@@ -73,3 +73,17 @@ F:8B52  draw_large_char
 F:8D2C  clear_playfield_ram
 F:8D3E  clear_text_ram
 F:B9D4  irq_32v_play
+A5:438C step_map_column
+A5:42BC step_map_row
+A5:41CE draw_map_strip
+A5:4000 init_map_view
+A5:48CC update_map_slots
+A5:5D08 stop_effect_sound
+A5:5B46 rolling_sound
+A5:5BD2 town_music
+A5:4984 draw_tile_block
+A5:51EE slope_height
+A7:4098 move_objects_0_3
+A7:410C project_speed
+A7:4F98 direction_from_object7
+A7:4ECC hold_object
