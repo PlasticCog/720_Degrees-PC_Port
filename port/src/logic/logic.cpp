@@ -285,6 +285,9 @@ uint16_t call(uint16_t addr, std::initializer_list<uint16_t> args)
 		fprintf(stderr, "logic::call(%04X) did not return normally (PC=%04X)\n", addr, T.r[7]);
 		fatal_unknown_pc(T.r[7]);
 	}
+	// like the instruction after a JSR in the original: interrupts may come in here, so a
+	// chain of rewritten routines does not hold them off for its whole length
+	if (!sync(RETURN_SENTINEL)) throw Unwound{};
 	T.r[6] = (uint16_t)(T.r[6] + 2 * args.size());
 	return T.r[0];
 }
