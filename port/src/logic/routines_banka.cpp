@@ -585,23 +585,508 @@ uint16_t hold_object(const Args &a)
 	return w;
 }
 
+// ---------------------------------------------------------------- messages
+// Up to 8 message boxes are shown in the text layer: 0x0336 is the index of the last one,
+// 0x0338/0x0348 hold their expiry time (compared with the counter 0x036A) and their box
+// descriptor (word: text layer address, bytes: rows, columns).  Pending messages wait in
+// 0x0362 (index 0x0358) with their durations in 0x035A.
+
+// A7:4D30  message_box(int erase, box): draw the frame of box (tiles 0x110-0x117, inside
+// 0x87, colour 0xE000) or erase it.  0x036C keeps a stack of flags (bit 0: the box address
+// is odd, for which F:EAD4 draws/erases the text at 0x5DF6); erasing the last of those in
+// Skate City also redraws the number 0x0244/0x0246 at 0x3746.  Bank B is 0x2800 meanwhile.
+uint16_t message_box(const Args &a)
+{
+	const uint16_t saved_a = peek(0x01D2), saved_b = peek(0x01D4);
+	set_bank_b(0x2800);
+	call(0x8068, {});                                  // select_video_bank0
+	poke(0x0188, 0xE000);
+	const uint16_t box = a.u(1);
+	uint16_t p = (uint16_t)((peek(box) + 0x2000) & ~1);
+	const uint16_t rows = peekb((uint16_t)(box + 2));
+	const uint16_t cols = peekb((uint16_t)(box + 3));
+	const uint16_t back = (uint16_t)(cols << 1);
+	uint16_t r0;
+	if (a.u(0))
+	{
+		for (uint16_t r = rows; r > 0; r--)
+		{
+			for (uint16_t c = cols; c > 0; c--)
+			{
+				poke(p, 0);
+				p = (uint16_t)(p + 2);
+			}
+			p = (uint16_t)(p - back + 0x0080);
+		}
+		if (peekb(0x036C) == 1 && !peekb(0x0F59))
+		{
+			poke(0x0188, 0xA000);
+			call(0xEAD4, {0x0000, 0x5DF6});
+			poke(0x0186, 0x3746);
+			call(0xBA96, {0x0001, 0x0000, 0x0008, peek(0x0246), peek(0x0244), 0x5DF6});
+		}
+		r0 = (uint16_t)(peekb(0x036C) >> 1);
+		pokeb(0x036C, (uint8_t)r0);
+	}
+	else
+	{
+		const uint16_t flags = (uint16_t)(peekb(0x036C) << 1);
+		pokeb(0x036C, (uint8_t)flags);
+		if (peek(box) & 1)
+		{
+			pokeb(0x036C, (uint8_t)(peekb(0x036C) | 1));
+			call(0xEAD4, {0x0001, 0x5DF6});
+		}
+		r0 = peek(0x0188);
+		auto put = [&](uint16_t v) { poke(p, v); p = (uint16_t)(p + 2); };
+		auto line = [&](uint16_t left, uint16_t mid, uint16_t right) {
+			put(left);
+			for (int16_t n = (int16_t)(cols - 2); n > 0; n--) put(mid);
+			put(right);
+		};
+		line(r0 | 0x0110, r0 | 0x0111, r0 | 0x0112);
+		p = (uint16_t)(p - back + 0x0080);
+		for (int16_t n = (int16_t)(rows - 2); n > 0; n--)
+		{
+			line(r0 | 0x0113, r0 | 0x0087, r0 | 0x0114);
+			p = (uint16_t)(p - back + 0x0080);
+		}
+		line(r0 | 0x0115, r0 | 0x0116, r0 | 0x0117);
+	}
+	poke(0x01D2, saved_a);
+	poke(0x01D4, saved_b);
+	poke(0x1400, peek(0x01D2));
+	poke(0x1402, peek(0x01D4));
+	return r0;
+}
+
+// A7:4B84 (assembly): count the message timer 0x036A and erase the messages whose time has
+// come (shifting the later ones down).  As in the original, the entry after a removed one
+// is skipped in this pass and the loop runs to the old count.  Banks are restored; the flags
+// are those of comparing the two saved bank words.
+void expire_messages()
+{
+	T.r[6] = (uint16_t)(T.r[6] - 4);
+	const uint16_t sp = T.r[6];
+	T.r[5] = sext8(peekb(0x0336));
+	if (!((int16_t)T.r[5] < 0))
+	{
+		poke((uint16_t)(sp + 2), peek(0x01D2));
+		poke(sp, peek(0x01D4));
+		poke(0x036A, (uint16_t)(peek(0x036A) + 1));
+		for (T.r[4] = 0; (int16_t)T.r[4] <= (int16_t)T.r[5]; T.r[4]++)
+		{
+			T.r[0] = (uint16_t)(T.r[4] << 1);
+			if (peek((uint16_t)(0x0338 + T.r[0])) != peek(0x036A)) continue;
+			T.r[1] = 0x2800;
+			set_bank_b(0x2800);
+			const uint16_t box = peek((uint16_t)(0x0348 + T.r[0]));
+			if ((int16_t)peek(box) >= 0x4000)
+				call(0xEAD4, {0x0001, peek(box)});
+			else
+				call(0x4D30, {0x0001, box});           // message_box(erase)
+			T.r[0] = (uint16_t)(sext8(peekb(0x0336)) - 1);
+			pokeb(0x0336, (uint8_t)T.r[0]);
+			T.r[3] = sext8((uint8_t)T.r[0]);
+			if ((int16_t)T.r[3] < 0) continue;
+			for (T.r[2] = T.r[4]; (int16_t)T.r[2] <= (int16_t)T.r[3]; T.r[2]++)
+			{
+				T.r[1] = (uint16_t)(T.r[2] << 1);
+				T.r[0] = T.r[1];
+				poke((uint16_t)(0x0348 + T.r[1]), peek((uint16_t)(0x034A + T.r[0])));
+				poke((uint16_t)(0x0338 + T.r[1]), peek((uint16_t)(0x033A + T.r[0])));
+			}
+		}
+		poke(0x01D2, peek((uint16_t)(sp + 2)));
+		poke(0x01D4, peek(sp));
+		poke(0x1400, peek(0x01D2));
+		poke(0x1402, peek(0x01D4));
+	}
+	T.r[6] = (uint16_t)(T.r[6] + 4);
+	fl::cmp(peek(sp), peek((uint16_t)(sp + 2)));
+}
+
+// A7:4C28 (assembly): show the next pending message (0x0362[0x0358]) in a new box: when all
+// 8 are in use the oldest is removed first.  Text by F:A9FC; bits 0 of 0x036D / 0x036E ask
+// for F:A8FE and the text table 0x5CD2 for this message.  The flags are those of the
+// argument word left on the stack.
+void show_next_message()
+{
+	T.r[0] = (uint16_t)(sext8(peekb(0x0358)) << 1);
+	const uint16_t msg = peek((uint16_t)(0x0362 + T.r[0]));
+	fl::tst(msg);
+	if (!msg) return;
+	if (peekb(0x0336) == 7)
+	{
+		T.r[3] = peek(0x01D2);
+		T.r[4] = peek(0x01D4);
+		T.r[0] = 0x2800;
+		set_bank_b(0x2800);
+		const uint16_t box = peek(0x0348);
+		if ((int16_t)peek(box) >= 0x4000)
+			call(0xEAD4, {0x0001, peek(box)});
+		else
+			call(0x4D30, {0x0001, box});               // message_box(erase)
+		for (T.r[2] = 0; (int16_t)T.r[2] <= 6; T.r[2]++)
+		{
+			T.r[1] = (uint16_t)(T.r[2] << 1);
+			T.r[0] = T.r[1];
+			poke((uint16_t)(0x0348 + T.r[1]), peek((uint16_t)(0x034A + T.r[0])));
+			poke((uint16_t)(0x0338 + T.r[1]), peek((uint16_t)(0x033A + T.r[0])));
+		}
+		pokeb(0x0336, 6);
+		poke(0x01D2, T.r[3]);
+		poke(0x01D4, T.r[4]);
+		poke(0x1400, peek(0x01D2));
+		poke(0x1402, peek(0x01D4));
+	}
+	if (peekb(0x036D) & 1) call(0xA8FE, {});
+	T.r[0] = (uint16_t)(peekb(0x036D) >> 1);
+	pokeb(0x036D, (uint8_t)T.r[0]);
+	if (peek(0x036E) & 1) poke(0x0184, 0x5CD2);
+	T.r[0] = (uint16_t)(peekb(0x036E) >> 1);
+	pokeb(0x036E, (uint8_t)T.r[0]);
+	T.r[0] = (uint16_t)(sext8(peekb(0x0358)) << 1);
+	push(peek((uint16_t)(0x0362 + T.r[0])));
+	const uint16_t arg = T.r[6];
+	call(0xA9FC, {});
+	poke(0x0184, 0x5AC8);
+	T.r[0] = (uint16_t)(sext8(peekb(0x0336)) + 1);
+	pokeb(0x0336, (uint8_t)T.r[0]);
+	T.r[0] = (uint16_t)(sext8((uint8_t)T.r[0]) << 1);
+	T.r[1] = (uint16_t)(sext8(peekb(0x0358)) << 1);
+	poke((uint16_t)(0x0348 + T.r[0]), peek((uint16_t)(0x0362 + T.r[1])));
+	T.r[2] = (uint16_t)(peek((uint16_t)(0x035A + T.r[1])) + peek(0x036A));
+	poke((uint16_t)(0x0338 + T.r[0]), T.r[2]);
+	poke((uint16_t)(0x0362 + T.r[1]), 0);
+	T.r[0] = (uint16_t)(sext8(peekb(0x0358)) - 1);
+	pokeb(0x0358, (uint8_t)T.r[0]);
+	T.r[0] = sext8((uint8_t)T.r[0]);
+	if ((int16_t)T.r[0] < 0) poke(T.r[0], 0);
+	T.r[6] = (uint16_t)(T.r[6] + 2);
+	fl::tst(peek(arg));
+}
+
+// A7:5A7E  credit_messages(int mode, int show_price): the credit/coin texts (F:8B04, colour
+// 0xE000).  Mode 0: texts 0x53 (and 0x5A beyond 4 credits) with the credit count 0x01F9 / 4;
+// otherwise the coin mode text from the switches 0x01F3 / 0x01FA.  Then text 0x4F-0x52 by the
+// credits against the price table 0x5A46.
+uint16_t text(uint16_t n)
+{
+	T.r[0] = n;
+	return call(0x8B04, {});
+}
+uint16_t credit_messages(const Args &a)
+{
+	poke(0x0188, 0xE000);
+	if (!a.u(0))
+	{
+		text(0x0053);
+		if (peekb(0x01F9) > 4) text(0x005A);
+		poke(0x0186, (uint16_t)(peek(0x0186) - 0x0018));
+		call(0xBA96, {0x0000, 0x0001, 0x0002, 0x0000, (uint16_t)(peekb(0x01F9) >> 2)});
+		if (peekb(0x01F9) & 3)
+		{
+			uint16_t r1 = rb((uint16_t)(0x5A49 + (sext8(peekb(0x01FA)) & 3)));
+			r1 = (uint16_t)(((sext8(peekb(0x01F9)) & 3) << 1) + r1 - 2);
+			const uint16_t at = peek(0x0186);
+			poke(at, peek((uint16_t)(0x5A4E + (r1 << 1))) | peek(0x0188));
+			poke((uint16_t)(peek(0x0186) + 2), peek((uint16_t)(0x5A50 + (r1 << 1))) | peek(0x0188));
+		}
+	}
+	else if ((peekb(0x01FA) & 0xE0) == 0xE0)
+		text(0x0059);
+	else
+	{
+		const uint16_t m = (uint16_t)((peekb(0x01F3) >> 6) & 3);
+		text((uint16_t)(m + 0x0054));
+		if (m != 1) text(0x0058);
+	}
+	uint16_t n = peekb(0x01F9);
+	if (!a.u(1))
+		n = 3;
+	else
+	{
+		const uint16_t price = rb((uint16_t)(0x5A46 + ((peekb(0x01F3) >> 6) & 3)));
+		if ((int16_t)n >= (int16_t)(price << 1)) n = 0;
+		else if ((int16_t)n >= (int16_t)price) n = 1;
+		else n = 2;
+	}
+	return text((uint16_t)(n + 0x004F));
+}
+
+// ---------------------------------------------------------------- game state
+
+// A7:5018: the chaser (object 7).  Its timer 0x0EB4 counts down; while it is on screen it
+// keeps the timer negative and is steered with the skater's velocity.  When the timer runs
+// out it gets faster (0x0EB2, up to 7; 0x0F22 the delay from 0xFE0D) and F:E13A moves it
+// towards the skater; the timer restarts at 5 (on screen) or 16-31 (random).
+uint16_t chaser_step(const Args &)
+{
+	poke(0x043E, 0x0001);
+	poke(0x0EB4, (uint16_t)(peek(0x0EB4) - 1));
+	uint16_t r1 = 0, r2 = 0;
+	const uint16_t sx = peek(0x063E), sy = peek(0x067E);
+	bool visible = sx > 0x8200 && sx < 0xF000;
+	if (!visible) visible = (int16_t)sy < 0x1000 && sy > 0x9000;
+	if (visible)
+	{
+		r1 = peek(0x04F0);
+		r2 = (uint16_t)(peek(0x0570) + peek(0x05B0));
+		poke(0x0EB4, 0xFFFF);
+	}
+	if ((int16_t)peek(0x0EB4) > 0) return 0;
+	if ((int16_t)peek(0x0F22) <= 0)
+	{
+		if ((int8_t)peekb(0x0EB2) <= 6) pokeb(0x0EB2, (uint8_t)(peekb(0x0EB2) + 1));
+		pokeb(0x0F22, rb((uint16_t)(0xFE0D + peekb(0x0F2E))));
+		pokeb(0x0F23, 0);
+	}
+	const uint16_t dir = call(0x4F98, {});             // direction_from_object7
+	uint16_t r0 = call(0xE13A, {r2, r1, sext8(peekb(0x0EB2)), dir});
+	if ((int16_t)peek(0x0EB4) < 0)
+		poke(0x0EB4, 0x0005);
+	else
+	{
+		r0 = call(0x9152, {});                         // next_random
+		poke(0x0EB4, (uint16_t)((r0 & 0x000F) + 0x0010));
+	}
+	return r0;
+}
+
+// A7:5248: buying (bit 0x10 of 0x0ED7): at the shop A7:5326, if the cash 0x0256 covers the
+// price (tables 0xFE7C/0xFE70 by 0x0F31) the item count 0x025C+shop goes up, the price is
+// paid (F:F002) and a sound plays; otherwise the "not enough" message.  The request is cleared.
+uint16_t shop_purchase(const Args &)
+{
+	if (!(peekb(0x0ED7) & 0x10)) return T.r[0];
+	const uint16_t shop = call(0x5326, {});
+	pokeb(0x0ED8, (uint8_t)(peekb(0x0ED8) | rb((uint16_t)(0xFC74 + shop))));
+	const uint16_t price = rb((uint16_t)(0xFE70 + rb((uint16_t)(0xFE7C + peekb(0x0F31)))));
+	if ((int16_t)peek(0x0256) >= (int16_t)price)
+	{
+		const uint16_t item = (uint16_t)(0x025C + shop);
+		if ((int8_t)peekb(item) < 0) pokeb(item, 0);
+		pokeb(item, (uint8_t)(peekb(item) + 1));
+		push(0x76C8);
+		push(0x00D2);
+		push(0x0001);
+		call(0xA974, {});
+		poke(T.r[6], (uint16_t)-price);
+		call(0xF002, {});
+		poke(T.r[6], shop);
+		push(0x0000);
+		call(0xD97C, {});
+		T.r[0] = call(0x9152, {}) & 0x0007;
+		poke(T.r[6], rb((uint16_t)(0xFE1E + T.r[0])));
+		call(0x8E78, {});
+		call(0x5602, {});
+		call(0xD8D2, {});
+	}
+	else
+	{
+		push(0x76D6);
+		push(0x00F0);
+		push(0x0001);
+		call(0xA974, {});
+		poke(T.r[6], shop);
+		push(0x0001);
+		call(0xD97C, {});
+		T.r[0] = call(0x9152, {}) & 0x0003;
+		poke(T.r[6], rb((uint16_t)(0xFE26 + T.r[0])));
+		call(0x8E78, {});
+	}
+	pokeb(0x0ED7, peekb(0x0ED7) & ~0x10);
+	T.r[6] = (uint16_t)(T.r[6] + 8);
+	return T.r[0];
+}
+
+// A7:43C0  insert_high_score(int first, long score): find the first of the 15 entries from
+// first on (8 bytes at 0x0370: high word, low word, ...) below score and insert score there,
+// moving the lower entries down.  Returns the place or -1.
+uint16_t insert_high_score(const Args &a)
+{
+	const uint16_t first = a.u(0), lo = a.u(1), hi = a.u(2);
+	const uint32_t score = (uint32_t)hi << 16 | lo;
+	uint16_t place = 0xFFFF;
+	for (uint16_t i = first; (int16_t)i <= (int16_t)(uint16_t)(first + 14); i = (uint16_t)(i + 1))
+	{
+		const uint16_t e = (uint16_t)(0x0370 + (i << 3));
+		const uint32_t v = (uint32_t)peek(e) << 16 | peek((uint16_t)(e + 2));
+		if ((int16_t)((v - score) >> 16) < 0)
+		{
+			place = i;
+			break;
+		}
+	}
+	if ((int16_t)place < 0) return place;
+	for (uint16_t j = (uint16_t)(first + 14); (int16_t)j >= (int16_t)(uint16_t)(place + 1); j = (uint16_t)(j - 1))
+		for (int k = 0; k < 8; k += 2)
+			poke((uint16_t)(0x0370 + (j << 3) + k), peek((uint16_t)(0x0368 + (j << 3) + k)));
+	poke((uint16_t)(0x0370 + (place << 3)), hi);
+	poke((uint16_t)(0x0372 + (place << 3)), lo);
+	return place;
+}
+
+// A7:5684: the first object from 0x0994 down to 5 whose box (animation 0x03F0: x, y, width,
+// height) overlaps the skater's (0x023A at 0x0630/0x0238) and whose shapes touch (A7:572A).
+// Returns the object or 0.
+uint16_t find_collision(const Args &)
+{
+	uint16_t saved[6];
+	for (int i = 1; i <= 5; i++) saved[i] = T.r[i];
+	const uint16_t box = peek(0x023A);
+	uint16_t result = 0;
+	for (uint16_t r2 = (uint16_t)((sext8(peekb(0x0994)) - 5) << 1); (int16_t)r2 >= 0; r2 = (uint16_t)(r2 - 2))
+	{
+		const uint16_t p = peek((uint16_t)(0x03FA + r2));
+		if (!p) continue;
+		uint16_t a1 = (uint16_t)(peek((uint16_t)(0x063A + r2)) + peek(p));
+		uint16_t b1 = (uint16_t)(peek(0x0630) + peek(box));
+		uint16_t d = (uint16_t)(a1 - b1);
+		if ((int16_t)a1 >= (int16_t)b1)
+		{
+			if (d >= peek((uint16_t)(box + 4))) continue;
+		}
+		else if ((uint16_t)-d >= peek((uint16_t)(p + 4)))
+			continue;
+		a1 = (uint16_t)(peek((uint16_t)(0x067A + r2)) + peek((uint16_t)(p + 2)));
+		b1 = (uint16_t)(peek(0x0238) + peek((uint16_t)(box + 2)));
+		d = (uint16_t)(a1 - b1);
+		if ((int16_t)a1 >= (int16_t)b1)
+		{
+			if (d >= peek((uint16_t)(box + 6))) continue;
+		}
+		else if ((uint16_t)-d >= peek((uint16_t)(p + 6)))
+			continue;
+		if (call(0x572A, {d, (uint16_t)(r2 + 10), r2, box}))
+		{
+			result = (uint16_t)((r2 >> 1) + 5);
+			break;
+		}
+	}
+	for (int i = 1; i <= 5; i++) T.r[i] = saved[i];
+	return result;
+}
+
+// A7:50F8 (assembly): the skater after a fall (0x031F = 1): the timer 0x02FA runs down, then
+// F:B602(2, 2) and sound 0x55 end the fall; on a slope (0x0327 bits 0-2) the skater turns to
+// the slope's direction (0xFCD0, F:9B82), on flat ground he slows down by 20.  State 2 is
+// not used by the game.  When the state is clear the kick state is reset (F:E238).
+void fallen_skater()
+{
+	const uint8_t st = peekb(0x031F);
+	T.r[1] = sext8(st);
+	fl::movb(st);
+	if (!st) return;
+	if (peek(0x02FA)) poke(0x02FA, (uint16_t)(peek(0x02FA) - 1));
+	if (T.r[1] == 1)
+	{
+		bool end;
+		if ((int16_t)peek(0x02FC) >= 0x0380)
+		{
+			if (!peek(0x02FA))
+				end = true;
+			else
+			{
+				poke(0x02FA, (uint16_t)(peek(0x02FA) - 1));
+				end = !peek(0x02FA);
+			}
+		}
+		else
+			end = !peek(0x02FA);
+		if (end)
+		{
+			call(0xB602, {0x0002, 0x0002});
+			pokeb(0x031F, 0);
+			call(0x8E78, {0x0055});
+		}
+		if (peekb(0x0327) & 7)
+		{
+			T.r[0] = rb((uint16_t)(0xFCD0 + (peekb(0x0327) >> 3)));
+			T.r[2] = peekb(0x031D);
+			if (T.r[0] != T.r[2])
+			{
+				pokeb(0x031D, (uint8_t)T.r[0]);
+				pokeb(0x01F8, (uint8_t)T.r[0]);
+				call(0x9B82, {});
+			}
+		}
+		else if (!peekb(0x031E))
+		{
+			const uint16_t v = (uint16_t)(peek(0x01B4) - 0x0014);
+			poke(0x01B4, v);
+			if (!((int16_t)v > 0))
+			{
+				poke(0x01B4, 0);
+				call(0x8E78, {0x0055});
+			}
+		}
+	}
+	if (T.r[1] == 2)
+	{
+		poke(0x01B4, 0);
+		if (!peek(0x02FA))
+		{
+			pokeb(0x031B, 0x3F);
+			pokeb(0x031F, 0);
+			T.r[0] = sext8(peekb(0x0327)) & 0x0007;
+			if (T.r[0] >= 4)
+			{
+				pokeb(0x0325, 0x7F);
+				T.r[0] = (uint16_t)(peekb(0x0327) >> 3);
+				pokeb(0x031D, rb((uint16_t)(0xFCD0 + T.r[0])));
+			}
+		}
+	}
+	const uint8_t now = peekb(0x031F);
+	fl::tstb(now);
+	if (!now) call(0xE238, {});                       // reset_skater_state
+}
+
+// A7:4B3E: every 128 frames ask the sound CPU for its status (command 9); a bit of 0-2 that
+// stays set from the last answer (0x01A3) marks it as failing (0x01A2 = 1)
+uint16_t poll_sound_status(const Args &)
+{
+	if (peekb(0x01C4) & 0x7F) return T.r[0];
+	call(0x8E6A, {});                                  // set_flag_01a4
+	call(0x8EA2, {0x0009});                            // send_sound_command
+	const uint16_t status = call(0x8ED2, {});          // read_sound_response
+	call(0x8F62, {});
+	call(0x8E72, {});                                  // clear_flag_01a4
+	const uint16_t r0 = peekb(0x01A3) & status;
+	if (r0 & 7) pokeb(0x01A2, 1);
+	pokeb(0x01A3, (uint8_t)status);
+	return r0;
+}
+
 }
 
 LOGIC_TABLE(banka,
 	c_routine("A5", 0x438C, "step_map_column", step_map_column, 0, 438),
 	asm_routine("A5", 0x42BC, "step_map_row", step_map_row, 464),
-	asm_routine("A5", 0x41CE, "draw_map_strip", draw_map_strip, 383),
-	c_routine("A5", 0x4000, "init_map_view", init_map_view, 0, 2982195),
-	asm_routine("A5", 0x48CC, "update_map_slots", update_map_slots, 30961),
-	c_routine("A5", 0x5D08, "stop_effect_sound", stop_effect_sound, 0, 306),
-	c_routine("A5", 0x5B46, "rolling_sound", rolling_sound, 0, 452),
+	asm_routine("A5", 0x41CE, "draw_map_strip", draw_map_strip, 379),
+	c_routine("A5", 0x4000, "init_map_view", init_map_view, 0, 2993035),
+	asm_routine("A5", 0x48CC, "update_map_slots", update_map_slots, 30363),
+	c_routine("A5", 0x5D08, "stop_effect_sound", stop_effect_sound, 0, 311),
+	c_routine("A5", 0x5B46, "rolling_sound", rolling_sound, 0, 439),
 	wait_routine("A5", 0x5BD2, "town_music", town_music, 420),
 	c_routine("A5", 0x4984, "draw_tile_block", draw_tile_block, 0, 3117),
-	c_routine("A5", 0x51EE, "slope_height", slope_height, 0, 612),
+	c_routine("A5", 0x51EE, "slope_height", slope_height, 0, 643),
 	asm_routine("A7", 0x4098, "move_objects_0_3", move_objects_0_3, 3003),
-	c_routine("A7", 0x410C, "project_speed", project_speed, 0, 6703),
+	c_routine("A7", 0x410C, "project_speed", project_speed, 0, 6390),
 	c_routine("A7", 0x4F98, "direction_from_object7", direction_from_object7, 0, 762),
 	c_routine("A7", 0x4ECC, "hold_object", hold_object, 0, 636),
+	c_routine("A7", 0x4D30, "message_box", message_box, 0, 10547),
+	asm_routine("A7", 0x4B84, "expire_messages", expire_messages, 166),
+	asm_routine("A7", 0x4C28, "show_next_message", show_next_message, 160),
+	c_routine("A7", 0x5A7E, "credit_messages", credit_messages, 0, 23113),
+	c_routine("A7", 0x5018, "chaser_step", chaser_step, 0, 614),
+	c_routine("A7", 0x5248, "shop_purchase", shop_purchase, 0, 267),
+	c_routine("A7", 0x43C0, "insert_high_score", insert_high_score, 0, 7800),
+	c_routine("A7", 0x5684, "find_collision", find_collision, 0, 2730),
+	asm_routine("A7", 0x50F8, "fallen_skater", fallen_skater, 99),
+	wait_c_routine("A7", 0x4B3E, "poll_sound_status", poll_sound_status, 267),
 )
 
 }

@@ -87,3 +87,13 @@ A7:4098 move_objects_0_3
 A7:410C project_speed
 A7:4F98 direction_from_object7
 A7:4ECC hold_object
+A7:4D30 message_box
+A7:4B84 expire_messages
+A7:4C28 show_next_message
+A7:5A7E credit_messages
+A7:5018 chaser_step
+A7:5248 shop_purchase
+A7:43C0 insert_high_score
+A7:5684 find_collision
+A7:50F8 fallen_skater
+A7:4B3E poll_sound_status
