@@ -152,10 +152,9 @@ add_executable(leveltool src/tools/leveltool.cpp)
 target_link_libraries(leveltool PRIVATE leveldata board)
 
 if(MINGW)
-  foreach(t ref720 verify720 render720 leveltool)
+  # Link the MinGW runtime (libgcc, libstdc++, winpthread) statically so the programs run
+  # outside MSYS2.  SDL3 is still used through its import library and ships as SDL3.dll.
+  foreach(t 720degrees editor720 ref720 verify720 render720 leveltool)
     target_link_options(${t} PRIVATE -static)
-  endforeach()
-  foreach(t 720degrees editor720)
-    target_link_options(${t} PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic)
   endforeach()
 endif()
