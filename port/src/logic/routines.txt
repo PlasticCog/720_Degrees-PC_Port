@@ -95,3 +95,7 @@ F:CE24  add_map_object
 F:CFD6  init_map_objects
 F:C3E6  map_object_leaves
 F:BCB8  check_map_object_view
+F:BFBC  move_map_object
+F:C4E4  create_map_object
+F:B8FC  irq_32v_sprites
+F:B66E  irq_32v_game
