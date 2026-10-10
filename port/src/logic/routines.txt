@@ -103,3 +103,5 @@ F:C850  try_map_object_move
 F:C868  try_next_map_definition
 F:CA4C  update_map_object_slot
 F:BC52  check_map_objects_in_view
+F:C8AA  tick_map_object_timers
+F:CB24  update_objects
