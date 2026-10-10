@@ -2,6 +2,7 @@
 #include "leveldata.h"
 #include "board.h"
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <map>
@@ -138,6 +139,12 @@ bool LevelSet::decode_block(LevelBlock &blk, int level, uint16_t p, bool alt, st
 			return false;
 		}
 		if (pos - start > 600) { err = "half too large"; return false; }
+		if (h == 1)
+		{
+			// keep the original encoding so unedited blocks behave exactly as in the arcade
+			blk.orig_body.resize(pos);
+			for (int i = 0; i < pos; i++) blk.orig_body[i] = rd.at(i);
+		}
 	}
 	return true;
 }
@@ -196,7 +203,7 @@ bool LevelSet::load(const RomSet &roms, std::string &err)
 				if (d.level == 0)
 				{
 					const int cell = (mptr - TOWN_BASE) >> 1;
-					Reader bm{m, 0x2C00, (uint32_t)(0x7F16 + ((mptr - TOWN_BASE) >> 4))};
+					Reader bm{m, 0x2C00, (uint32_t)(0x5F16 + ((mptr - TOWN_BASE) >> 4))};   // 0x7F16 in window B (bank 0x2C00)
 					alt = (bm.at(0) & (1 << (cell & 7))) != 0;
 				}
 				auto key = std::make_pair(p, alt);
@@ -205,7 +212,13 @@ bool LevelSet::load(const RomSet &roms, std::string &err)
 				{
 					LevelBlock blk;
 					std::string e2;
-					if (!decode_block(blk, d.level, p, alt, e2)) { ok = false; break; }
+					if (!decode_block(blk, d.level, p, alt, e2))
+					{
+						if (getenv("D720_LEVEL_DEBUG"))
+							fprintf(stderr, "level %d class %d cell %d,%d P=%04X alt=%d: %s\n", d.level, d.cls, cx, cy, p, (int)alt, e2.c_str());
+						ok = false;
+						break;
+					}
 					index[key] = (int)lm.blocks.size();
 					row.push_back((int)lm.blocks.size());
 					lm.blocks.push_back(std::move(blk));
@@ -447,14 +460,19 @@ ModPatch LevelSet::build_patch(const RomSet &orig, std::string &report) const
 			for (size_t bi = 0; bi < lm.blocks.size(); bi++)
 			{
 				const LevelBlock &b = lm.blocks[bi];
-				std::vector<uint8_t> top = encode_half(b.half[0]);
-				std::vector<uint8_t> bot = encode_half(b.half[1]);
 				std::vector<uint8_t> body;
-				body.push_back((uint8_t)((b.half[0].attr & 0x7f) | (b.objects.empty() ? 0 : 0x80)));
-				body.push_back(b.half[1].attr);
-				body.push_back((uint8_t)top.size());
-				body.insert(body.end(), top.begin(), top.end());
-				body.insert(body.end(), bot.begin(), bot.end());
+				if (!b.modified && !b.orig_body.empty())
+					body = b.orig_body;
+				else
+				{
+					std::vector<uint8_t> top = encode_half(b.half[0]);
+					std::vector<uint8_t> bot = encode_half(b.half[1]);
+					body.push_back((uint8_t)((b.half[0].attr & 0x7f) | (b.objects.empty() ? 0 : 0x80)));
+					body.push_back(b.half[1].attr);
+					body.push_back((uint8_t)top.size());
+					body.insert(body.end(), top.begin(), top.end());
+					body.insert(body.end(), bot.begin(), bot.end());
+				}
 				std::vector<uint8_t> pre;
 				if (!b.objects.empty())
 				{

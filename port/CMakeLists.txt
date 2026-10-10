@@ -130,6 +130,7 @@ add_executable(verify720 src/tools/verify720.cpp)
 target_link_libraries(verify720 PRIVATE gamecore refcpu)
 add_executable(render720 src/tools/render720.cpp)
 target_link_libraries(render720 PRIVATE gamecore leveldata)
+target_include_directories(leveldata PUBLIC src/native)
 add_executable(leveltool src/tools/leveltool.cpp)
 target_link_libraries(leveltool PRIVATE leveldata board)
 

@@ -26,6 +26,7 @@ struct LevelBlock {
 	uint16_t orig_ptr = 0;
 	bool orig_alt = false;
 	bool modified = false;
+	std::vector<uint8_t> orig_body;      // original header + RLE bytes (used while unmodified)
 	bool operator==(const LevelBlock &o) const;
 };
 

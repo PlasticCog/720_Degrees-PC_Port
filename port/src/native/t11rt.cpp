@@ -12,6 +12,8 @@ uint8_t *RAM = nullptr;
 const uint8_t *ROM = nullptr;
 uint16_t shadow[256];
 int shadow_top = 0;
+uint16_t g_patch_town_alt_base = 0x6000;
+uint16_t g_patch_park_odd_base = 0xA000;
 
 void *g_game_fiber = nullptr;
 void *g_host_fiber = nullptr;
@@ -130,7 +132,8 @@ void dispatch()
 	else if (pc >= 0x4000)
 	{
 		const int w = (pc >> 13) & 1;
-		seg = t11_seg_bank[w][B->bank_entry(w) & 63];
+		const int e = B->bank_entry(w);
+		seg = (e >= 0 && e < 64) ? t11_seg_bank[w][e] : nullptr;
 	}
 	if (!seg || (pc & 1)) fatal_unknown_pc(pc);
 	const unsigned idx = (unsigned)(pc - seg->base) >> 1;

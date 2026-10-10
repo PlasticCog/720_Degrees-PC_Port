@@ -3,6 +3,7 @@
 #include "nativemachine.h"
 #include "soundchips.h"
 #include "inputscript.h"
+#include "modloader.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -25,7 +26,7 @@ static void write_wav(const std::string &path, const std::vector<int16_t> &s, in
 
 int main(int argc, char **argv)
 {
-	std::string roms = "Game", out = ".", script, wav;
+	std::string roms = "Game", out = ".", script, wav, mod;
 	int frames = 600, png_every = 0, seed = 0;
 	for (int i = 1; i < argc; i++)
 	{
@@ -38,10 +39,12 @@ int main(int argc, char **argv)
 		else if (a == "--script") script = next();
 		else if (a == "--random") seed = atoi(next().c_str());
 		else if (a == "--wav") wav = next();
+		else if (a == "--mod") mod = next();
 	}
 	RomSet rs;
 	std::string err;
 	if (!rs.load(roms, err)) { fprintf(stderr, "%s\n", err.c_str()); return 1; }
+	if (!mod.empty() && !apply_mod_file(rs, mod, err)) { fprintf(stderr, "%s\n", err.c_str()); return 1; }
 	NativeMachine m(rs);
 	m.reset();
 	m.board.chips().audio_enabled = !wav.empty();

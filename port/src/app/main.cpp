@@ -19,6 +19,7 @@
 #include "nativemachine.h"
 #include "soundchips.h"
 #include "controls.h"
+#include "modloader.h"
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -35,6 +36,8 @@ struct Options {
 	bool smooth = false;
 	int dsw0 = 0x00, dsw1 = 0x55;
 	bool invert_rotation = false;
+	std::vector<std::string> mods;
+	bool no_mods = false;
 };
 
 std::string find_roms(const std::string &requested)
@@ -90,6 +93,8 @@ int main(int argc, char **argv)
 		else if (a == "--dsw0") opt.dsw0 = (int)strtol(next().c_str(), nullptr, 0);
 		else if (a == "--dsw1") opt.dsw1 = (int)strtol(next().c_str(), nullptr, 0);
 		else if (a == "--invert-rotation") opt.invert_rotation = true;
+		else if (a == "--mod") opt.mods.push_back(next());
+		else if (a == "--no-mods") opt.no_mods = true;
 	}
 
 	if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD))
@@ -126,6 +131,26 @@ int main(int argc, char **argv)
 	SDL_AudioStream *audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
 	if (audio) SDL_ResumeAudioStreamDevice(audio);
 	else SDL_Log("audio unavailable: %s", SDL_GetError());
+
+	// level mods: Game/mods/*.720mod (unless --no-mods) and --mod <file>
+	{
+		std::string errors;
+		std::vector<std::string> applied;
+		if (!opt.no_mods)
+		{
+			const char *base = SDL_GetBasePath();
+			applied = apply_mod_folder(roms, std::string(base ? base : "") + "mods", errors);
+		}
+		for (const auto &m : opt.mods)
+		{
+			std::string e;
+			if (apply_mod_file(roms, m, e)) applied.push_back(m);
+			else errors += m + ": " + e + "\n";
+		}
+		for (const auto &a : applied) SDL_Log("level mod loaded: %s", a.c_str());
+		if (!errors.empty())
+			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "720 Degrees", ("Some level mods could not be loaded:\n" + errors).c_str(), nullptr);
+	}
 
 	auto machine = std::make_unique<NativeMachine>(roms);
 	machine->reset();

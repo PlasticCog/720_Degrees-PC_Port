@@ -57,6 +57,10 @@ def h(v):
     return '0x%04X' % (v & 0xffff)
 
 
+# immediates that mods may change at runtime (see port/src/native/t11rt.h)
+PATCH_IMM = {('F', 0xE8B6): ('g_patch_town_alt_base', 0x6000), ('F', 0xE8B0): ('g_patch_park_odd_base', 0xA000)}
+
+
 class Unsupported(Exception):
     pass
 
@@ -175,7 +179,13 @@ class InsnGen:
             self.emit('s = %s;' % (('(%s) & 0xff' % v) if byte else v))
             return
         if r == 7 and m == 2:
-            self.emit('s = %s;' % h(self.ext()))     # immediate: full word even for byte ops
+            imm = self.ext()
+            pp = PATCH_IMM.get((self.seg, self.A))
+            if pp:
+                assert imm == pp[1], 'patch point mismatch at %s:%04X' % (self.seg, self.A)
+                self.emit('s = %s;   // patch point (default %s)' % (pp[0], h(imm)))
+            else:
+                self.emit('s = %s;' % h(imm))     # immediate: full word even for byte ops
             return
         ea = self.ea(m, r, byte)
         self.emit('s = %s;' % self.rd(ea, byte))

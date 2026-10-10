@@ -140,7 +140,11 @@ static int bank_entry_from_data(uint16_t data)
 {
 	int n = ((data >> 10) & 077) ^ 3;
 	auto b = [&](int i) { return (n >> i) & 1; };
-	return (b(5) << 5) | (b(4) << 4) | (b(1) << 3) | (b(0) << 2) | (b(3) << 1) | b(2);
+	const int e = (b(5) << 5) | (b(4) << 4) | (b(1) << 3) | (b(0) << 2) | (b(3) << 1) | b(2);
+	// Native extension for mods: the original program only ever writes bank values with the
+	// low 10 bits clear; nonzero low bits select an extension group of 64 extra ROM pages
+	// appended after the original 0x90000-byte region (see port/src/level/leveldata.h).
+	return e + 64 * (data & 0x3ff);
 }
 
 void Board::reset()
@@ -267,6 +271,7 @@ uint16_t Board::main_read16(uint16_t a, uint16_t mask)
 	if (a < 0x8000)
 	{
 		const size_t o = banked_rom_offset((a >> 13) & 1, a);
+		if (o + 1 >= m_roms.main.size()) return 0;
 		return m_roms.main[o] | (m_roms.main[o + 1] << 8);
 	}
 	return m_roms.main[a] | (m_roms.main[a + 1] << 8);
