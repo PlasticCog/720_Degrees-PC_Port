@@ -170,6 +170,38 @@ uint16_t set_medal_level(const Args &)
 	return 0x3800;
 }
 
+
+// F:D97C  set_gate_animation(int closing, int gate): the gate object (slot whose 0x0AF8 word is
+// the gate's entry at 0x70AC in bank B 0x0400, with bit 15) gets animation 0x03B0 from the
+// table 0x5B8C (or 0x5BAC when closing), one of two variants chosen at random.  Banks are
+// restored.
+uint16_t set_gate_animation(const Args &a)
+{
+	KeepRegs keep(3);
+	const uint16_t bank_a = peek(0x01D2), bank_b = peek(0x01D4);
+	poke(0x01D2, 0);
+	poke(0x1400, 0);
+	T.r[0] = 0x0400;
+	poke(0x01D4, 0x0400);
+	poke(0x1402, 0x0400);
+	const uint16_t gate = a.u(1);
+	const uint16_t id = (uint16_t)(peek((uint16_t)(0x70AC + gate * 2)) | 0x8000);
+	uint16_t r0 = call(0xCDFA, {0xFFFF, id});          // find_other_slot
+	if ((int16_t)r0 >= 0)
+	{
+		const uint16_t obj = (uint16_t)((uint16_t)(int16_t)(int8_t)peekb((uint16_t)(0x09B8 + r0)) & 0x3F);
+		r0 = (call(0x9152, {}) & 1) ? 8 : 0;           // next_random
+		r0 = (uint16_t)((r0 + gate) * 2);
+		const uint16_t table = a.u(0) == 0 ? 0x5B8C : 0x5BAC;
+		poke((uint16_t)(0x03B0 + obj * 2), peek((uint16_t)(table + r0)));
+	}
+	poke(0x01D2, bank_a);
+	poke(0x01D4, bank_b);
+	poke(0x1400, peek(0x01D2));
+	poke(0x1402, peek(0x01D4));
+	return r0;
+}
+
 }
 
 LOGIC_TABLE(parks,
@@ -184,6 +216,7 @@ LOGIC_TABLE(parks,
 	c_routine("A7", 0x50C8, "a7_50c8", a7_50c8, 0, 99),
 	c_routine("F", 0xDA02, "open_park_gate", open_park_gate, 0, 897),
 	c_routine("B3", 0x6E38, "set_medal_level", set_medal_level, 0, 548),
+	c_routine("F", 0xD97C, "set_gate_animation", set_gate_animation, 0, 12610),
 )
 
 }

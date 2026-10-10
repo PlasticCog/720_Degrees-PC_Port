@@ -199,6 +199,116 @@ uint16_t rotary_zone_step(const Args &a)
 	return 0x0040;
 }
 
+
+// F:8938 (interrupt, vertical blank in the self test): scroll registers, frame counters
+// 0x01C4 / 0x0192, watchdog, inputs; a new press of the button in bit 7 of 0x0193 sets 0x0FE6.
+// With IN0 bit 15 set (test switch off) the program restarts at F:8000.
+void irq_vblank_selftest()
+{
+	uint16_t saved[6];
+	for (int i = 0; i < 6; i++) saved[i] = T.r[i];
+	poke(0x15E0, 0);                                   // acknowledge
+	call(0x8036, {});                                  // load_scroll_registers
+	poke(0x01C4, (uint16_t)(peek(0x01C4) + 1));
+	pokeb(0x0192, (uint8_t)(peekb(0x0192) + 1));
+	if (peek(0x1800) & 0x8000)
+	{
+		for (int i = 0; i < 6; i++) push(saved[i]);
+		push(0x8960);
+		leave_to(0x8000);                              // reset
+	}
+	call(0x917C, {});                                  // feed_watchdog
+	call(0x80A4, {});                                  // read_input_edges
+	if (peekb(0x0193) & 0x80)
+	{
+		if (!peekb(0x0190))
+		{
+			pokeb(0x0190, 1);
+			pokeb(0x0FE6, 1);
+		}
+	}
+	else
+		pokeb(0x0190, 0);
+	poke(0x15C0, 0);                                   // acknowledge
+	call(0x8096, {});                                  // reselect_video_bank
+	for (int i = 0; i < 6; i++) T.r[i] = saved[i];
+}
+
+// F:F90E (assembly, self test): scroll test: the town map (A5:4000 with 0x15, 0x0E, 0) and two
+// texts (F:8AB6); until a button press the controller scrolls the playfield (F:F896)
+void selftest_scroll_screen()
+{
+	T.icount -= 30;
+	call(0x8CE8, {});                                  // clear_playfield
+	pokeb(0x0F2D, 1);
+	poke(0x01D2, 0x1800);
+	poke(0x1400, 0x1800);
+	T.r[0] = 0x3C00;
+	poke(0x01D4, 0x3C00);
+	poke(0x1402, 0x3C00);
+	T.icount -= 33 + 18 + 27 + 27 + 18 + 27 + 27 + 24 + 30 + 30 + 30;
+	call(0x4000, {0x0015, 0x000E, 0});
+	poke(0x0184, 0x5BBC);
+	T.r[0] = 0x0020;
+	T.icount -= 33 + 18 + 30;
+	call(0x8AB6, {});
+	poke(0x0184, 0x5C04);
+	T.r[0] = 0x001F;
+	T.icount -= 33 + 18 + 30;
+	call(0x8AB6, {});
+	for (;;)
+	{
+		T.icount -= 24 + 12;
+		if (peekb(0x0FE6)) break;
+		T.icount -= 30;
+		call(0x8D50, {});                              // wait_vblank
+		T.icount -= 30;
+		call(0xF8EA, {});                              // button_hold_timer
+		T.icount -= 21 + 30;
+		uint16_t d = call(0xF896, {0});                // rotary_zone_step
+		poke(0x01AE, (uint16_t)(peek(0x01AE) - d));
+		T.icount -= 27 + 27 + 30;
+		d = call(0xF896, {1});
+		T.r[0] = (uint16_t)(d + peek(0x01AC));
+		poke(0x01AC, T.r[0]);
+		T.icount -= 24 + 27 + 12;
+	}
+	pokeb(0x0FE6, 0);
+	T.icount -= 27 + 18;
+	fl::add((uint16_t)(T.r[6] - 6), 6);                // ADD #6,SP
+}
+
+// F:F98E (self test): clear the screen, a title (F:8AB6) and the 16 items listed at 0x7798
+// (bank B 0x2800), each drawn by A7:4D30 with a 2 x 2 tile hole cleared at its position
+uint16_t selftest_items_screen(const Args &)
+{
+	KeepRegs keep(2);
+	call(0x8068, {});                                  // select_video_bank0
+	call(0x8D2C, {});                                  // clear_playfield_ram
+	call(0x8CE8, {});                                  // clear_playfield
+	poke(0x0184, 0x5C04);
+	T.r[0] = 0x001F;
+	call(0x8AB6, {});
+	poke(0x0184, 0x5CD2);
+	uint16_t r0 = T.r[0];
+	for (int i = 15; i >= 0; i--)
+	{
+		const uint16_t item = (uint16_t)(0x7798 + i * 8);
+		poke(0x01D2, 0x3800);
+		poke(0x1400, 0x3800);
+		T.r[0] = 0x2800;
+		poke(0x01D4, 0x2800);
+		poke(0x1402, 0x2800);
+		r0 = call(0x4D30, {0, item});
+		const uint16_t p = (uint16_t)(peek(item) + 0x2082);
+		poke((uint16_t)(p + 0x82), 0);
+		poke((uint16_t)(p + 0x80), 0);
+		poke((uint16_t)(p + 2), 0);
+		poke(p, 0);
+	}
+	return r0;
+}
+
 }
 
 LOGIC_TABLE(boot,
@@ -211,6 +321,9 @@ LOGIC_TABLE(boot,
 	c_routine("F", 0x8E2E, "rotary_step", rotary_step, 0, 230),
 	wait_routine("B6", 0x72B0, "selftest_colour_screen", selftest_colour_screen, 21),
 	c_routine("F", 0xF896, "rotary_zone_step", rotary_zone_step, 0, 111),
+	irq_routine("F", 0x8938, "irq_vblank_selftest", irq_vblank_selftest, 612),
+	wait_routine("F", 0xF90E, "selftest_scroll_screen", selftest_scroll_screen, 21),
+	c_routine("F", 0xF98E, "selftest_items_screen", selftest_items_screen, 0, 10902),
 )
 
 }

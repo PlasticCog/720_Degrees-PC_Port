@@ -81,6 +81,14 @@ inline void tick(uint16_t pc, int cycles)
 	if (!t11rt::sync(pc)) throw Unwound{};
 }
 
+// continue the program at pc, abandoning the routine (as a jump out of it would): the stack
+// has to be as the original leaves it there.  Used for the reset (F:8000).
+[[noreturn]] inline void leave_to(uint16_t pc)
+{
+	t11rt::T.r[7] = pc;
+	throw Unwound{};
+}
+
 // called by the generated wrappers; false = run the original translation
 bool enter(int index);
 

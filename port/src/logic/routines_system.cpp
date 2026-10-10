@@ -202,7 +202,7 @@ void put_small_char()
 
 LOGIC_TABLE(system,
 	asm_routine("A7", 0x4314, "send_queued_sound", send_queued_sound, 116),
-	c_routine("A5", 0x5CC0, "queue_effect_sound", queue_effect_sound, 0, 298),
+	c_routine("A5", 0x5CC0, "queue_effect_sound", queue_effect_sound, 0, 299),
 	asm_routine("A5", 0x5D86, "step_sound_level", step_sound_level, 57),
 	c_routine("F", 0x81AA, "install_interrupts_a", install_interrupts_a, 0, 1959),
 	c_routine("F", 0x820C, "install_interrupts_b", install_interrupts_b, 0, 3942),
