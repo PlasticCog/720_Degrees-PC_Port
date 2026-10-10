@@ -693,6 +693,390 @@ void map_object_enters()
 	call(0xC4E4, {});
 }
 
+// F:BF18: release the current map object's definition: its group (properties bits 0-3) is
+// free again (0x0E6D+group = 0) and its bit in the bitmap 0x0CF6 is cleared.  Banks end at
+// 0x1000 / 0x1400.  Returns the bitmap byte index.
+uint16_t release_map_definition(const Args &)
+{
+	Frame frame(2);
+	T.r[0] = 0x1400;
+	set_bank_a(0x1000);
+	set_bank_b(0x1400);
+	call(0xBE10, {});
+	const uint16_t def = peek(0x09B6);
+	const uint16_t group = peekb((uint16_t)(0x4560 + def)) & 0x0F;
+	if (group) pokeb((uint16_t)(0x0E6D + group), 0);
+	const uint16_t i = (uint16_t)((int16_t)def >> 3);
+	pokeb((uint16_t)(0x0CF6 + i), (uint8_t)(peekb((uint16_t)(0x0CF6 + i)) & ~peekb((uint16_t)(0xFC74 + (def & 7)))));
+	set_c((def >> 2) & 1);                              // the last ASR
+	return i;
+}
+
+// F:C114: the object of the current map object turns towards the direction in byte 2 of its
+// record (0x09B2): one animation frame (list 0x5F7C per type, entry per direction 0xFDBA) per
+// call, the short way round; odd directions go straight to the target frame.  Types with
+// 0x6502 set show the frame after.  While turning, the object heads for its definition's
+// position (F:BF5E, from the type's offsets 0x62A4 / 0x636E) and returns 1; once facing the
+// direction it gets the speed of the direction (tables 0x4138 / 0x4238 and 0x3FF8 / 0xFD8A,
+// bank A 0x2400) and returns 0.
+uint16_t turn_map_object(const Args &)
+{
+	Frame frame(SAVE_R2_R5 + 0x0C + 4);                 // + six locals, two of them for F:BF5E
+	const uint16_t sp = T.r[6];
+	const uint16_t dir = peekb((uint16_t)(peek(0x09B2) + 2));
+	set_bank_a(0);
+	set_bank_b(0x0400);
+	const uint16_t n = peek(0x09AA);
+	const uint16_t slot = sext8(peekb((uint16_t)(0x09B8 + n))) & 0x003F;
+	const uint16_t type = peekb((uint16_t)(0x0370 + slot)), tw = (uint16_t)(type << 1), w = (uint16_t)(slot << 1);
+	auto direction_frame = [&](uint16_t d) {
+		return peek((uint16_t)(peekb((uint16_t)(0xFDBA + d)) + peek((uint16_t)(0x5F7C + tw))));
+	};
+	uint16_t target = direction_frame(dir);
+	const uint16_t old = sext8(peekb((uint16_t)(0x07D0 + slot)));
+	bool turning = false;
+	uint16_t diff = (uint16_t)(dir - old);
+	if (diff)
+	{
+		uint16_t step = 2;
+		if ((int16_t)diff < 0)
+		{
+			diff = (uint16_t)-diff;
+			step = 0xFFFE;
+		}
+		if ((int16_t)diff > 8) step = (uint16_t)-step;
+		const uint16_t flags = (uint16_t)(0x04B0 + slot);
+		uint16_t f = (peekb(flags) & 0x01) ? peek((uint16_t)(0x03B0 + w)) : direction_frame(old);
+		f = (uint16_t)(f + step);
+		if ((int16_t)peek(f) < 0) f = peek(f) & 0x7FFF;
+		if ((dir | old) & 1) f = target;
+		if (f == target)
+			pokeb(flags, peekb(flags) & ~0x01);
+		else
+		{
+			target = f;
+			turning = true;
+		}
+		if (peekb((uint16_t)(0x6502 + type)))
+		{
+			if (!turning)
+				target = peek(target);
+			else if (peekb(flags) & 0x01)
+			{
+				target = (uint16_t)(target + step);
+				if ((int16_t)peek(target) < 0) target = peek(target) & 0x7FFF;
+			}
+		}
+		if (target != peek((uint16_t)(0x03B0 + w)))
+		{
+			poke((uint16_t)(0x03B0 + w), target);
+			pokeb((uint16_t)(0x0490 + slot), peekb((uint16_t)(0x0490 + slot)) | 0x18);
+			const uint16_t pictures = peek((uint16_t)(0x6110 + tw));
+			if (pictures) poke((uint16_t)(0x03F0 + w), peek((uint16_t)(peekb((uint16_t)(0xFDBA + dir)) + pictures)));
+		}
+	}
+	if (!turning)
+	{
+		uint16_t still = sext8(peekb((uint16_t)(0x649D + type))) & 1;
+		if (still && (dir & 1))
+		{
+			still = 0;
+			pokeb((uint16_t)(0x0490 + slot), peekb((uint16_t)(0x0490 + slot)) & ~0x01);
+		}
+		const uint16_t kind = sext8(peekb((uint16_t)(0x65CC + type)));
+		pokeb((uint16_t)(0x0770 + slot), peekb((uint16_t)(0x0770 + slot)) & 0x7F);
+		set_bank_a(0x1000);
+		set_bank_b(0x1400);
+		const uint16_t speed = peekb((uint16_t)(peek(0x09B2) + 3));
+		set_bank_a(0x2400);
+		if (!still)
+		{
+			const uint16_t i = (uint16_t)(((dir << 3) + kind) << 1);
+			poke((uint16_t)(0x04F0 + w), peek((uint16_t)(0x4138 + i)));
+			poke((uint16_t)(0x0570 + w), peek((uint16_t)(0x4238 + i)));
+			pokeb((uint16_t)(0x0430 + w), speed == 0x18 ? peekb((uint16_t)(0xFD8A + kind)) : peekb((uint16_t)(0x3FF8 + (speed << 3) + kind)));
+			poke((uint16_t)(0x0430 + w), peek((uint16_t)(0x0430 + w)) & 0x00FF);
+		}
+		else
+		{
+			poke((uint16_t)(0x0430 + w), (uint16_t)(peek((uint16_t)(0x0430 + w)) + peek((uint16_t)(0x40F8 + (speed << 1)))));
+			poke((uint16_t)(0x04F0 + w), 0);
+			poke((uint16_t)(0x0570 + w), 0);
+			pokeb((uint16_t)(0x0490 + slot), peekb((uint16_t)(0x0490 + slot)) | 0x01);
+		}
+		pokeb((uint16_t)(0x07D0 + slot), (uint8_t)dir);
+		set_c(carry(sp, 0x10));                         // ADD #0x10,SP
+		return 0;
+	}
+	T.r[0] = 0x1400;
+	set_bank_a(0x1000);
+	set_bank_b(0x1400);
+	const uint16_t px = (uint16_t)(sp + 0x0E), py = (uint16_t)(sp + 0x0C);
+	call(0xBF5E, {px, py});
+	set_bank_a(0);
+	set_bank_b(0x0400);
+	const uint16_t dx = (uint16_t)(peek((uint16_t)(0x62A4 + tw)) - peek((uint16_t)(0x06F0 + w)) + rw(py));
+	poke((uint16_t)(0x04F0 + w), (uint16_t)((int16_t)dx >> 4));
+	const uint16_t dy = (uint16_t)(peek((uint16_t)(0x636E + tw)) - peek((uint16_t)(0x0730 + w)) + rw(px));
+	poke((uint16_t)(0x0570 + w), (uint16_t)((int16_t)dy >> 4));
+	poke((uint16_t)(0x0430 + w), 6);
+	pokeb((uint16_t)(0x0770 + slot), peekb((uint16_t)(0x0770 + slot)) | 0x80);
+	pokeb((uint16_t)(0x04B0 + slot), peekb((uint16_t)(0x04B0 + slot)) | 0x01);
+	set_c(carry(sp, 0x10));
+	return 1;
+}
+
+// F:CF5E  remove_map_object(int n): map object n goes: its object slot is reset (F:B56E) if it
+// has one, its definition released (F:BF18); a fixed one (n < 0x40) clears its timer 0x0AB8,
+// a dynamic one counts the event of its definition (F:D348, properties 0x4000 bits 0-3).
+// Descriptor and slot entry are cleared.  Returns the definition's properties byte (0x4000).
+uint16_t remove_map_object(const Args &a)
+{
+	Frame frame(2);
+	const uint16_t n = a.u(0);
+	poke(0x09AA, n);
+	if ((int16_t)peek((uint16_t)(0x0AF8 + 2 * n)) < 0)
+	{
+		const uint16_t slot = sext8(peekb((uint16_t)(0x09B8 + n))) & 0x003F;
+		T.r[0] = slot;
+		call(0xB56E, {slot});
+	}
+	call(0xBF18, {});
+	const uint16_t m = peek(0x09AA);
+	if ((int16_t)m < 0x40)
+		pokeb((uint16_t)(0x0AB8 + m), 0);
+	else
+	{
+		T.r[0] = peek(0x09B6);
+		call(0xD348, {(uint16_t)(peekb((uint16_t)(0x4000 + T.r[0])) & 0x0F)});
+	}
+	const uint16_t k = peek(0x09AA);
+	poke((uint16_t)(0x0AF8 + 2 * k), 0);
+	pokeb((uint16_t)(0x09B8 + k), 0);
+	set_c(false);
+	return sext8(peekb((uint16_t)(0x4000 + peek(0x09B6))));
+}
+
+// F:CE24  add_map_object(int dynamic, int descriptor, int type): enter a map object in the
+// first free entry (fixed ones from 0, dynamic ones from 0x0E98 = 0x40 on) unless its cell's
+// definition is taken (F:BE7C, returns -1).  Fixed objects of types without 0x649D bit 7 get
+// the timer 0x0AB8 = 0x0E9A + 8; definitions of types without 0x6438 bit 1 are marked taken.
+// The highest entry in use (0x09AE fixed / 0x09B0 dynamic) is updated.  Returns 0.  0x09B2 is
+// left pointing at the descriptor argument on the stack, as in the original.
+uint16_t add_map_object(const Args &a)
+{
+	Frame frame(SAVE_R2_R5 + 4);
+	const uint16_t saved_a = peek(0x01D2), saved_b = peek(0x01D4);
+	const uint16_t desc = a.u(1), type = a.u(2);
+	set_bank_a(0x1000);
+	set_bank_b(0x1400);
+	poke(0x09B2, (uint16_t)(a.sp + 4));
+	const bool fixed = a.u(0) == 0;
+	uint16_t i, top;
+	if (fixed)
+	{
+		i = 0;
+		top = 0x09AE;
+		poke(0x09AA, 0);
+	}
+	else
+	{
+		i = peekb(0x0E98);
+		top = 0x09B0;
+		poke(0x09AA, 0x0040);
+	}
+	T.r[0] = 0x1400;
+	if (call(0xBE7C, {}) != 0)
+	{
+		restore_banks(saved_a, saved_b);
+		set_c(saved_b < saved_a);                       // CMP (SP)+,(SP)+ of the saved banks
+		return 0xFFFF;
+	}
+	while (peekb((uint16_t)(0x09B8 + i))) i++;
+	poke((uint16_t)(0x0AF8 + 2 * i), desc);
+	poke(0x09AA, i);
+	call(0xBE10, {});
+	const uint16_t def = peek(0x09B6), byte = (uint16_t)((int16_t)def >> 3);
+	set_bank_a(0);
+	set_bank_b(0x0400);
+	if (!(peekb((uint16_t)(0x6438 + type)) & 0x02))
+		pokeb((uint16_t)(0x0CF6 + byte), peekb((uint16_t)(0x0CF6 + byte)) | peekb((uint16_t)(0xFC74 + (def & 7))));
+	if (fixed && !(peekb((uint16_t)(0x649D + type)) & 0x80))
+		pokeb((uint16_t)(0x0AB8 + i), (uint8_t)(peekb(0x0E9A) + 8));
+	pokeb((uint16_t)(0x09B8 + i), (uint8_t)type);
+	set_bank_a(0);
+	set_bank_b(0x0400);
+	poke(0x09AA, i);
+	if ((int16_t)i <= (int16_t)peek(top))
+	{
+		i = peek(top);
+		while (!peekb((uint16_t)(0x09B8 + i))) i--;
+	}
+	poke(top, i);
+	pokeb(0x0E99, 1);
+	restore_banks(saved_a, saved_b);
+	set_c(saved_b < saved_a);
+	return 0;
+}
+
+// F:CFD6: clear the map object tables (0x09AA-0x0E9A), set the empty ranges (0x09AE = -1,
+// 0x09B0 = 0x3F, next dynamic entry 0x0E98 = 0x40) and add the level's fixed map objects from
+// the list at 0x6696 (bank B 0x0400; descriptor, type; ends with 0xFFFF).  Banks are restored.
+// Returns the last F:CE24 result.
+uint16_t init_map_objects(const Args &)
+{
+	Frame frame(SAVE_R2_R3);
+	const uint16_t saved_a = peek(0x01D2), saved_b = peek(0x01D4);
+	for (uint16_t p = 0x09AA; p <= 0x0E9A; p++) pokeb(p, 0);
+	pokeb(0x0E93, 0);
+	poke(0x09AE, 0xFFFF);
+	poke(0x09B0, 0x003F);
+	pokeb(0x0E98, 0x40);
+	set_bank_a(0);
+	set_bank_b(0x0400);
+	uint16_t r0 = 0x0400;
+	for (uint16_t p = 0x6696; peek(p) != 0xFFFF; p = (uint16_t)(p + 4))
+	{
+		T.r[0] = r0;
+		r0 = call(0xCE24, {1, peek((uint16_t)(p + 2)), peek(p)});
+	}
+	restore_banks(saved_a, saved_b);
+	set_c(false);
+	return r0;
+}
+
+// F:C3E6: the object of the current map object goes off screen: type 4 stays; types counted
+// in 0x0E97 / 0x0E96 (0x649D bits 6 / 4) count up; objects flagged 0x10 (0x04B0) remove their
+// map object for good (F:CF5E); the others are reset (slot 5 also resets slot 6), the map
+// object keeps its type in 0x09B8 and loses its slot flag; fixed map objects get a timer from
+// the animation counter (unless 0x649D bit 7) and F:5D08 (bank A 0x1800) is told the type.
+// Banks are restored.
+uint16_t map_object_leaves(const Args &)
+{
+	Frame frame(SAVE_R2_R5);
+	const uint16_t saved_a = peek(0x01D2), saved_b = peek(0x01D4);
+	set_bank_a(0);
+	set_bank_b(0x0400);
+	uint16_t r0 = 0x0400;
+	const uint16_t n = peek(0x09AA);
+	const uint16_t slot = sext8(peekb((uint16_t)(0x09B8 + n))) & 0x003F;
+	const uint16_t type = peekb((uint16_t)(0x0370 + slot));
+	if (type == 4)
+	{
+		restore_banks(saved_a, saved_b);
+		set_c(false);
+		return r0;
+	}
+	const uint8_t kind = peekb((uint16_t)(0x649D + type));
+	if (kind & 0x40)
+	{
+		r0 = (uint16_t)(sext8(peekb(0x0E97)) + 1);
+		pokeb(0x0E97, (uint8_t)r0);
+	}
+	if (kind & 0x10)
+	{
+		r0 = (uint16_t)(sext8(peekb(0x0E96)) + 1);
+		pokeb(0x0E96, (uint8_t)r0);
+	}
+	if (peekb((uint16_t)(0x04B0 + slot)) & 0x10)
+	{
+		T.r[0] = r0;
+		r0 = call(0xCF5E, {peek(0x09AA)});
+	}
+	else
+	{
+		pokeb((uint16_t)(0x09B8 + n), (uint8_t)type);
+		const uint16_t anim = peek((uint16_t)(0x0430 + 2 * slot));
+		T.r[0] = (uint16_t)(slot << 1);
+		call(0xB56E, {slot});
+		if (slot == 5) call(0xB56E, {6});
+		const uint16_t m = peek(0x09AA);
+		r0 = (uint16_t)(m << 1);
+		poke((uint16_t)(0x0AF8 + r0), peek((uint16_t)(0x0AF8 + r0)) & 0x7FFF);
+		if ((int16_t)m < 0x40)
+		{
+			if (!(kind & 0x80))
+			{
+				r0 = peekb(0x0E9A);
+				pokeb((uint16_t)(0x0AB8 + m), (uint8_t)((uint16_t)((int16_t)anim >> 2) + r0));
+			}
+			set_bank_a(0x1800);
+			T.r[0] = 0x1800;
+			r0 = call(0x5D08, {type});
+		}
+	}
+	restore_banks(saved_a, saved_b);
+	set_c(false);
+	return r0;
+}
+
+// F:BCB8 (assembly): keep the current map object's on-screen state up to date.  Without an
+// object (descriptor bit 15 clear) it may enter (F:BD78).  With one, bits 7 / 6 of its slot
+// entry 0x09B8 record the side of the screen in x / y (beyond 0x4000); an object that crossed
+// from one side to the other far off screen (beyond 0xC000) leaves (F:C3E6).
+void check_map_object_view()
+{
+	T.r[1] = peek(0x09AA);
+	T.r[0] = (uint16_t)(T.r[1] << 1);
+	if ((int16_t)peek((uint16_t)(0x0AF8 + T.r[0])) < 0)
+	{
+		T.r[1] = (uint16_t)(T.r[1] + 0x09B8);
+		T.r[0] = sext8(peekb(T.r[1])) & 0x003F;
+		T.r[2] = (uint16_t)(T.r[0] << 1);
+		T.r[0] = peek((uint16_t)(0x0630 + T.r[2]));
+		bool leave;
+		if ((int16_t)T.r[0] >= 0)
+		{
+			fl::cmp(T.r[0], 0x4000);
+			const uint8_t b = lt() ? (uint8_t)(peekb(T.r[1]) & ~0x80) : (uint8_t)(peekb(T.r[1]) | 0x80);
+			pokeb(T.r[1], b);
+			leave = false;
+		}
+		else
+		{
+			fl::cmp(T.r[0], 0xC000);
+			const uint8_t b = peekb(T.r[1]);
+			leave = fC() ? (int8_t)b > 0 : (int8_t)b < 0;
+		}
+		if (!leave)
+		{
+			T.r[0] = peek(0x09AA);
+			T.r[1] = (uint16_t)(0x09B8 + T.r[0]);
+			T.r[0] = peek((uint16_t)(0x0670 + T.r[2]));
+			if ((int16_t)T.r[0] > 0)
+			{
+				fl::cmp(T.r[0], 0x4000);
+				const uint8_t b = lt() ? (uint8_t)(peekb(T.r[1]) & ~0x40) : (uint8_t)(peekb(T.r[1]) | 0x40);
+				pokeb(T.r[1], b);
+				f_nzv(nzb(b));
+				return;
+			}
+			fl::cmp(T.r[0], 0xC000);
+			const uint8_t b = peekb(T.r[1]);
+			f_nzv(nzb(b & 0x40));
+			if (fC() ? (b & 0x40) != 0 : (b & 0x40) == 0) return;
+		}
+		call(0xC3E6, {});
+		return;
+	}
+	call(0xBD78, {});
+	const uint16_t v = peek(0x099A);
+	fl::tst(v);
+	if ((int16_t)v >= 0) return;
+	// a second try with the window widened by the scroll margins
+	poke(0x0224, (uint16_t)(peek(0x0224) + 0x0C));
+	poke(0x0226, (uint16_t)(peek(0x0226) + 0x0C));
+	poke(0x0228, (uint16_t)(peek(0x0228) - 0x50));
+	poke(0x022A, (uint16_t)(peek(0x022A) - 0x50));
+	call(0xBD78, {});
+	poke(0x0224, peek(0x099A));
+	poke(0x0226, peek(0x099C));
+	poke(0x0228, peek(0x0996));
+	const uint16_t r = peek(0x0998);
+	poke(0x022A, r);
+	fl::mov(r);
+}
+
 // ---------------------------------------------------------------- numbers
 
 // F:BA96 / F:BA9A  print_number(int separators, int lead, int digits, long value): print the
@@ -852,21 +1236,28 @@ uint16_t print_number_large(const Args &a) { return print_number(a, 0x8000); }
 }
 
 LOGIC_TABLE(fmid,
-	asm_routine("F", 0xB03C, "apply_queued_piece_counts", apply_queued_piece_counts, 59),
-	asm_routine("F", 0xB092, "update_chains_a", update_chains_a, 4519),
-	asm_routine("F", 0xB120, "update_chains_b", update_chains_b, 4636),
-	asm_routine("F", 0xB1EA, "build_sprite_pieces", build_sprite_pieces, 11675),
-	asm_routine("F", 0xB378, "move_objects", move_objects, 9224),
-	c_routine("F", 0xB4B6, "show_object", show_object, 0, 1227),
+	asm_routine("F", 0xB03C, "apply_queued_piece_counts", apply_queued_piece_counts, 62),
+	asm_routine("F", 0xB092, "update_chains_a", update_chains_a, 4135),
+	asm_routine("F", 0xB120, "update_chains_b", update_chains_b, 4287),
+	asm_routine("F", 0xB1EA, "build_sprite_pieces", build_sprite_pieces, 11646),
+	asm_routine("F", 0xB378, "move_objects", move_objects, 8150),
+	c_routine("F", 0xB4B6, "show_object", show_object, 0, 1234),
 	c_routine("F", 0xB602, "queue_piece_count", queue_piece_count, 0, 990),
 	c_routine("F", 0xBA2E, "clear_objects_and_text", clear_objects_and_text, 0, 132999),
 	c_routine("F", 0xC98E, "restart_object_animation", restart_object_animation, 0, 1047),
-	c_routine("F", 0xBE10, "locate_map_object", locate_map_object, 0, 686),
-	c_routine("F", 0xBE7C, "map_object_state", map_object_state, 0, 733),
+	c_routine("F", 0xBE10, "locate_map_object", locate_map_object, 0, 685),
+	c_routine("F", 0xBE7C, "map_object_state", map_object_state, 0, 715),
 	c_routine("F", 0xBF5E, "map_object_position", map_object_position, 0, 798),
 	asm_routine("F", 0xBD78, "map_object_enters", map_object_enters, 301),
-	c_routine("F", 0xBA96, "print_number_small", print_number_small, 0, 6161),
-	c_routine("F", 0xBA9A, "print_number_large", print_number_large, 0, 5406),
+	c_routine("F", 0xBA96, "print_number_small", print_number_small, 0, 6049),
+	c_routine("F", 0xBA9A, "print_number_large", print_number_large, 0, 5311),
+	c_routine("F", 0xBF18, "release_map_definition", release_map_definition, 0, 1113),
+	c_routine("F", 0xC114, "turn_map_object", turn_map_object, 0, 3232),
+	c_routine("F", 0xCF5E, "remove_map_object", remove_map_object, 0, 1917),
+	c_routine("F", 0xCE24, "add_map_object", add_map_object, 0, 5357),
+	c_routine("F", 0xCFD6, "init_map_objects", init_map_objects, 0, 240105),
+	c_routine("F", 0xC3E6, "map_object_leaves", map_object_leaves, 0, 1924),
+	asm_routine("F", 0xBCB8, "check_map_object_view", check_map_object_view, 497),
 )
 
 }

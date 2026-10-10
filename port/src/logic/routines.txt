@@ -88,3 +88,10 @@ F:BF5E  map_object_position
 F:BD78  map_object_enters
 F:BA96  print_number_small
 F:BA9A  print_number_large
+F:BF18  release_map_definition
+F:C114  turn_map_object
+F:CF5E  remove_map_object
+F:CE24  add_map_object
+F:CFD6  init_map_objects
+F:C3E6  map_object_leaves
+F:BCB8  check_map_object_view
