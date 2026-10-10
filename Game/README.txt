@@ -5,8 +5,9 @@ Drop the arcade ROM files into THIS folder (not a sub-folder, not zipped).
 The ROMs are not included in this repository; you must supply your own copy
 of the "720 Degrees (rev 4)" set (MAME short name: 720).
 
-After building, 720degrees.exe and SDL3.dll are copied here as well, so this
-folder is the complete runnable game.
+Only the ROM files go here. The build puts 720degrees.exe, editor720.exe and
+SDL3.dll in the folder above this one, and both programs look for their ROMs
+in this Game folder.
 
 Required files (37):
 

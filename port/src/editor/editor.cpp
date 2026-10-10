@@ -1,7 +1,7 @@
 // editor720 - level editor for the 720 Degrees native port (SDL3 + Dear ImGui).
 //
 // Edits the playfield maps decoded by port/src/level (Skate City, the parks of each class
-// and the attract screens) and saves .720mod files that the game loads from Game/mods.
+// and the attract screens) and saves .720mod files into the mods folder next to the game.
 //
 //   Map          left click: select a cell, or paint the brush block in Paint mode
 //                right drag: pan   wheel: zoom   middle click: pick block   double click: edit block
@@ -59,20 +59,26 @@ bool has_roms(const std::string &dir)
 	return (bool)f;
 }
 
-// same search order as the game: next to the executable, then Game folders above it
-std::string find_game_dir(const std::string &requested)
+// folder the program runs from: the game, the mods folder and exports live here
+std::string app_dir()
+{
+	const char *base = SDL_GetBasePath();
+	return base ? std::string(base) : std::string("./");
+}
+
+// same search order as the game: the Game folder next to the program, then the program's
+// own folder, then Game folders above it (for running from the build directory)
+std::string find_rom_dir(const std::string &requested)
 {
 	if (!requested.empty()) return requested.back() == '/' || requested.back() == '\\' ? requested : requested + "/";
-	const char *base = SDL_GetBasePath();
+	const std::string base = app_dir();
 	std::vector<std::string> c;
-	if (base)
-		for (const char *rel : { "", "Game/", "../Game/", "../../Game/", "../../../Game/" })
-			c.push_back(std::string(base) + rel);
+	for (const char *rel : { "Game/", "", "../Game/", "../../Game/", "../../../Game/" })
+		c.push_back(base + rel);
 	c.push_back("Game/");
-	c.push_back("./");
 	for (auto &d : c)
 		if (has_roms(d)) return d;
-	return base ? std::string(base) : std::string("Game/");
+	return base + "Game/";
 }
 
 std::vector<std::string> list_mods(const std::string &dir)
@@ -193,7 +199,7 @@ struct Editor {
 	GfxSet gfx;
 	LevelSet original, levels;
 	int8_t random_var[32] = {};
-	std::string game_dir, mod_file;
+	std::string rom_dir, app, mod_file;     // ROM folder; program folder (mods, exports, game)
 	PaletteCapture capture;
 	bool capturing = false;
 
@@ -233,7 +239,7 @@ struct Editor {
 	// ------------------------------------------------------------ loading
 	bool init(std::string &err)
 	{
-		if (!roms.load(game_dir, err)) return false;
+		if (!roms.load(rom_dir, err)) return false;
 		if (!original.load(roms, err)) return false;
 		gfx.decode(roms);
 		for (int i = 0; i < 32; i++) random_var[i] = (int8_t)roms.main[RANDOM_VAR_TAB + i];
@@ -479,7 +485,7 @@ struct Editor {
 		std::string name = mod_name;
 		for (char &c : name) if (strchr("<>:\"/\\|?*", c)) c = '_';
 		if (name.empty()) name = "my_level";
-		const std::string path = game_dir + "mods/" + name + ".720mod";
+		const std::string path = app + "mods/" + name + ".720mod";
 		std::string report;
 		if (save_mod(path, report))
 		{
@@ -507,13 +513,15 @@ struct Editor {
 			}
 		std::string name = lm.name;
 		for (char &c : name) if (!isalnum((unsigned char)c)) c = '_';
-		const std::string path = game_dir + name + ".png";
+		std::error_code ec;
+		std::filesystem::create_directories(app + "exports", ec);
+		const std::string path = app + "exports/" + name + ".png";
 		status = write_png(path, img.data(), W, H) ? "Exported " + path : "PNG export failed";
 	}
 
 	void play_test()
 	{
-		const std::string exe = game_dir + GAME_EXE;
+		const std::string exe = app + GAME_EXE;
 		std::error_code ec;
 		if (!std::filesystem::exists(exe, ec)) { status = "Play test: " + exe + " not found (build the game first)"; return; }
 		bool edited = false;
@@ -543,13 +551,13 @@ struct Editor {
 			}
 			if (ImGui::BeginMenu("Open mod"))
 			{
-				const auto mods = list_mods(game_dir + "mods");
-				if (mods.empty()) ImGui::TextDisabled("No mods in %smods", game_dir.c_str());
+				const auto mods = list_mods(app + "mods");
+				if (mods.empty()) ImGui::TextDisabled("No mods in %smods", app.c_str());
 				for (const auto &m : mods)
 					if (ImGui::MenuItem(m.c_str()) && (!unsaved || confirm(win, "Discard your unsaved edits?", "Discard")))
 					{
 						std::string err;
-						status = open_levels(game_dir + "mods/" + m, err) ? "Opened " + m : "Could not open " + m + ": " + err;
+						status = open_levels(app + "mods/" + m, err) ? "Opened " + m : "Could not open " + m + ": " + err;
 					}
 				ImGui::EndMenu();
 			}
@@ -593,7 +601,7 @@ struct Editor {
 			ImGui::TextUnformatted("The game loads all mods in that folder when it starts.");
 			if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
 			const bool enter = ImGui::InputText("name", mod_name, sizeof(mod_name), ImGuiInputTextFlags_EnterReturnsTrue);
-			ImGui::TextDisabled("%smods/%s.720mod", game_dir.c_str(), mod_name);
+			ImGui::TextDisabled("%smods/%s.720mod", app.c_str(), mod_name);
 			if (ImGui::Button("Save") || enter)
 			{
 				save_named();
@@ -1007,11 +1015,11 @@ struct Editor {
 	}
 };
 
-int capture_test(const std::string &game_dir)
+int capture_test(const std::string &rom_dir)
 {
 	RomSet roms;
 	std::string err;
-	if (!roms.load(game_dir, err)) { fprintf(stderr, "%s\n", err.c_str()); return 1; }
+	if (!roms.load(rom_dir, err)) { fprintf(stderr, "%s\n", err.c_str()); return 1; }
 	PaletteCapture cap;
 	const uint64_t t0 = SDL_GetTicksNS();
 	cap.start(roms);
@@ -1041,7 +1049,7 @@ int main(int argc, char **argv)
 		else if (a == "--block" && i + 1 < argc) shot_block = atoi(argv[++i]);
 		else if (a == "--open" && i + 1 < argc) open_mod = argv[++i];
 	}
-	if (test) return capture_test(find_game_dir(rom_dir));
+	if (test) return capture_test(find_rom_dir(rom_dir));
 
 	if (!SDL_Init(SDL_INIT_VIDEO))
 	{
@@ -1049,13 +1057,14 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	static Editor ed;
-	ed.game_dir = find_game_dir(rom_dir);
+	ed.rom_dir = find_rom_dir(rom_dir);
+	ed.app = app_dir();
 	std::string err;
 	if (!ed.init(err))
 	{
 		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "720 Degrees level editor",
-			("Could not load the levels from the ROM files in\n" + ed.game_dir + "\n\n" + err +
-			 "\n\nPut the 720 Degrees ROM files in the Game folder.").c_str(), nullptr);
+			("Could not load the levels from the ROM files in\n" + ed.rom_dir + "\n\n" + err +
+			 "\n\nPut the 720 Degrees ROM files in the Game folder next to the editor.").c_str(), nullptr);
 		return 1;
 	}
 	if (ed.capture.load(pref_file("720_palettes.bin"))) ed.apply_capture();

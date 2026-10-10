@@ -115,12 +115,12 @@ target_link_libraries(leveldata PUBLIC board)
 # The game
 add_executable(720degrees WIN32 src/app/main.cpp)
 target_link_libraries(720degrees PRIVATE gamecore leveldata SDL3::SDL3)
-set(D720_GAME_DIR "${REPO_ROOT}/Game" CACHE PATH "Folder the finished game is copied to (with the ROMs)")
+set(D720_OUTPUT_DIR "${REPO_ROOT}" CACHE PATH "Folder the finished game and editor are copied to (the ROMs go in its Game subfolder)")
 add_custom_command(TARGET 720degrees POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:SDL3::SDL3> $<TARGET_FILE_DIR:720degrees>
-  COMMAND ${CMAKE_COMMAND} -E make_directory ${D720_GAME_DIR}
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:720degrees> $<TARGET_FILE:SDL3::SDL3> ${D720_GAME_DIR}
-  COMMENT "Copying the game to ${D720_GAME_DIR}")
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${D720_OUTPUT_DIR}
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:720degrees> $<TARGET_FILE:SDL3::SDL3> ${D720_OUTPUT_DIR}
+  COMMENT "Copying the game to ${D720_OUTPUT_DIR}")
 
 # ---------------------------------------------------------------------------
 # Level editor (Dear ImGui is vendored in third_party/imgui)
@@ -135,9 +135,9 @@ add_executable(editor720 WIN32 src/editor/editor.cpp)
 target_link_libraries(editor720 PRIVATE gamecore leveldata imgui SDL3::SDL3)
 add_custom_command(TARGET editor720 POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:SDL3::SDL3> $<TARGET_FILE_DIR:editor720>
-  COMMAND ${CMAKE_COMMAND} -E make_directory ${D720_GAME_DIR}
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:editor720> $<TARGET_FILE:SDL3::SDL3> ${D720_GAME_DIR}
-  COMMENT "Copying the level editor to ${D720_GAME_DIR}")
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${D720_OUTPUT_DIR}
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:editor720> $<TARGET_FILE:SDL3::SDL3> ${D720_OUTPUT_DIR}
+  COMMENT "Copying the level editor to ${D720_OUTPUT_DIR}")
 
 # ---------------------------------------------------------------------------
 # Tools

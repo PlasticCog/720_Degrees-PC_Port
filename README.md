@@ -21,8 +21,16 @@ emulator runs inside the game.
 
    Configuration translates the program ROMs to C++ (`tools/t11_to_cpp.py`,
    `tools/m6502_to_cpp.py`) and downloads the SDL3 development package if SDL3 is not installed.
-4. Run `Game/720degrees.exe`. The build copies the game, the level editor (`editor720.exe`) and
-   `SDL3.dll` next to your ROMs.
+4. Run `720degrees.exe` in the top folder of the repository. The build puts the game, the level
+   editor (`editor720.exe`) and `SDL3.dll` there; the `Game` folder holds only the ROMs.
+
+```
+720degrees.exe   the game
+editor720.exe    the level editor
+SDL3.dll
+Game/            your ROM files
+mods/            level mods (created by the editor)
+```
 
 Tested with MSYS2 UCRT64 GCC 15. Visual Studio uses the SDL3 VC package (`-G "Visual Studio 17 2022"`).
 
@@ -44,9 +52,10 @@ High scores and settings are kept in the game's EEPROM image, saved under
 
 ## Level editor
 
-Run `Game/editor720.exe`. It edits Skate City, the six layouts of each of the four parks and the
-attract-mode screens, and saves your changes as a mod file in `Game/mods`. The game loads every
-`.720mod` file in that folder when it starts; `--no-mods` turns them off and `--mod FILE` adds one.
+Run `editor720.exe`. It edits Skate City, the six layouts of each of the four parks and the
+attract-mode screens, and saves your changes as a mod file in the `mods` folder next to the game.
+The game loads every `.720mod` file in that folder when it starts; `--no-mods` turns them off and
+`--mod FILE` adds one.
 
 * **Map.** Click a cell to select it. In *Paint blocks* mode, drag to paint the brush block.
   Right-drag pans, the wheel zooms, middle-click picks up the block under the cursor and a
@@ -58,7 +67,8 @@ attract-mode screens, and saves your changes as a mod file in `Game/mods`. The g
   the tile set used for "bank 1" tiles while that part of the town is on screen.
 * **Tiles.** The tile sheet of the current level. Choose the bank, palette and priority bits of the
   brush here. Tiles 0 to 15 are ground placeholders, which the game replaces with varied ground tiles.
-* **File menu.** *Save mod* (Ctrl+S), *Open mod* to continue editing, *Export map as PNG*.
+* **File menu.** *Save mod* (Ctrl+S), *Open mod* to continue editing, *Export map as PNG* (into
+  the `exports` folder).
   **Play test** (F5) starts the game with your current edits only. Undo and redo are Ctrl+Z / Ctrl+Y.
 
 On its first start the editor runs the game headless for a few seconds to capture the level

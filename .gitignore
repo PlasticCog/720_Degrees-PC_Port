@@ -20,6 +20,11 @@
 # --- build output ---------------------------------------------------------------
 /port/build/
 /build/
+/720degrees.exe
+/editor720.exe
+/SDL3.dll
+/mods/
+/exports/
 __pycache__/
 *.pyc
 /re/ghidra/PDP11/data/languages/*.sla

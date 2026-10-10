@@ -47,16 +47,18 @@ std::string find_roms(const std::string &requested)
 	if (!requested.empty()) return requested;
 	const char *base = SDL_GetBasePath();
 	std::vector<std::string> candidates;
+	// the Game folder next to the program, the program's own folder, then Game folders above
+	// it (for running from the build directory)
 	if (base)
-		for (const char *rel : { "", "Game", "../Game", "../../Game", "rom", "../rom", "../../rom" })
+		for (const char *rel : { "Game", "", "../Game", "../../Game", "../../../Game" })
 			candidates.push_back(std::string(base) + rel);
-	for (const char *rel : { "Game", ".", "rom" }) candidates.push_back(rel);
+	for (const char *rel : { "Game", "." }) candidates.push_back(rel);
 	for (auto &c : candidates)
 	{
 		std::ifstream f(c + "/136047-3126.7lm", std::ios::binary);
 		if (f) return c;
 	}
-	return "rom";
+	return std::string(base ? base : "") + "Game";
 }
 
 std::string pref_file(const char *name)
