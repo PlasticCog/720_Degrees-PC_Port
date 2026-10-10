@@ -153,6 +153,106 @@ int main(int argc, char **argv)
 		printf("wrote %s\n", arg.c_str());
 		return 0;
 	}
+	if (cmd == "pngbanks")
+	{
+		// pngbanks "MAP B0 B1 FILE": render one map (index as in 'stats') with given tile banks
+		int mi = 0, b0 = 0, b1 = 0;
+		char file[512] = "";
+		if (sscanf(arg.c_str(), "%d %d %d %511s", &mi, &b0, &b1, file) != 4 || mi < 0 || mi >= (int)ls.maps.size())
+		{
+			fprintf(stderr, "usage: leveltool pngbanks \"MAP B0 B1 FILE\"\n");
+			return 1;
+		}
+		GfxSet gfx;
+		gfx.decode(rs);
+		const LevelMap &lm = ls.maps[mi];
+		const int W = lm.cols * 128, H = lm.rows * 128;
+		std::vector<uint32_t> img((size_t)W * H);
+		for (int cy = 0; cy < lm.rows; cy++)
+			for (int cx = 0; cx < lm.cols; cx++)
+			{
+				const LevelBlock &b = lm.blocks[lm.cell(cx, cy)];
+				for (int h = 0; h < 2; h++)
+					for (int ty = 0; ty < 8; ty++)
+						for (int tx = 0; tx < 16; tx++)
+						{
+							const uint16_t w = b.half[h].tiles[ty * 16 + tx];
+							const int code = (((((w >> 10) & 1) ? b1 : b0) << 10) | (w & 0x3ff)) & 8191;
+							for (int py = 0; py < 8; py++)
+								for (int px = 0; px < 8; px++)
+									img[(size_t)(cy * 128 + h * 64 + ty * 8 + py) * W + cx * 128 + tx * 8 + px] =
+										level_palette_rgb(lm.palette[128 + ((w >> 11) & 7) * 16 + gfx.tiles[code * 64 + py * 8 + px]]);
+						}
+			}
+		return write_png(file, img.data(), W, H) ? 0 : 1;
+	}
+	if (cmd == "bankscan")
+	{
+		// For each map, try every tile bank for the tiles with the bank bit set (and, separately,
+		// for the others) and count pixels that differ across the edges they share with their
+		// neighbours.  The bank the game really uses gives seamless edges.
+		GfxSet gfx;
+		gfx.decode(rs);
+		for (const auto &lm : ls.maps)
+		{
+			const int W = lm.cols * 16, H = lm.rows * 16;           // map size in tiles
+			std::vector<uint16_t> tw((size_t)W * H);
+			for (int cy = 0; cy < lm.rows; cy++)
+				for (int cx = 0; cx < lm.cols; cx++)
+				{
+					const LevelBlock &b = lm.blocks[lm.cell(cx, cy)];
+					for (int h = 0; h < 2; h++)
+						for (int ty = 0; ty < 8; ty++)
+							for (int tx = 0; tx < 16; tx++)
+								tw[(size_t)(cy * 16 + h * 8 + ty) * W + cx * 16 + tx] = b.half[h].tiles[ty * 16 + tx];
+				}
+			auto score = [&](int which, int bank) {
+				auto pix = [&](uint16_t w, int x, int y) {
+					const int bk = ((w >> 10) & 1) == which ? bank : lm.tile_bank[(w >> 10) & 1];
+					const int code = ((bk << 10) | (w & 0x3ff)) & 8191;
+					return ((w >> 11) & 7) * 16 + gfx.tiles[code * 64 + y * 8 + x];
+				};
+				long bad = 0, edges = 0;
+				for (int y = 0; y < H; y++)
+					for (int x = 0; x < W; x++)
+					{
+						const uint16_t a = tw[(size_t)y * W + x];
+						if ((a & 0x7ff) < 16) continue;                  // ground placeholders
+						if (x + 1 < W)
+						{
+							const uint16_t b = tw[(size_t)y * W + x + 1];
+							if ((b & 0x7ff) >= 16 && ((((a >> 10) & 1) == which) || (((b >> 10) & 1) == which)))
+								for (int i = 0; i < 8; i++, edges++) bad += pix(a, 7, i) != pix(b, 0, i);
+						}
+						if (y + 1 < H)
+						{
+							const uint16_t b = tw[(size_t)(y + 1) * W + x];
+							if ((b & 0x7ff) >= 16 && ((((a >> 10) & 1) == which) || (((b >> 10) & 1) == which)))
+								for (int i = 0; i < 8; i++, edges++) bad += pix(a, i, 7) != pix(b, i, 0);
+						}
+					}
+				return edges ? 100.0 * bad / edges : -1.0;
+			};
+			for (int which = 0; which < 2; which++)
+			{
+				int best = -1;
+				double best_s = 1e9;
+				std::string line;
+				for (int bank = 0; bank < 8; bank++)
+				{
+					const double s = score(which, bank);
+					if (s < 0) continue;
+					char t[32];
+					snprintf(t, sizeof(t), " %d:%.0f", bank, s);
+					line += t;
+					if (s < best_s) { best_s = s; best = bank; }
+				}
+				printf("%-22s bank-%d tiles: current %d, best %d   (%% edge pixels differing:%s)\n",
+					lm.name.c_str(), which, lm.tile_bank[which], best, line.c_str());
+			}
+		}
+		return 0;
+	}
 	if (cmd == "zones")
 	{
 		// zone byte per block half: bits 3+ = playfield tile bank 1, bits 0-2 = switch mode

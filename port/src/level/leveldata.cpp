@@ -176,9 +176,8 @@ bool LevelSet::load(const RomSet &roms, std::string &err)
 		else
 			defs.push_back({lv, 0, r16(b3(0x7F8C) + 2 * lv), m[b3(0x7F9C) + lv], mapbank});
 	}
-	// tile banks when a level starts (FEC2/FECA); the parks then switch bank 1 to the value
-	// in a table indexed by park (bank 3 page 0x3800, 0x567A, bits 3+)
-	const size_t park_bank_tab = (size_t)rom_bank_offset(0x3800) + (0x567A - 0x4000);
+	// tile banks when a level starts (FEC2/FECA).  Checked against the maps with
+	// "leveltool bankscan" and renders: these are the banks every map is drawn with.
 
 	for (const Def &d : defs)
 	{
@@ -254,8 +253,6 @@ bool LevelSet::load(const RomSet &roms, std::string &err)
 		for (int i = 0; i < 16; i++) lm.subst[i] = r16(r16(SUBST_TAB + 2 * d.level) + 2 * i);
 		lm.tile_bank[0] = m[FEC2_BANK0_TAB + d.level] & 15;
 		lm.tile_bank[1] = m[FECA_BANK1_TAB + d.level] & 15;
-		if (d.level >= 1 && d.level <= 4 && park_bank_tab + 2 * d.level < m.size())
-			lm.tile_bank[1] = (m[park_bank_tab + 2 * (d.level - 1)] >> 3) & 15;
 		lm.zone_banks = d.level == 0;
 		memcpy(lm.palette.data(), ri->palette, sizeof(ri->palette));
 		bool any = false;
