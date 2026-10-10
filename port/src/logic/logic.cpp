@@ -148,8 +148,9 @@ void difftest(Slot &s)
 		g_atomic = atomic0;
 		g_atomic_limit = ATOMIC_STEP_LIMIT;
 		s.timeouts++;
-		run(s);
+		// the routine now waits for real: what interrupts call meanwhile is tested as usual
 		g_testing--;
+		run(s);
 	};
 
 	// the original translation, without any replacements

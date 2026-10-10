@@ -1,6 +1,8 @@
 // ref720: headless reference runner used during reverse engineering.
 //   ref720 --roms DIR --frames N [--out DIR] [--png-every K] [--script FILE]
 //          [--coverage FILE] [--sound-coverage FILE] [--ramdump-every K] [--random SEED]
+//          [--poke FRAME:ADDR:VALUE]  (main RAM word, hex address/value; e.g. enter a park:
+//                                      --poke 1200:027A:0101 --poke 1200:0F26:0001)
 // Script lines: "<frame> <input> <value>"  e.g.  "200 coin1 1", "206 coin1 0", "400 rotate 3"
 #include "refmachine.h"
 #include "inputscript.h"
@@ -18,6 +20,8 @@ int main(int argc, char **argv)
 	std::vector<uint16_t> breaks;
 	std::vector<std::pair<uint16_t, uint16_t>> watches;     // --watch A[-B]: log writes to main RAM
 	int watch_from = 0, watch_to = 1 << 30;
+	struct Poke { int frame; uint16_t addr, value; };
+	std::vector<Poke> pokes;
 	for (int i = 1; i < argc; i++)
 	{
 		std::string a = argv[i];
@@ -31,6 +35,13 @@ int main(int argc, char **argv)
 		else if (a == "--coverage") coverage = next();
 		else if (a == "--sound-coverage") sndcov = next();
 		else if (a == "--random") random_play = atoi(next().c_str());
+		else if (a == "--poke")
+		{
+			const std::string v = next();
+			const size_t c1 = v.find(':'), c2 = v.find(':', c1 + 1);
+			pokes.push_back({atoi(v.substr(0, c1).c_str()), (uint16_t)strtol(v.substr(c1 + 1, c2 - c1 - 1).c_str(), nullptr, 16),
+				(uint16_t)strtol(v.substr(c2 + 1).c_str(), nullptr, 16)});
+		}
 		else if (a == "--trace-mem") trace_from = atoi(next().c_str());
 		else if (a == "--break") breaks.push_back((uint16_t)strtol(next().c_str(), nullptr, 16));
 		else if (a == "--break-limit") break_limit = atoi(next().c_str());
@@ -161,6 +172,12 @@ int main(int argc, char **argv)
 		std::string snap;
 		if (trace_from >= 0 && f >= trace_from) tracing = true;
 		cur_frame = f;
+		for (const auto &pk : pokes)
+			if (pk.frame == f && pk.addr < 0x0fff)
+			{
+				m.board.main_ram()[pk.addr] = (uint8_t)pk.value;
+				m.board.main_ram()[pk.addr + 1] = (uint8_t)(pk.value >> 8);
+			}
 		inp.apply(f, m.board.input, snap);
 		if (!snap.empty())
 		{
