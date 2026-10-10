@@ -132,6 +132,73 @@ uint16_t rotary_step(const Args &)
 	return (uint16_t)r0;
 }
 
+
+// B6:72B0 (assembly, self test): fill the playfield with tile 0x0134 and wait for a button
+// press (0x0FE6); each press and release of input bit 0x40 (0x0193) steps the colour 0x1086
+// through the three values at 0x7050.  R0 ends as the colour index, R1 as twice that.
+void selftest_colour_screen()
+{
+	poke(0x0188, 0);
+	pokeb(0x1800, 0);
+	T.icount -= 27 + 27 + 30;
+	call(0x8068, {});                                  // select_video_bank0
+	poke(0x1100, 0);
+	for (uint16_t a = 0x2000; a <= 0x37FE; a = (uint16_t)(a + 2)) poke(a, 0x0134);
+	T.icount -= 27 + 18 + 0x0C00 * (27 + 18 + 12) + 18;
+	uint16_t r0 = 0xFFFF;
+	for (;;)
+	{
+		r0++;
+		T.icount -= 12 + 18 + 12;
+		if ((int16_t)r0 > 2)
+		{
+			r0 = 0;
+			T.icount -= 12;
+		}
+		T.r[0] = r0;
+		T.r[1] = (uint16_t)(r0 * 2);
+		poke(0x1086, peek((uint16_t)(0x7050 + T.r[1])));
+		T.icount -= 12 + 12 + 42;
+		for (;;)
+		{
+			if (peekb(0x0193) & 0x40)
+			{
+				T.icount -= 30 + 12;
+				break;
+			}
+			if (peekb(0x0FE6))
+			{
+				T.icount -= 30 + 12 + 24 + 12 + 27;
+				pokeb(0x0FE6, 0);
+				fl::clr();
+				return;
+			}
+			tick(0x72E6, 30 + 12 + 24 + 12);
+		}
+		while (peekb(0x0193) & 0x40) tick(0x72FA, 30 + 12 + 12);
+		T.icount -= 30 + 12;
+	}
+}
+
+// F:F896  rotary_zone_step(int vertical): -0x40 / +0x40 / 0 from the controller angle
+// 0x01C6 (0..143): one direction for the angles around one end of the chosen axis, the other
+// for the opposite end; 0 in between or while 0x0FE7 counts down
+uint16_t rotary_zone_step(const Args &a)
+{
+	if (peekb(0x0FE7)) return 0;
+	const int16_t r = (int16_t)peek(0x01C6);
+	if (a.u(0) == 0)
+	{
+		if (r > 0x09 && r < 0x3F) return 0x0040;
+		if (r <= 0x51 || r >= 0x87) return 0;
+		return 0xFFC0;
+	}
+	if (r > 0x2D && r < 0x63) return 0xFFC0;
+	if (r < 0x1B) return 0x0040;
+	if (r <= 0x75) return 0;
+	return 0x0040;
+}
+
 }
 
 LOGIC_TABLE(boot,
@@ -142,6 +209,8 @@ LOGIC_TABLE(boot,
 	asm_routine("F", 0xF4C0, "print_ok", print_ok, 291),
 	c_routine("F", 0xF8EA, "button_hold_timer", button_hold_timer, 0, 456),
 	c_routine("F", 0x8E2E, "rotary_step", rotary_step, 0, 230),
+	wait_routine("B6", 0x72B0, "selftest_colour_screen", selftest_colour_screen, 21),
+	c_routine("F", 0xF896, "rotary_zone_step", rotary_zone_step, 0, 111),
 )
 
 }

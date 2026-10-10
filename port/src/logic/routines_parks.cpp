@@ -117,6 +117,59 @@ uint16_t a7_50c8(const Args &)
 	return r0;
 }
 
+
+// F:DA02  open_park_gate(int park): sound 0x62; the gate object of the park (slot whose
+// 0x0AF8 word is the park's entry at 0x70E8 in bank B 0x0400, with bit 15) starts its
+// animation (0x0430 = 1); the park is marked open in 0x0EA4.  Banks are restored.
+uint16_t open_park_gate(const Args &a)
+{
+	KeepRegs keep(3);
+	const uint16_t bank_a = peek(0x01D2), bank_b = peek(0x01D4);
+	poke(0x01D2, 0);
+	poke(0x1400, 0);
+	poke(0x01D4, 0x0400);
+	poke(0x1402, 0x0400);
+	T.r[0] = 0x0400;
+	call(0x8E78, {0x0062});                            // queue_sound
+	const uint16_t park = a.u(0);
+	const uint16_t id = (uint16_t)(peek((uint16_t)(0x70E8 + park * 2)) | 0x8000);
+	uint16_t r0 = call(0xCDD0, {0xFFFF, id});          // find_slot_with
+	if ((int16_t)r0 >= 0)
+	{
+		r0 = (uint16_t)((uint16_t)(int16_t)(int8_t)peekb((uint16_t)(0x09B8 + r0)) & 0x3F);
+		r0 = (uint16_t)(r0 * 2);
+		poke((uint16_t)(0x0430 + r0), 0x0001);
+	}
+	pokeb(0x0EA4, peekb(0x0EA4) | peekb((uint16_t)(0xFC74 + park)));
+	poke(0x01D2, bank_a);
+	poke(0x01D4, bank_b);
+	poke(0x1400, peek(0x01D2));
+	poke(0x1402, peek(0x01D4));
+	return r0;
+}
+
+// B3:6E38: medal level of the value 0x0258 against the thresholds 0x0FDA/0x0FDC/0x0FDE
+// (3 -> 0xC0, 2 -> 0x80, 1 -> 0x40, none -> 0) into the byte 0x0262 + 0x0F31; bank A 0x3800.
+// Returns 0x0F31 when a level was reached, else 0x3800.
+uint16_t set_medal_level(const Args &)
+{
+	const int16_t v = (int16_t)peek(0x0258);
+	if (v > 0)
+		for (int i = 3; i >= 1; i--)
+			if (v >= (int16_t)peek((uint16_t)(0x0FD8 + 2 * i)))
+			{
+				const uint16_t slot = peekb(0x0F31);
+				pokeb((uint16_t)(0x0262 + slot), (uint8_t)(i << 6));
+				poke(0x01D2, 0x3800);
+				poke(0x1400, 0x3800);
+				return slot;
+			}
+	pokeb((uint16_t)(0x0262 + peekb(0x0F31)), 0);
+	poke(0x01D2, 0x3800);
+	poke(0x1400, 0x3800);
+	return 0x3800;
+}
+
 }
 
 LOGIC_TABLE(parks,
@@ -129,6 +182,8 @@ LOGIC_TABLE(parks,
 	c_routine("F", 0xCDD0, "find_slot_with", find_slot_with, 0, 2769),
 	c_routine("F", 0xE106, "call_cf5e_keep_banks", call_cf5e_keep_banks, 0, 441),
 	c_routine("A7", 0x50C8, "a7_50c8", a7_50c8, 0, 99),
+	c_routine("F", 0xDA02, "open_park_gate", open_park_gate, 0, 897),
+	c_routine("B3", 0x6E38, "set_medal_level", set_medal_level, 0, 548),
 )
 
 }

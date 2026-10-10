@@ -106,6 +106,47 @@ void irq_32v_play()
 	for (int i = 0; i < 6; i++) T.r[i] = saved[i];
 }
 
+
+// F:DD10 (assembly): while 0x0EA9 counts down (every fourth frame) the colours 0x11C2-0x11C6
+// rotate through the four at 0x7A9A; at 0 they are restored from 0x7E6C
+void flash_text_colours()
+{
+	const uint8_t n = peekb(0x0EA9);
+	if (!n)
+	{
+		fl::tstb(n);
+		return;
+	}
+	const uint16_t phase = peek(0x01C4) & 0x0003;
+	fl::mov(phase);
+	if (phase) return;
+	pokeb(0x0EA9, (uint8_t)(n - 1));
+	T.r[3] = peekb(0x0EA9);
+	uint16_t v = 0;
+	if (T.r[3] == 0)
+	{
+		for (int i = 3; i >= 1; i--)
+		{
+			T.r[0] = (uint16_t)(i * 2);
+			v = peek((uint16_t)(0x7E6C + T.r[0]));
+			poke((uint16_t)(0x11C0 + T.r[0]), v);
+		}
+		T.r[1] = 0;
+	}
+	else
+	{
+		for (int i = 3; i >= 1; i--)
+		{
+			T.r[2] = (uint16_t)(i * 2);
+			T.r[0] = (uint16_t)(((T.r[3] + i - 1) & 3) * 2);
+			v = peek((uint16_t)(0x7A9A + T.r[0]));
+			poke((uint16_t)(0x11C0 + T.r[2]), v);
+		}
+		T.r[1] = 0;
+	}
+	f_nzvc(nzw(v));
+}
+
 }
 
 LOGIC_TABLE(screen,
@@ -113,6 +154,7 @@ LOGIC_TABLE(screen,
 	asm_routine("F", 0x8D2C, "clear_playfield_ram", clear_playfield_ram, 156741),
 	asm_routine("F", 0x8D3E, "clear_text_ram", clear_text_ram, 52293),
 	irq_routine("F", 0xB9D4, "irq_32v_play", irq_32v_play, 617),
+	asm_routine("F", 0xDD10, "flash_text_colours", flash_text_colours, 57),
 )
 
 }
