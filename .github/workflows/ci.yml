@@ -1,0 +1,64 @@
+# Builds everything that does not need the arcade ROMs (board model, reference CPUs, level
+# library, tools, Dear ImGui with SDL3) on Windows, Linux and macOS, and runs the coroutine
+# self-test that the translated game relies on.  The game itself is translated from the
+# user's ROMs at build time, so it cannot be built here.
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  portable:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Linux x86-64, os: ubuntu-24.04 }
+          - { name: Linux ARM64, os: ubuntu-24.04-arm }
+          - { name: macOS Apple Silicon, os: macos-14 }
+          - { name: macOS Intel, os: macos-15-intel }
+          - { name: Windows MSVC, os: windows-2022 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxi-dev libxss-dev libxtst-dev libxfixes-dev libwayland-dev libxkbcommon-dev \
+            libegl1-mesa-dev libasound2-dev libpulse-dev libudev-dev libdbus-1-dev
+
+      - name: Install build tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Configure
+        if: runner.os != 'Windows'
+        run: cmake -S port -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DD720_GAME=OFF -DD720_OUTPUT_DIR=${{ github.workspace }}/out
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: cmake -S port -B build -DD720_GAME=OFF -DD720_OUTPUT_DIR=${{ github.workspace }}/out
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Coroutine self-test
+        shell: bash
+        run: |
+          if [ -f build/Release/coro_test.exe ]; then build/Release/coro_test.exe; else build/coro_test; fi
+
+      - name: Tools start
+        shell: bash
+        run: |
+          if [ -f build/Release/leveltool.exe ]; then T=build/Release; else T=build; fi
+          # without ROMs the tools must fail cleanly with a message, not crash
+          set +e
+          $T/leveltool --roms nonexistent stats; code=$?
+          set -e
+          test $code -eq 1
