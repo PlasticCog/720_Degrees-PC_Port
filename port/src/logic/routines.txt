@@ -97,3 +97,6 @@ A7:43C0 insert_high_score
 A7:5684 find_collision
 A7:50F8 fallen_skater
 A7:4B3E poll_sound_status
+A5:454A scan_zone_switches
+A7:538E terrain_event
+A7:572A shapes_touch

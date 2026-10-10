@@ -1060,33 +1060,614 @@ uint16_t poll_sound_status(const Args &)
 	return r0;
 }
 
+// ---------------------------------------------------------------- zone switches while scrolling
+
+// A5:454A (assembly): Skate City zone switches.  When the scroll position (0x01AA, 0x01A8)
+// enters another 512-pixel row or column (last ones in 0x0F52/0x0F54), the zone bytes of the
+// cells along the new edge (8 x 8 table at 0x0F60; row 0x0232, column 0x0234 within the
+// cell) are checked with A5:43F8-44EC and their own conditions, until one switches the
+// tile bank (F:EEE6 counts it in 0x0236).  The modes of the zone byte that jump into the
+// middle of an instruction or outside the routine (not used by the game) do nothing here.
+// Registers end as the original leaves them; the flags are those of the final ADD to SP.
+void scan_zone_switches()
+{
+	const uint16_t E = T.r[6];
+	const uint16_t L0 = (uint16_t)(E - 8), L2 = (uint16_t)(E - 6), L4 = (uint16_t)(E - 4), L6 = (uint16_t)(E - 2);
+	T.r[6] = L0;
+	auto finish = [&]() { T.r[6] = fl::add(T.r[6], 0x0008); };
+	auto finish_pop = [&]() { T.r[6] = (uint16_t)(T.r[6] + 2); finish(); };
+	auto zone_at = [&](uint16_t i) -> uint16_t { return peekb((uint16_t)(0x0F60 + i)); };
+	auto set_bank = [&]() { T.r[0] = call(0xEEE6, {}); };   // set_tile_bank(stack word)
+	T.r[0] = peek(0x01AA);
+	T.r[2] = T.r[0] & ~0x01FF;
+	T.r[5] = 0;
+	if (T.r[2] != peek(0x0F52))
+		T.r[5] = 1;
+	else
+	{
+		T.r[1] = peek(0x01A8) & ~0x01FF;
+		if (T.r[1] == peek(0x0F54))
+		{
+			finish();
+			return;
+		}
+	}
+	poke(0x0236, 0);
+	T.r[4] = asr(T.r[0], 9);
+	poke(0x0232, T.r[4] & 7);
+	T.r[1] = asr(T.r[4], 3);
+	T.r[4] = T.r[1] & 7;
+	T.r[3] = asr(peek(0x01A8), 9);
+	poke(0x0234, T.r[3] & 0x000F);
+	T.r[1] = asr(T.r[3], 4);
+	const bool carry = (T.r[3] >> 3) & 1;             // shifted out by the last ASR
+	T.r[3] = T.r[1] & 7;
+	const bool row_changed = T.r[5] & 1;
+	T.r[5] = (uint16_t)((carry ? 0x8000 : 0) | (T.r[5] >> 1));   // ROR
+	if (row_changed)
+	{
+		poke(L2, (uint16_t)(T.r[0] - peek(0x0F52)));
+		poke(0x0F52, T.r[2]);
+		poke(L0, (uint16_t)(T.r[3] + 4));
+		if ((int16_t)peek(L2) < 0)
+		{
+			poke(L6, (uint16_t)(T.r[4] << 3));
+			T.r[0] = (uint16_t)(T.r[3] + peek(L6));
+			push(zone_at(T.r[0]));
+			T.r[0] = call(0x43F8, {});                 // zone_switch_a
+			if (peek(0x0236)) { finish_pop(); return; }
+			T.r[2] = peek(L6);
+			T.r[1] = 3;
+			do
+			{
+				T.r[0] = (uint16_t)(((T.r[1] + T.r[3]) & 7) + T.r[2]);
+				T.r[5] = zone_at(T.r[0]);
+				T.r[0] = (uint16_t)((T.r[5] & 7) << 1);
+				bool sw = false;
+				switch (T.r[5] & 7)
+				{
+				case 1: case 2: case 5: sw = true; break;
+				case 3: case 4: case 7: sw = (int16_t)peek(0x0232) < 7; break;
+				default: break;                        // 0, 6: no switch
+				}
+				if (sw)
+				{
+					poke(T.r[6], T.r[5]);
+					set_bank();
+				}
+				if (peek(0x0236)) { finish_pop(); return; }
+			} while (--T.r[1]);
+			T.r[0] = (uint16_t)((peek(L0) & 7) + peek(L6));
+			poke(T.r[6], zone_at(T.r[0]));
+			T.r[0] = call(0x4442, {});                 // zone_switch_b
+		}
+		else
+		{
+			T.r[0] = peek(0x0232) ? 6 : 5;
+			T.r[0] = (uint16_t)(T.r[0] + T.r[4]);
+			T.r[1] = T.r[0] & 7;
+			poke(L6, (uint16_t)(T.r[1] << 3));
+			T.r[0] = (uint16_t)(T.r[3] + peek(L6));
+			push(zone_at(T.r[0]));
+			T.r[0] = call(0x4496, {});                 // zone_switch_c
+			if (peek(0x0236)) { finish_pop(); return; }
+			T.r[2] = peek(L6);
+			poke(L4, 1);
+			do
+			{
+				T.r[0] = (uint16_t)(((T.r[3] + peek(L4)) & 7) + T.r[2]);
+				T.r[5] = zone_at(T.r[0]);
+				T.r[0] = (uint16_t)((T.r[5] & 7) << 1);
+				bool sw = false;
+				switch (T.r[5] & 7)
+				{
+				case 1: case 2: sw = peek(0x0232) != 1; break;
+				case 3: case 4: case 5: case 7: sw = true; break;
+				default: break;                        // 0, and 6 (enters an instruction): no switch
+				}
+				if (sw)
+				{
+					poke(T.r[6], T.r[5]);
+					set_bank();
+				}
+				if (peek(0x0236)) { finish_pop(); return; }
+				poke(L4, (uint16_t)(peek(L4) + 1));
+			} while ((int16_t)peek(L4) <= 3);
+			T.r[0] = (uint16_t)((peek(L0) & 7) + peek(L6));
+			poke(T.r[6], zone_at(T.r[0]));
+			T.r[0] = call(0x44EC, {});                 // zone_switch_d
+		}
+		if (peek(0x0236)) { finish_pop(); return; }
+		T.r[6] = (uint16_t)(T.r[6] + 2);
+	}
+	T.r[0] = peek(0x01A8) & ~0x01FF;
+	if (T.r[0] == peek(0x0F54))
+	{
+		finish();
+		return;
+	}
+	T.r[5] = (uint16_t)(peek(0x01A8) - peek(0x0F54));
+	poke(0x0F54, T.r[0]);
+	poke(L6, (uint16_t)(T.r[4] << 3));
+	if ((int16_t)T.r[5] < 0)
+	{
+		if (!((int16_t)peek(L2) > 0))
+		{
+			T.r[0] = (uint16_t)((T.r[4] << 3) + T.r[3]);
+			push(zone_at(T.r[0]));
+			T.r[0] = call(0x43F8, {});                 // zone_switch_a
+			T.r[6] = (uint16_t)(T.r[6] + 2);
+		}
+		T.r[2] = (uint16_t)(T.r[3] + peek(L6));
+		poke(L4, 5);
+		do
+		{
+			T.r[0] = (uint16_t)(T.r[2] + 8);
+			T.r[2] = T.r[0] & 0x003F;
+			T.r[5] = zone_at(T.r[2]);
+			T.r[0] = (uint16_t)((T.r[5] & 7) << 1);
+			const uint16_t mode = T.r[5] & 7;
+			bool sw = false;
+			switch (mode)
+			{
+			case 1: case 3: case 5: sw = true; break;
+			case 2: case 4: case 7: sw = (int16_t)peek(0x0234) < 14; break;
+			default: break;                            // 0: no switch, 6: also skips the check
+			}
+			if (sw)
+			{
+				push(T.r[5]);
+				set_bank();
+				T.r[6] = (uint16_t)(T.r[6] + 2);
+			}
+			if (mode != 6 && peek(0x0236)) { finish(); return; }
+			poke(L4, (uint16_t)(peek(L4) - 1));
+		} while (peek(L4));
+		if ((int16_t)peek(L2) < 0) { finish(); return; }
+		T.r[0] = (uint16_t)((((T.r[4] + 6) << 3) & 0x0038) + T.r[3]);
+		push(zone_at(T.r[0]));
+		T.r[0] = call(0x4496, {});                     // zone_switch_c
+		finish_pop();
+		return;
+	}
+	T.r[0] = (uint16_t)((peek(0x0234) ? 4 : 3) + T.r[3]);
+	T.r[1] = T.r[0] & 7;
+	if (!((int16_t)peek(L2) > 0))
+	{
+		T.r[0] = (uint16_t)((T.r[4] << 3) + T.r[1]);
+		push(zone_at(T.r[0]));
+		T.r[0] = call(0x4442, {});                     // zone_switch_b
+		if (peek(0x0236)) { finish_pop(); return; }
+		T.r[6] = (uint16_t)(T.r[6] + 2);
+	}
+	T.r[2] = (uint16_t)(T.r[1] + peek(L6));
+	T.r[3] = 5;
+	do
+	{
+		T.r[0] = (uint16_t)(T.r[2] + 8);
+		T.r[2] = T.r[0] & 0x003F;
+		T.r[5] = zone_at(T.r[2]);
+		T.r[0] = (uint16_t)((T.r[5] & 7) << 1);
+		bool sw = false;
+		switch (T.r[5] & 7)
+		{
+		case 1: case 3: sw = (int16_t)peek(0x0234) > 2 || peek(0x0234) == 0; break;
+		case 2: case 4: case 5: sw = true; break;
+		default: break;                                // 0, and 6/7 (outside the routine): no switch
+		}
+		if (sw)
+		{
+			push(T.r[5]);
+			set_bank();
+			T.r[6] = (uint16_t)(T.r[6] + 2);
+		}
+		if (peek(0x0236)) { finish(); return; }
+	} while (--T.r[3]);
+	if ((int16_t)peek(L2) < 0) { finish(); return; }
+	T.r[4] = (uint16_t)((((T.r[4] + 6) << 3) & 0x0038) + T.r[1]);
+	push(zone_at(T.r[4]));
+	T.r[0] = call(0x44EC, {});                         // zone_switch_d
+	finish_pop();
+}
+
+// ---------------------------------------------------------------- terrain events
+
+// A7:538E: the terrain event 0x032A (1-25, jump table at 0x55AC) the skater has reached:
+// shops and park entrances (1-8, 20-23), jumps (11/18: sound and F:B602 into the air),
+// tickets (17), flags 0x0F27/0x0F28 (9/10), 0x0ED4 (13/14) and others.  Values above 25 jump
+// into the next routine in the original and are not used; they do nothing here.  R1 is
+// preserved; R0 is returned as the original leaves it.
+uint16_t terrain_event(const Args &)
+{
+	const uint16_t saved_r1 = T.r[1];
+	T.r[0] = sext8(peekb(0x032A));
+	if ((int16_t)T.r[0] <= 0) return T.r[0];
+	const uint16_t ev = T.r[0];
+	T.r[0] = (uint16_t)((T.r[0] - 1) << 1);
+	switch (ev)
+	{
+	case 1: case 2: case 3: case 4:
+	{
+		T.r[0] = call(0x5360, {});
+		pokeb(0x027A, (uint8_t)T.r[0]);
+		T.r[1] = T.r[0] & 0x00FF;
+		if (peekb(0x0EA4) & rb((uint16_t)(0xFC74 + T.r[1]))) break;
+		T.r[0] = (peek(0x0ED6) | peekb(0x0F29)) & 0x00FF;
+		if (T.r[0] & rb((uint16_t)(0xFC74 + T.r[1]))) break;
+		bool other_park = false;
+		if (peekb(0x01F6) && peekb(0x0F2B) == 1)
+		{
+			T.r[0] = peekb(0x02B8);
+			other_park = T.r[1] != T.r[0];
+		}
+		if (other_park)
+		{
+			push(0x75F4);
+			push(0x00B4);
+			push(0x0001);
+			T.r[0] = call(0xA974, {});
+			T.r[6] = (uint16_t)(T.r[6] + 2);
+		}
+		else if (!peekb(0x025B))
+		{
+			pokeb(0x0EA6, 1);
+			poke(0x0EAA, 0x00B4);
+			push((uint16_t)(T.r[1] + 4));
+			push(0x0001);
+			T.r[0] = call(0xD97C, {});
+			T.r[0] = call(0x9152, {}) & 0x0003;          // next_random
+			poke(T.r[6], rb((uint16_t)(0xFE2A + T.r[0])));
+			T.r[0] = call(0x8E78, {});                     // queue_sound
+		}
+		else
+		{
+			push(0xFFFF);
+			T.r[0] = call(0x72CA, {});
+			pokeb(0x0279, (uint8_t)(peekb(0x0279) | 1));
+			poke(T.r[6], (uint16_t)(peekb(0x027A) + 4));
+			push(0x0000);
+			T.r[0] = call(0xD97C, {});
+			poke(T.r[6], peekb(0x027A));
+			T.r[0] = call(0xDA02, {});
+			T.r[0] = call(0x50C8, {});
+		}
+		T.r[0] = peekb(0x027A);
+		pokeb(0x0ED6, (uint8_t)(peekb(0x0ED6) | rb((uint16_t)(0xFC74 + T.r[0]))));
+		T.r[6] = (uint16_t)(T.r[6] + 4);
+		break;
+	}
+	case 5: case 6: case 7: case 8:
+		T.r[1] = (sext8(peekb(0x0ED7)) | peekb(0x0ED8)) & 0x00FF;
+		T.r[0] = call(0x5326, {});
+		if (!(T.r[1] & rb((uint16_t)(0xFC74 + T.r[0])))) pokeb(0x0ED7, (uint8_t)(peekb(0x0ED7) | 0x10));
+		break;
+	case 9:
+		pokeb(0x0F27, 1);
+		break;
+	case 10:
+		pokeb(0x0F28, 1);
+		break;
+	case 11: case 18:
+		if (!peekb(0x01EA))
+			poke(0x0FB2, (uint16_t)(peek(0x0FB2) + 1));
+		else if (peekb(0x031F) != 5)
+		{
+			push(0x0053);
+			T.r[0] = call(0x8E78, {});                     // queue_sound
+			T.r[0] = 0x1C00;
+			set_bank_b(0x1C00);
+			T.r[0] = call(0x78E4, {});
+			if (peekb(0x032A) == 0x12)
+			{
+				poke(T.r[6], 0x0069);
+				T.r[0] = call(0x8E78, {});
+				poke(0x03B4, 0x57A8);
+			}
+			else
+			{
+				poke(T.r[6], 0x006A);
+				T.r[0] = call(0x8E78, {});
+				poke(0x03B4, 0x57AA);
+			}
+			poke(0x03B2, 0x50FA);
+			poke(T.r[6], 0x0002);
+			push(0x0012);
+			T.r[0] = call(0xB602, {});
+			T.r[6] = (uint16_t)(T.r[6] + 4);
+		}
+		pokeb(0x032A, 0);
+		break;
+	case 13:
+		poke(0x0ED4, 0x7800);
+		break;
+	case 14:
+		poke(0x0ED4, 0x5800);
+		break;
+	case 16:
+		T.r[0] = (uint16_t)(peek(0x0F32) + 1);
+		if ((int16_t)T.r[0] < (int16_t)peek(0x099A))
+		{
+			poke(0x0F32, peek(0x099A));
+			T.r[0] = call(0x7A9E, {});
+		}
+		break;
+	case 17:
+		if (!peekb(0x01EA) || peekb(0x018F) > 1) break;
+		T.r[0] = call(0x52FC, {});                         // difficulty_step
+		T.r[0] = rb((uint16_t)(0xFC74 + T.r[0]));
+		if (peekb(0x0F2A) & T.r[0]) break;
+		pokeb(0x0F36, 1);
+		T.r[1] = sext8(peekb(0x0F2A)) | T.r[0];
+		pokeb(0x0F2A, (uint8_t)T.r[1]);
+		pokeb(0x0F2A, (uint8_t)(peekb(0x0F2A) | 0x80));
+		break;
+	case 19:
+		if (!peekb(0x01EA) || peekb(0x0F26) >= 5 || peekb(0x031F) == 5) break;
+		T.r[0] = 0x1C00;
+		set_bank_b(0x1C00);
+		T.r[0] = call(0x78E4, {});
+		break;
+	case 20: case 21: case 22: case 23:
+		T.r[0] = call(0x5360, {});
+		pokeb(0x027A, (uint8_t)T.r[0]);
+		T.r[0] = peekb(0x027A);
+		if (!(peekb(0x0EA4) & rb((uint16_t)(0xFC74 + T.r[0])))) break;
+		push(0x0053);
+		T.r[0] = call(0x8E78, {});
+		pokeb(0x0F26, 1);
+		T.r[6] = (uint16_t)(T.r[6] + 2);
+		break;
+	default:                                               // 12, 15, 24, 25 and unused values
+		break;
+	}
+	T.r[1] = saved_r1;
+	return T.r[0];
+}
+
+// ---------------------------------------------------------------- collisions
+
+// A7:572A (assembly)  shapes_touch(int dy, int obj2, ...): pixel test of the skater's shape
+// against object obj2 / 2 where their boxes overlap.  The shapes are 16-pixel-wide bit masks
+// (one word per line) before the box descriptors (0x023A for the skater, 0x03F0[obj] for the
+// object); B8:7DB8 shifts a mask word by R1 pixels.  0x0230 gets the number of overlapping
+// lines, 0x0232 the horizontal shift, 0x0234/0x0236 the object's width/height in pixels / 256.
+// Objects wider than 32 pixels are only partly handled, as in the original.  R0 = 1 when
+// the shapes touch.  Registers end as the original leaves them.
+void shapes_touch()
+{
+	const uint16_t E = T.r[6];
+	const uint16_t L0 = (uint16_t)(E - 6), L2 = (uint16_t)(E - 4), L4 = (uint16_t)(E - 2);
+	const uint16_t OX = (uint16_t)(E - 8), SX = (uint16_t)(E - 10), S0 = (uint16_t)(E - 12);
+	T.r[6] = L0;
+	auto shift = [&](uint16_t mask, uint16_t n) { T.r[0] = mask; T.r[1] = n; call(0x7DB8, {}); };
+	T.r[0] = peek((uint16_t)(E + 4));
+	T.r[2] = peek((uint16_t)(E + 2));
+	T.r[1] = peek((uint16_t)(0x03F0 + T.r[0]));
+	T.r[3] = (uint16_t)(peek((uint16_t)(0x0630 + T.r[0])) + peek(T.r[1]));
+	push(T.r[3]);                                      // OX: object left
+	T.r[4] = peek(0x023A);
+	push(peek(T.r[4]));
+	poke(SX, (uint16_t)(peek(SX) + peek(0x0630)));     // SX: skater left
+	push(T.r[3]);
+	poke(S0, (uint16_t)(peek(S0) - peek(SX)));
+	T.r[3] = peek(S0);
+	poke(0x0234, asr(peek((uint16_t)(T.r[1] + 4)), 8));
+	poke(0x0236, (uint16_t)(asr(peek((uint16_t)(T.r[1] + 6)), 8) << 1));
+	poke(L4, (uint16_t)(peek((uint16_t)(T.r[4] + 2)) + peek(0x0238)));   // skater top
+	T.r[5] = (uint16_t)(peek(L4) + peek((uint16_t)(T.r[4] + 6)));
+	const uint16_t oy = (uint16_t)(peek((uint16_t)(0x0670 + T.r[0])) + peek((uint16_t)(T.r[1] + 2)));
+	ww((uint16_t)(E - 14), oy);                        // pushed and popped
+	poke(L2, oy);                                      // object top
+	T.r[0] = (uint16_t)(peek(L2) + peek((uint16_t)(T.r[1] + 6)));
+	if (!((int16_t)T.r[5] >= (int16_t)T.r[0])) T.r[0] = T.r[5];
+	poke(0x0230, T.r[0]);
+	poke(L0, peek(L4));
+	T.r[0] = (uint16_t)(peek(L0) - peek(L2));
+	if (!(T.r[0] & 0x8000))
+	{
+		T.r[3] = (uint16_t)(T.r[4] - 2);
+		poke(L4, 0);
+		T.r[5] = (uint16_t)(T.r[0] + 0x0100);
+		T.r[0] = asr(T.r[5], 8);
+		T.r[5] = (uint16_t)(T.r[0] << 1);
+		T.r[2] = (uint16_t)(T.r[1] - T.r[5]);
+		T.r[0] = (uint16_t)(peek(0x0230) - peek(L0) + 0x00C0);
+		poke(0x0230, asr(T.r[0], 8));
+		poke(0x0232, peek(S0));
+	}
+	else
+	{
+		T.r[3] = (uint16_t)(T.r[1] - 2);
+		poke(L4, 1);
+		T.r[5] = (uint16_t)(0x0100 - T.r[0]);
+		T.r[0] = (uint16_t)(asr(T.r[5], 8) << 1);
+		T.r[2] = (uint16_t)(T.r[4] - T.r[0]);
+		T.r[0] = (uint16_t)(peek(0x0230) - peek(L2) + 0x00C0);
+		poke(0x0230, asr(T.r[0], 8));
+		poke(0x0232, (uint16_t)(peek(SX) - peek(OX)));
+	}
+	T.r[0] = peek(0x0232);
+	T.r[4] = peek(0x0234);
+	bool hit = false;
+	if (!((int16_t)T.r[4] > 0x10))
+	{
+		const bool left = (int16_t)T.r[0] < 0;
+		if (left) T.r[1] = (uint16_t)-T.r[0];
+		poke(0x0232, asr(left ? T.r[1] : T.r[0], 8));
+		T.r[5] = peek(0x0230);
+		if ((int16_t)T.r[5] > 0)
+			do
+			{
+				if (left)
+				{
+					shift(peek(T.r[2]), peek(0x0232));
+					hit = (peek(T.r[3]) & T.r[0]) != 0;
+				}
+				else
+				{
+					shift(peek(T.r[3]), peek(0x0232));
+					hit = (T.r[0] & peek(T.r[2])) != 0;
+				}
+				if (hit) break;
+				T.r[3] = (uint16_t)(T.r[3] - 2);
+				T.r[2] = (uint16_t)(T.r[2] - 2);
+			} while (--T.r[5]);
+	}
+	else
+	{
+		poke(OX, T.r[3]);
+		poke(L0, T.r[2]);
+		poke(0x0232, asr(T.r[0], 8));
+		T.r[0] = peek(0x0232);
+		T.r[1] = (uint16_t)(T.r[4] - 0x0010);
+		if (peek(L4))
+		{
+			T.r[5] = (uint16_t)(T.r[0] - T.r[1]);
+			if ((int16_t)T.r[4] > 0x20)
+			{
+				poke(L2, T.r[5]);
+				T.r[5] = (uint16_t)(T.r[5] + 0x0010);
+			}
+		}
+		else
+		{
+			T.r[5] = (uint16_t)(T.r[1] + T.r[0]);
+			if ((int16_t)T.r[4] > 0x20)
+			{
+				poke(L2, T.r[5]);
+				T.r[5] = (uint16_t)(T.r[5] - 0x0010);
+			}
+		}
+		if ((int16_t)T.r[0] < 0) T.r[0] = (uint16_t)-T.r[0];
+		if ((int16_t)T.r[0] < 0x10)
+		{
+			poke(S0, (int16_t)T.r[4] > 0x20 ? (uint16_t)(peek(0x0236) << 1) : peek(0x0236));
+			poke(SX, peek(0x0230));
+			if ((int16_t)peek(SX) > 0)
+				do
+				{
+					if (peek(L4))
+					{
+						T.r[4] = (uint16_t)(T.r[3] - peek(S0));
+						shift(peek(T.r[4]), peek(0x0232));
+						hit = (T.r[0] & peek(T.r[2])) != 0;
+					}
+					else
+					{
+						shift(peek(T.r[3]), peek(0x0232));
+						T.r[1] = T.r[0];
+						T.r[0] = (uint16_t)(T.r[2] - peek(S0));
+						hit = (T.r[1] & peek(T.r[0])) != 0;
+					}
+					if (hit) break;
+					T.r[3] = (uint16_t)(T.r[3] - 2);
+					T.r[2] = (uint16_t)(T.r[2] - 2);
+					poke(SX, (uint16_t)(peek(SX) - 1));
+				} while (peek(SX));
+			if (!hit)
+			{
+				T.r[3] = peek(OX);
+				T.r[2] = peek(L0);
+			}
+		}
+		if (!hit)
+		{
+			T.r[0] = (int16_t)T.r[5] < 0 ? (uint16_t)-T.r[5] : T.r[5];
+			if ((int16_t)T.r[0] < 0x10)
+			{
+				if ((int16_t)peek(0x0234) > 0x20)
+				{
+					poke(SX, peek(0x0230));
+					if ((int16_t)peek(SX) > 0)
+						do
+						{
+							if (peek(L4))
+							{
+								T.r[4] = (uint16_t)(T.r[3] - peek(0x0236));
+								shift(peek(T.r[4]), T.r[5]);
+								hit = (T.r[0] & peek(T.r[2])) != 0;
+							}
+							else
+							{
+								shift(peek(T.r[3]), T.r[5]);
+								T.r[1] = T.r[0];
+								T.r[0] = (uint16_t)(T.r[2] - peek(0x0236));
+								hit = (T.r[1] & peek(T.r[0])) != 0;
+							}
+							if (hit) break;
+							T.r[3] = (uint16_t)(T.r[3] - 2);
+							T.r[2] = (uint16_t)(T.r[2] - 2);
+							poke(SX, (uint16_t)(peek(SX) - 1));
+						} while (peek(SX));
+				}
+				else
+				{
+					T.r[4] = peek(0x0230);
+					if ((int16_t)T.r[4] > 0)
+						do
+						{
+							shift(peek(T.r[3]), T.r[5]);
+							hit = (T.r[0] & peek(T.r[2])) != 0;
+							if (hit) break;
+							T.r[3] = (uint16_t)(T.r[3] - 2);
+							T.r[2] = (uint16_t)(T.r[2] - 2);
+						} while (--T.r[4]);
+				}
+				if (!hit)
+				{
+					T.r[3] = peek(OX);
+					T.r[2] = peek(L0);
+				}
+			}
+		}
+		if (!hit && (int16_t)peek(L2) > (int16_t)0xFFF0 && (int16_t)peek(0x0234) > 0x20)
+		{
+			T.r[4] = peek(0x0230);
+			if ((int16_t)T.r[4] > 0)
+				do
+				{
+					shift(peek(T.r[3]), peek(L2));
+					hit = (T.r[0] & peek(T.r[2])) != 0;
+					if (hit) break;
+					T.r[3] = (uint16_t)(T.r[3] - 2);
+					T.r[2] = (uint16_t)(T.r[2] - 2);
+				} while (--T.r[4]);
+		}
+	}
+	T.r[0] = hit ? 1 : 0;
+	T.r[6] = fl::add(T.r[6], 0x000C);
+}
+
 }
 
 LOGIC_TABLE(banka,
 	c_routine("A5", 0x438C, "step_map_column", step_map_column, 0, 438),
 	asm_routine("A5", 0x42BC, "step_map_row", step_map_row, 464),
-	asm_routine("A5", 0x41CE, "draw_map_strip", draw_map_strip, 379),
+	asm_routine("A5", 0x41CE, "draw_map_strip", draw_map_strip, 384),
 	c_routine("A5", 0x4000, "init_map_view", init_map_view, 0, 2993035),
-	asm_routine("A5", 0x48CC, "update_map_slots", update_map_slots, 30363),
-	c_routine("A5", 0x5D08, "stop_effect_sound", stop_effect_sound, 0, 311),
-	c_routine("A5", 0x5B46, "rolling_sound", rolling_sound, 0, 439),
+	asm_routine("A5", 0x48CC, "update_map_slots", update_map_slots, 30236),
+	c_routine("A5", 0x5D08, "stop_effect_sound", stop_effect_sound, 0, 308),
+	c_routine("A5", 0x5B46, "rolling_sound", rolling_sound, 0, 438),
 	wait_routine("A5", 0x5BD2, "town_music", town_music, 420),
 	c_routine("A5", 0x4984, "draw_tile_block", draw_tile_block, 0, 3117),
-	c_routine("A5", 0x51EE, "slope_height", slope_height, 0, 643),
+	c_routine("A5", 0x51EE, "slope_height", slope_height, 0, 600),
 	asm_routine("A7", 0x4098, "move_objects_0_3", move_objects_0_3, 3003),
-	c_routine("A7", 0x410C, "project_speed", project_speed, 0, 6390),
+	c_routine("A7", 0x410C, "project_speed", project_speed, 0, 6609),
 	c_routine("A7", 0x4F98, "direction_from_object7", direction_from_object7, 0, 762),
 	c_routine("A7", 0x4ECC, "hold_object", hold_object, 0, 636),
-	c_routine("A7", 0x4D30, "message_box", message_box, 0, 10547),
-	asm_routine("A7", 0x4B84, "expire_messages", expire_messages, 166),
+	c_routine("A7", 0x4D30, "message_box", message_box, 0, 10195),
+	asm_routine("A7", 0x4B84, "expire_messages", expire_messages, 164),
 	asm_routine("A7", 0x4C28, "show_next_message", show_next_message, 160),
-	c_routine("A7", 0x5A7E, "credit_messages", credit_messages, 0, 23113),
-	c_routine("A7", 0x5018, "chaser_step", chaser_step, 0, 614),
+	c_routine("A7", 0x5A7E, "credit_messages", credit_messages, 0, 22898),
+	c_routine("A7", 0x5018, "chaser_step", chaser_step, 0, 661),
 	c_routine("A7", 0x5248, "shop_purchase", shop_purchase, 0, 267),
 	c_routine("A7", 0x43C0, "insert_high_score", insert_high_score, 0, 7800),
-	c_routine("A7", 0x5684, "find_collision", find_collision, 0, 2730),
-	asm_routine("A7", 0x50F8, "fallen_skater", fallen_skater, 99),
+	c_routine("A7", 0x5684, "find_collision", find_collision, 0, 2698),
+	asm_routine("A7", 0x50F8, "fallen_skater", fallen_skater, 95),
 	wait_c_routine("A7", 0x4B3E, "poll_sound_status", poll_sound_status, 267),
+	asm_routine("A5", 0x454A, "scan_zone_switches", scan_zone_switches, 409),
+	c_routine("A7", 0x538E, "terrain_event", terrain_event, 0, 123),
+	asm_routine("A7", 0x572A, "shapes_touch", shapes_touch, 2264),
 )
 
 }
