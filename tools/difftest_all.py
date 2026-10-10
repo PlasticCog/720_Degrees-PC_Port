@@ -60,12 +60,15 @@ def parse(text):
         m = LINE.match(line)
         if m:
             key, name, calls, rest = m.group(1), m.group(2), int(m.group(3)), m.group(4)
-            r = {'name': name, 'calls': calls, 'tested': 0, 'bad': 0, 'cycles': 0.0, 'charged': None,
+            r = {'name': name, 'calls': calls, 'tested': 0, 'bad': 0, 'cycles': 0.0, 'native': 0.0, 'charged': None,
                  'waits': 0, 'unwound': 0, 'first': None}
             t = re.search(r'tested\s+(\d+)\s+mismatches (\d+)\s+original (\d+) cycles/call \(charged (\d+)\)', rest)
             if t:
                 r['tested'], r['bad'] = int(t.group(1)), int(t.group(2))
                 r['cycles'], r['charged'] = float(t.group(3)), int(t.group(4))
+            n = re.search(r'\(charged \d+\) native (\d+)', rest)
+            if n:
+                r['native'] = float(n.group(1))
             w = re.search(r'waits \(not compared\) (\d+)', rest)
             if w:
                 r['waits'] = int(w.group(1))
@@ -155,13 +158,14 @@ def main():
                 if l.startswith('logic:'):
                     problems.append('%s: %s' % (name, l))
             for key, r in parse(text).items():
-                m = merged.setdefault(key, {'name': r['name'], 'calls': 0, 'tested': 0, 'bad': 0, 'cyc': 0.0,
+                m = merged.setdefault(key, {'name': r['name'], 'calls': 0, 'tested': 0, 'bad': 0, 'cyc': 0.0, 'ncyc': 0.0,
                                             'charged': r['charged'], 'waits': 0, 'unwound': 0, 'first': None,
                                             'where': set()})
                 m['calls'] += r['calls']
                 m['tested'] += r['tested']
                 m['bad'] += r['bad']
                 m['cyc'] += r['cycles'] * r['tested']
+                m['ncyc'] += r['native'] * r['tested']
                 m['waits'] += r['waits']
                 m['unwound'] += r['unwound']
                 if r['charged'] is not None:
@@ -177,8 +181,8 @@ def main():
         m = merged[key]
         s = '  %s %-22s calls %8d' % (key, m['name'], m['calls'])
         if m['tested']:
-            s += '  tested %8d  mismatches %d  original %d cycles/call (charged %s)' % (
-                m['tested'], m['bad'], round(m['cyc'] / m['tested']), m['charged'])
+            s += '  tested %8d  mismatches %d  original %d cycles/call (charged %s) native %d' % (
+                m['tested'], m['bad'], round(m['cyc'] / m['tested']), m['charged'], round(m['ncyc'] / m['tested']))
         elif not m['waits']:
             untested.append('%s %s' % (key, m['name']))
         if m['waits']:

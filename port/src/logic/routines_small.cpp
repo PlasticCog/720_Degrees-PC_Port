@@ -149,7 +149,7 @@ LOGIC_TABLE(small,
 	asm_routine("F", 0x8270, "set_32v_vectors", set_32v_vectors, 327),
 	asm_routine("F", 0xBA5E, "clear_object_dy", clear_object_dy, 1959),
 	asm_routine("F", 0xE222, "state1_to_8", state1_to_8, 129),
-	asm_routine("F", 0xD348, "count_event", count_event, 153),
+	asm_routine("F", 0xD348, "count_event", count_event, 115),
 	asm_routine("F", 0xE238, "reset_skater_state", reset_skater_state, 189),
 )
 

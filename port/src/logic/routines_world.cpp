@@ -216,17 +216,17 @@ uint16_t zone_switch_d(const Args &a)
 }
 
 LOGIC_TABLE(world,
-	c_routine("A5", 0x5166, "copy_object0_velocity", copy_object0_velocity, 0, 911),
+	c_routine("A5", 0x5166, "copy_object0_velocity", copy_object0_velocity, 0, 915),
 	c_routine("F", 0xA2BE, "direction_bit", direction_bit, 0, 492),
-	c_routine("F", 0x9E52, "slope_table_value", slope_table_value, 0, 567),
+	c_routine("F", 0x9E52, "slope_table_value", slope_table_value, 0, 571),
 	c_routine("F", 0xB56E, "reset_object", reset_object, 0, 528),
-	c_routine("F", 0xB5B8, "alloc_object_slot", alloc_object_slot, 0, 805),
+	c_routine("F", 0xB5B8, "alloc_object_slot", alloc_object_slot, 0, 792),
 	c_routine("A7", 0x4F42, "spawn_queued_object", spawn_queued_object, 0, 576),
 	c_routine("F", 0xE0C2, "place_object7", place_object7, 0, 375),
-	c_routine("A5", 0x43F8, "zone_switch_a", zone_switch_a, 0, 213),
-	c_routine("A5", 0x4442, "zone_switch_b", zone_switch_b, 0, 162),
-	c_routine("A5", 0x4496, "zone_switch_c", zone_switch_c, 0, 458),
-	c_routine("A5", 0x44EC, "zone_switch_d", zone_switch_d, 0, 518),
+	c_routine("A5", 0x43F8, "zone_switch_a", zone_switch_a, 0, 172),
+	c_routine("A5", 0x4442, "zone_switch_b", zone_switch_b, 0, 167),
+	c_routine("A5", 0x4496, "zone_switch_c", zone_switch_c, 0, 419),
+	c_routine("A5", 0x44EC, "zone_switch_d", zone_switch_d, 0, 424),
 )
 
 }

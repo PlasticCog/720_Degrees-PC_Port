@@ -109,10 +109,10 @@ void irq_32v_play()
 }
 
 LOGIC_TABLE(screen,
-	asm_routine("F", 0x8B52, "draw_large_char", draw_large_char, 627),
-	asm_routine("F", 0x8D2C, "clear_playfield_ram", clear_playfield_ram, 156843),
-	asm_routine("F", 0x8D3E, "clear_text_ram", clear_text_ram, 52395),
-	irq_routine("F", 0xB9D4, "irq_32v_play", irq_32v_play, 880),
+	asm_routine("F", 0x8B52, "draw_large_char", draw_large_char, 837),
+	asm_routine("F", 0x8D2C, "clear_playfield_ram", clear_playfield_ram, 156741),
+	asm_routine("F", 0x8D3E, "clear_text_ram", clear_text_ram, 52293),
+	irq_routine("F", 0xB9D4, "irq_32v_play", irq_32v_play, 617),
 )
 
 }

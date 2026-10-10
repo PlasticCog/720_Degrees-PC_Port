@@ -20,6 +20,8 @@ const Routine *routines_world(int &count);
 const Routine *routines_system(int &count);
 const Routine *routines_wait(int &count);
 const Routine *routines_screen(int &count);
+const Routine *routines_boot(int &count);
+const Routine *routines_parks(int &count);
 
 bool g_enabled = true;
 bool g_difftest = false;
@@ -32,12 +34,12 @@ struct Slot {
 	const Original *orig = nullptr;
 	const Routine *r = nullptr;
 	uint64_t calls = 0, tests = 0, bad = 0, timeouts = 0, unwound = 0;
-	double orig_cycles = 0;
+	double orig_cycles = 0, native_cycles = 0;            // per tested call, callees included
 	std::string first_bad;
 };
 
 // the routine tables of the routines_*.cpp files
-const TableFn TABLES[] = { routines_core, routines_small, routines_misc, routines_world, routines_system, routines_wait, routines_screen };
+const TableFn TABLES[] = { routines_core, routines_small, routines_misc, routines_world, routines_system, routines_wait, routines_screen, routines_boot, routines_parks };
 
 std::vector<Routine> &registry()
 {
@@ -177,6 +179,7 @@ void difftest(Slot &s)
 	try { run_native(*s.r); }
 	catch (const AtomicTimeout &) { give_up(); return; }
 	const Ctx t2 = T;
+	const int cycles2 = (t0.icount - t2.icount) - (t2.aborted - t0.aborted);
 	const uint16_t min2 = g_min_sp;
 	B->save(b2);
 
@@ -221,6 +224,7 @@ void difftest(Slot &s)
 	}
 	s.tests++;
 	s.orig_cycles += cycles1;
+	s.native_cycles += cycles2;
 
 	// continue exactly as the original did
 	B->load(b1);
@@ -267,7 +271,7 @@ uint16_t call(uint16_t addr, std::initializer_list<uint16_t> args)
 
 void reset_stats()
 {
-	for (auto &s : g_slots) { s.calls = s.tests = s.bad = s.timeouts = s.unwound = 0; s.orig_cycles = 0; s.first_bad.clear(); }
+	for (auto &s : g_slots) { s.calls = s.tests = s.bad = s.timeouts = s.unwound = 0; s.orig_cycles = s.native_cycles = 0; s.first_bad.clear(); }
 }
 
 int rewritten_count()
@@ -307,6 +311,7 @@ std::string report(bool all)
 		if (s.tests)
 			out += fmt("  tested %8llu  mismatches %llu  original %.0f cycles/call (charged %d)",
 				(unsigned long long)s.tests, (unsigned long long)s.bad, s.orig_cycles / s.tests, s.r->cycles);
+		if (s.tests) out += fmt(" native %.0f", s.native_cycles / s.tests);
 		if (s.timeouts) out += fmt("  waits (not compared) %llu", (unsigned long long)s.timeouts);
 		if (s.unwound) out += fmt("  left by an interrupt %llu", (unsigned long long)s.unwound);
 		out += "\n";
