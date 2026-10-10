@@ -1,6 +1,7 @@
 // Atari System 2 board support for 720 Degrees (see board.h).
 #include "board.h"
 #include "soundchips.h"
+#include "romzip.h"
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -20,6 +21,10 @@ static bool read_file(const std::string &path, std::vector<uint8_t> &out, size_t
 bool RomSet::load(const std::string &dir, std::string &err)
 {
 	auto p = [&](const char *n) { return dir + "/" + n; };
+	{
+		std::string log;                    // a MAME 720.zip in the folder is unpacked here
+		extract_rom_zips(dir, log);
+	}
 	std::vector<uint8_t> d;
 	main.assign(0x90000, 0);
 	auto load16 = [&](const char *n, size_t off, size_t size) {

@@ -23,6 +23,7 @@
 #include "audioout.h"
 #include "input_config.h"
 #include "debugui.h"
+#include "romzip.h"
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlrenderer3.h"
@@ -63,10 +64,7 @@ std::string find_roms(const std::string &requested)
 			candidates.push_back(std::string(base) + rel);
 	for (const char *rel : { "Game", "." }) candidates.push_back(rel);
 	for (auto &c : candidates)
-	{
-		std::ifstream f(c + "/136047-3126.7lm", std::ios::binary);
-		if (f) return c;
-	}
+		if (rom_folder_usable(c)) return c;         // the ROM files, or a zip holding them
 	return std::string(base ? base : "") + "Game";
 }
 

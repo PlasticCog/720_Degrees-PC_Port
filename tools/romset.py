@@ -4,11 +4,16 @@ Builds the CPU-visible memory images exactly as the MAME driver does
 (Source_Emulator/mame/src/mame/atari/atarisy2.cpp, ROM_START(720)).
 """
 import os
+import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _HERE)
+import romzip  # noqa: E402
+
 ROMDIR = os.environ.get('D720_ROM_DIR') or next(
-    (d for d in (os.path.join(_HERE, '..', 'Game'), os.path.join(_HERE, '..', 'rom'))
-     if os.path.exists(os.path.join(d, '136047-3126.7lm'))), os.path.join(_HERE, '..', 'Game'))
+    (d for d in (os.path.join(_HERE, '..', 'Game'), os.path.join(_HERE, '..', 'rom')) if romzip.has_roms(d)),
+    os.path.join(_HERE, '..', 'Game'))
+romzip.extract(ROMDIR)      # a MAME 720.zip in the folder is unpacked on first use
 
 
 def _rd(name):

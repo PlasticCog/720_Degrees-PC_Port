@@ -21,6 +21,7 @@
 #include "board.h"
 #include "nativemachine.h"
 #include "inputscript.h"
+#include "romzip.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -55,8 +56,7 @@ std::string pref_file(const char *name)
 
 bool has_roms(const std::string &dir)
 {
-	std::ifstream f(dir + "136047-3126.7lm", std::ios::binary);
-	return (bool)f;
+	return rom_folder_usable(dir);              // the ROM files, or a zip holding them
 }
 
 // folder the program runs from: the game, the mods folder and exports live here

@@ -41,9 +41,12 @@ endif()
 if(D720_REGENERATE OR NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/game/files.cmake
    OR NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/game/s65_code.cpp
    OR NOT D720_OLD_HASH STREQUAL D720_TRANSLATOR_HASH)
+  # a MAME 720.zip dropped into the ROM folder is extracted first
+  execute_process(COMMAND ${Python3_EXECUTABLE} -I ${REPO_ROOT}/tools/romzip.py ${D720_ROM_DIR}
+    OUTPUT_QUIET ERROR_QUIET)
   if(NOT EXISTS ${D720_ROM_DIR}/136047-3126.7lm)
     message(FATAL_ERROR "720 Degrees ROM files not found in '${D720_ROM_DIR}'. "
-      "Copy the rev 4 ROM set (MAME '720') there or pass -DD720_ROM_DIR=<folder>.")
+      "Copy the rev 4 ROM set (MAME '720', the files or the zip) there or pass -DD720_ROM_DIR=<folder>.")
   endif()
   message(STATUS "Translating the 720 Degrees program ROMs to C++ ...")
   foreach(tool t11_to_cpp.py m6502_to_cpp.py)
@@ -98,6 +101,7 @@ add_library(board STATIC
   src/board/board.cpp
   src/board/soundchips.cpp
   src/board/tms5220.cpp
+  src/board/romzip.cpp
   third_party/ymfm/ymfm_opm.cpp)
 target_include_directories(board PUBLIC src/board third_party/ymfm)
 

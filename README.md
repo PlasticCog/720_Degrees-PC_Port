@@ -10,7 +10,8 @@ emulator runs inside the game.
 
 ## Quick start
 
-1. Put the 37 ROM files of the MAME set `720` (rev 4) into the [`Game`](Game/README.txt) folder.
+1. Put the 37 ROM files of the MAME set `720` (rev 4) into the [`Game`](Game/README.txt) folder, or just
+   drop the MAME `720.zip` there; it is unpacked automatically.
 2. Install a C++20 compiler, CMake 3.20+, Ninja (or Visual Studio 2022) and Python 3.
 3. Build:
 

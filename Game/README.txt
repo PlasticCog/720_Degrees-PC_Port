@@ -1,7 +1,9 @@
 720 Degrees - Game folder
 =========================
 
-Drop the arcade ROM files into THIS folder (not a sub-folder, not zipped).
+Drop the arcade ROM files into THIS folder: either the files themselves, or the
+MAME zip (720.zip) as it is. A zip is unpacked here automatically the first time
+the game, the level editor or the build needs the ROMs.
 The ROMs are not included in this repository; you must supply your own copy
 of the "720 Degrees (rev 4)" set (MAME short name: 720).
 
@@ -51,4 +53,4 @@ Required files (37):
   136047-1125.4t     16384    6b7e2328   alphanumerics (text font)
   720-eeprom.bin       512    5d2acf11   default EEPROM (settings / high scores)
 
-If you have a MAME "720.zip", extract its contents here.
+A MAME "720.zip" can simply be placed here; only these files are taken from it.
