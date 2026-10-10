@@ -73,6 +73,27 @@ inline uint8_t peekb(uint16_t a) { return t11rt::rb(a); }
 inline void poke(uint16_t a, uint16_t v) { t11rt::ww(a, v); }
 inline void pokeb(uint16_t a, uint8_t v) { t11rt::wb(a, v); }
 
+// condition codes as the T-11 sets them (same formulas as the translator), for routines
+// with an assembly interface whose callers may test the flags
+namespace fl {
+using namespace t11rt;
+inline void mov(uint16_t v) { f_nzv(nzw(v)); }
+inline void movb(uint8_t v) { f_nzv(nzb(v)); }
+inline void clr() { f_nzvc(ZF); }
+inline void tst(uint16_t v) { f_nzvc(nzw(v)); }
+inline void tstb(uint8_t v) { f_nzvc(nzb(v)); }
+inline uint16_t add(uint16_t d, uint16_t s) { const int r = d + s; f_nzvc(nzw(r) | vw(s, d, r) | cw(r)); return (uint16_t)r; }
+inline uint16_t sub(uint16_t d, uint16_t s) { const int r = d - s; f_nzvc(nzw(r) | vw(s, d, r) | cw(r)); return (uint16_t)r; }
+inline uint16_t adc(uint16_t d) { const int s = C(), r = d + s; f_nzvc(nzw(r) | vw(s, d, r) | cw(r)); return (uint16_t)r; }
+inline uint16_t sbc(uint16_t d) { const int s = C(), r = d - s; f_nzvc(nzw(r) | vw(s, d, r) | cw(r)); return (uint16_t)r; }
+inline void cmp(uint16_t s, uint16_t d) { const int r = s - d; f_nzvc(nzw(r) | vw(s, d, r) | cw(r)); }
+inline void cmpb(uint8_t s, uint8_t d) { const int r = s - d; f_nzvc(nzb(r) | vb(s, d, r) | cb(r)); }
+inline uint16_t inc(uint16_t d) { const int r = d + 1; f_nzv(nzw(r) | (d == 0x7fff ? VF : 0)); return (uint16_t)r; }
+inline uint16_t dec(uint16_t d) { const int r = d - 1; f_nzv(nzw(r) | (d == 0x8000 ? VF : 0)); return (uint16_t)r; }
+inline uint8_t incb(uint8_t d) { const int r = d + 1; f_nzv(nzb(r) | (d == 0x7f ? VF : 0)); return (uint8_t)r; }
+inline uint8_t decb(uint8_t d) { const int r = d - 1; f_nzv(nzb(r) | (d == 0x80 ? VF : 0)); return (uint8_t)r; }
+}
+
 // settings and statistics
 extern bool g_enabled;                                 // use the rewritten routines
 extern bool g_difftest;                                // compare every call with the original

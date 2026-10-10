@@ -14,6 +14,7 @@ extern const int t11_total_instructions;
 namespace logic {
 
 const Routine *routines_core(int &count);
+const Routine *routines_small(int &count);
 
 bool g_enabled = true;
 bool g_difftest = false;
@@ -31,7 +32,7 @@ struct Slot {
 };
 
 // the routine tables of the routines_*.cpp files
-const TableFn TABLES[] = { routines_core };
+const TableFn TABLES[] = { routines_core, routines_small };
 
 std::vector<Routine> &registry()
 {
