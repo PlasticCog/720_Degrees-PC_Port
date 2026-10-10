@@ -210,14 +210,19 @@ endfunction()
 if(D720_GAME)
 # ---------------------------------------------------------------------------
 # The game
-add_executable(720degrees WIN32 src/app/main.cpp src/app/input_config.cpp src/app/debugui.cpp)
+# program icon: a resource on Windows (port/res, drawn by tools/make_icon.py)
+if(WIN32)
+  enable_language(RC)
+  set(D720_ICON_RC ${CMAKE_CURRENT_SOURCE_DIR}/res/720degrees.rc)
+endif()
+add_executable(720degrees WIN32 src/app/main.cpp src/app/input_config.cpp src/app/debugui.cpp ${D720_ICON_RC})
 target_link_libraries(720degrees PRIVATE gamecore leveldata imgui SDL3::SDL3)
 d720_copy_to_output(720degrees)
 
 # ---------------------------------------------------------------------------
 # Level editor
 
-add_executable(editor720 WIN32 src/editor/editor.cpp)
+add_executable(editor720 WIN32 src/editor/editor.cpp ${D720_ICON_RC})
 target_link_libraries(editor720 PRIVATE gamecore leveldata imgui SDL3::SDL3)
 d720_copy_to_output(editor720)
 

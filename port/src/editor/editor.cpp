@@ -22,6 +22,7 @@
 #include "nativemachine.h"
 #include "inputscript.h"
 #include "romzip.h"
+#include "../app/window_icon.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -1091,6 +1092,7 @@ int main(int argc, char **argv)
 		SDL_Log("window creation failed: %s", SDL_GetError());
 		return 1;
 	}
+	set_window_icon(ed.win);
 	SDL_SetRenderVSync(ed.ren, 1);
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();

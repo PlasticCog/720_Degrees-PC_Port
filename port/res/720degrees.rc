@@ -1,0 +1,2 @@
+// Windows resources: the program icon (port/res/icon.ico, drawn by tools/make_icon.py)
+1 ICON "icon.ico"

@@ -24,6 +24,7 @@
 #include "input_config.h"
 #include "debugui.h"
 #include "romzip.h"
+#include "window_icon.h"
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlrenderer3.h"
@@ -171,6 +172,7 @@ int main(int argc, char **argv)
 		SDL_Log("window creation failed: %s", SDL_GetError());
 		return 1;
 	}
+	set_window_icon(window);
 	SDL_SetRenderVSync(renderer, 1);
 	if (opt.fullscreen) SDL_SetWindowFullscreen(window, true);
 	SDL_Texture *tex = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 512, 384);
