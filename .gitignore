@@ -1,0 +1,28 @@
+# --- ROMs and anything derived from them (copyrighted, never commit) ---------
+/rom/
+/Game/*
+!/Game/README.txt
+/port/src/game/
+/port/src/level/level_palettes.inc
+/re/work/
+/re/decompiled/
+/re/sound/
+/re/main_t11.lst
+/re/codedb.json
+/re/ghidra/proj/
+/re/ghidra/input/
+
+# --- third-party downloads / reference sources ----------------------------------
+/Source_Emulator/
+/port/third_party/SDL3-*/
+/port/third_party/imgui_src/
+
+# --- build output ---------------------------------------------------------------
+/port/build/
+/build/
+__pycache__/
+*.pyc
+/re/ghidra/PDP11/data/languages/*.sla
+/re/ghidra/PDP11/data/languages/sleigh_*.txt
+/re/ghidra/PDP11/data/languages/empty_in.txt
+*.720mod

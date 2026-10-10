@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<language_definitions>
+  <language processor="PDP11" endian="little" size="16" variant="T11" version="1.0"
+            slafile="pdp11.sla" processorspec="pdp11.pspec" id="PDP11:LE:16:T11">
+    <description>DEC T-11 / PDP-11 (no EIS) - 720 Degrees project</description>
+    <compiler name="default" spec="pdp11.cspec" id="default"/>
+  </language>
+</language_definitions>

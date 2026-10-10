@@ -1,0 +1,92 @@
+// Runtime support for the statically translated 720 Degrees main program (T-11 code
+// converted to C++ by tools/t11_to_cpp.py).  The generated functions operate on the
+// register context T and the board memory map; flag and bus semantics match the
+// original CPU exactly so the translated program behaves like the arcade program,
+// including where interrupts land.
+#pragma once
+#include <cstdint>
+#include <cstring>
+#include "board.h"
+
+namespace t11rt {
+
+struct Ctx {
+	uint16_t r[8];
+	uint8_t psw;
+	int32_t icount;        // cycles left in the current time slice
+	int32_t aborted;       // cycles given back by main_end_timeslice()
+	bool check_irqs;
+	bool wait_state;
+	uint8_t cp_state;
+};
+extern Ctx T;
+extern Board *B;
+extern uint8_t *RAM;
+extern const uint8_t *ROM;     // 0x90000 main region (fixed ROM at 0x8000-0xFFFF)
+
+// ---------------------------------------------------------------- memory
+uint16_t bus_rw(uint32_t a);
+uint8_t bus_rb(uint32_t a);
+void bus_ww(uint32_t a, uint16_t v);
+void bus_wb(uint32_t a, uint8_t v);
+
+inline uint16_t ram16(uint32_t a) { return (uint16_t)(RAM[a] | (RAM[a + 1] << 8)); }
+inline void ram16w(uint32_t a, uint32_t v) { RAM[a] = (uint8_t)v; RAM[a + 1] = (uint8_t)(v >> 8); }
+inline uint16_t rom16(uint32_t a) { return (uint16_t)(ROM[a] | (ROM[a + 1] << 8)); }
+
+inline uint16_t rw(uint32_t a) { a &= 0xfffe; return a < 0x1000 ? ram16(a) : bus_rw(a); }
+inline uint8_t rb(uint32_t a) { a &= 0xffff; return a < 0x1000 ? RAM[a] : bus_rb(a); }
+inline void ww(uint32_t a, uint32_t v) { a &= 0xfffe; if (a < 0x1000) ram16w(a, v); else bus_ww(a, (uint16_t)v); }
+inline void wb(uint32_t a, uint32_t v) { a &= 0xffff; if (a < 0x1000) RAM[a] = (uint8_t)v; else bus_wb(a, (uint8_t)v); }
+inline void slap(uint32_t a) { B->slapstic_simple((uint16_t)a); }
+
+inline void push(uint32_t v) { T.r[6] -= 2; ww(T.r[6], v); }
+inline uint16_t pop() { uint16_t v = rw(T.r[6]); T.r[6] += 2; return v; }
+
+// ---------------------------------------------------------------- flags (MAME t11ops macros)
+enum { CF = 1, VF = 2, ZF = 4, NF = 8 };
+inline int nzw(int r) { return ((r >> 12) & 8) | (((r & 0xffff) == 0) << 2); }
+inline int nzb(int r) { return ((r >> 4) & 8) | (((r & 0xff) == 0) << 2); }
+inline int vw(int s, int d, int r) { return ((s ^ d ^ r ^ (r >> 1)) >> 14) & 2; }
+inline int vb(int s, int d, int r) { return ((s ^ d ^ r ^ (r >> 1)) >> 6) & 2; }
+inline int cw(int r) { return (r >> 16) & 1; }
+inline int cb(int r) { return (r >> 8) & 1; }
+inline void f_nzv(int nz) { T.psw = (uint8_t)((T.psw & ~(NF | ZF | VF)) | nz); }             // CLR_NZV; SET NZ
+inline void f_nzvc(int f) { T.psw = (uint8_t)((T.psw & ~(NF | ZF | VF | CF)) | f); }         // CLR_NZVC; SET ...
+inline void f_shift() { T.psw |= ((T.psw << 1) ^ (T.psw >> 2)) & 2; }                        // V = N ^ C
+inline int C() { return T.psw & CF; }
+inline bool fN() { return (T.psw & NF) != 0; }
+inline bool fZ() { return (T.psw & ZF) != 0; }
+inline bool fV() { return (T.psw & VF) != 0; }
+inline bool fC() { return (T.psw & CF) != 0; }
+
+// ---------------------------------------------------------------- control
+// slow path of the per-instruction checkpoint: interrupts, end of time slice
+bool sync_slow(uint16_t next);
+inline bool sync(uint16_t next)
+{
+	if (T.icount > 0 && !T.check_irqs) return true;
+	return sync_slow(next);
+}
+inline void sync_dyn() { if (T.icount <= 0 || T.check_irqs) sync_slow(T.r[7]); }
+
+// run the code at T.r[7] until it returns (RTS/RTI) — dispatches by address + current bank
+void dispatch();
+// expected-return shadow stack (lets mismatched returns unwind to the right C++ frame)
+extern uint16_t shadow[256];
+extern int shadow_top;
+inline void shadow_push(uint16_t pc) { shadow[shadow_top++ & 255] = pc; }
+inline void shadow_pop() { shadow_top--; }
+bool in_shadow(uint16_t pc);
+// hardware trap/EMT/TRAP: push PSW+PC, load vector, run handler
+void trap_to(uint16_t vector, uint16_t next);
+void halt_insn(uint16_t next);
+[[noreturn]] void fatal_unknown_pc(uint16_t pc);
+
+} // namespace t11rt
+
+// generated dispatch tables
+using t11fn = void (*)();
+struct T11CodeSeg { uint16_t base, size; const t11fn *fn; };   // fn[(pc-base)/2]
+extern const T11CodeSeg t11_seg_fixed;
+extern const T11CodeSeg *t11_seg_bank[2][64];                  // [window A/B][bank]
