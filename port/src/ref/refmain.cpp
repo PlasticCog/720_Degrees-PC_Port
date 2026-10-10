@@ -16,6 +16,8 @@ int main(int argc, char **argv)
 	std::string roms = "Game", out = "out", script, coverage, sndcov;
 	int frames = 600, png_every = 0, ram_every = 0, random_play = 0, trace_from = -1, break_limit = 20;
 	std::vector<uint16_t> breaks;
+	std::vector<std::pair<uint16_t, uint16_t>> watches;     // --watch A[-B]: log writes to main RAM
+	int watch_from = 0, watch_to = 1 << 30;
 	for (int i = 1; i < argc; i++)
 	{
 		std::string a = argv[i];
@@ -32,6 +34,20 @@ int main(int argc, char **argv)
 		else if (a == "--trace-mem") trace_from = atoi(next().c_str());
 		else if (a == "--break") breaks.push_back((uint16_t)strtol(next().c_str(), nullptr, 16));
 		else if (a == "--break-limit") break_limit = atoi(next().c_str());
+		else if (a == "--watch")
+		{
+			const std::string v = next();
+			const size_t dash = v.find('-');
+			const uint16_t lo = (uint16_t)strtol(v.substr(0, dash).c_str(), nullptr, 16);
+			watches.push_back({lo, dash == std::string::npos ? lo : (uint16_t)strtol(v.substr(dash + 1).c_str(), nullptr, 16)});
+		}
+		else if (a == "--watch-frames")
+		{
+			const std::string v = next();
+			const size_t dash = v.find('-');
+			watch_from = atoi(v.substr(0, dash).c_str());
+			if (dash != std::string::npos) watch_to = atoi(v.substr(dash + 1).c_str());
+		}
 	}
 
 	RomSet rs;
@@ -115,7 +131,14 @@ int main(int argc, char **argv)
 	std::map<uint32_t, uint64_t> pf_readers, attr_readers, odd_bank_writes;
 	std::map<uint64_t, uint64_t> rom_readers;                // (ppc, window, bank, addr>>8) -> count
 	bool tracing = false;
+	int cur_frame = 0;
 	m.on_data = [&](uint16_t a, bool wr, bool word, uint16_t v) {
+		if (wr && !watches.empty() && cur_frame >= watch_from && cur_frame <= watch_to)
+			for (const auto &w : watches)
+				if (a >= w.first && a <= w.second)
+					printf("WRITE frame %d line %d pc %04X bankA %d bankB %d [%04X] = %04X%s R0=%04X R1=%04X R2=%04X R3=%04X R4=%04X R5=%04X\n",
+						cur_frame, m.board.scanline, m.t11.ppc, m.board.bank_entry(0), m.board.bank_entry(1), a, v, word ? "" : " (byte)",
+						m.t11.r[0], m.t11.r[1], m.t11.r[2], m.t11.r[3], m.t11.r[4], m.t11.r[5]);
 		if (!tracing) return;
 		const uint16_t pc = m.t11.ppc;
 		if (wr && a >= 0x2000 && a < 0x4000 && (m.board.vmmu_bank() == 2 || m.board.vmmu_bank() == 3))
@@ -137,6 +160,7 @@ int main(int argc, char **argv)
 	{
 		std::string snap;
 		if (trace_from >= 0 && f >= trace_from) tracing = true;
+		cur_frame = f;
 		inp.apply(f, m.board.input, snap);
 		if (!snap.empty())
 		{

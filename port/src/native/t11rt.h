@@ -85,9 +85,10 @@ void halt_insn(uint16_t next);
 
 } // namespace t11rt
 
-// patch points: immediates in the translated code that mods may change
-// (F:E8B6 MOV #0x6000,R2 - town alternate block bank; F:E8B0 MOV #0xA000,R2 - park odd-pointer bank)
-namespace t11rt { extern uint16_t g_patch_town_alt_base, g_patch_park_odd_base; }
+// patch points: immediates in the translated code that mods and the debug menu may change
+// (F:E8B6 MOV #0x6000,R2 - town alternate block bank; F:E8B0 MOV #0xA000,R2 - park odd-pointer bank;
+//  F:A068 MOV #12,@#0x02EE - gravity while airborne; A5:4F2C MOV #0x180,@#0x01B4 - kick start speed)
+namespace t11rt { extern uint16_t g_patch_town_alt_base, g_patch_park_odd_base, g_patch_gravity, g_patch_kick_speed; }
 
 // generated dispatch tables
 using t11fn = void (*)();

@@ -26,8 +26,10 @@ static void write_wav(const std::string &path, const std::vector<int16_t> &s, in
 
 int main(int argc, char **argv)
 {
-	std::string roms = "Game", out = ".", script, wav, mod, sound_log;
+	std::string roms = "Game", out = ".", script, wav, mod, sound_log, ram_dump;
 	int frames = 600, png_every = 0, seed = 0, stats_every = 0;
+	struct Poke { int frame; uint16_t addr, value; };
+	std::vector<Poke> pokes;
 	for (int i = 1; i < argc; i++)
 	{
 		std::string a = argv[i];
@@ -41,6 +43,14 @@ int main(int argc, char **argv)
 		else if (a == "--wav") wav = next();
 		else if (a == "--mod") mod = next();
 		else if (a == "--sound-log") sound_log = next();   // "frame command" per sound command
+		else if (a == "--ram-dump") ram_dump = next();     // per frame: main RAM, MO RAM, x/y scroll
+		else if (a == "--poke")                            // FRAME:ADDR:VALUE (hex addr/value), main RAM word
+		{
+			const std::string v = next();
+			const size_t c1 = v.find(':'), c2 = v.find(':', c1 + 1);
+			pokes.push_back({atoi(v.substr(0, c1).c_str()), (uint16_t)strtol(v.substr(c1 + 1, c2 - c1 - 1).c_str(), nullptr, 16),
+				(uint16_t)strtol(v.substr(c2 + 1).c_str(), nullptr, 16)});
+		}
 		else if (a == "--audio-stats") stats_every = atoi(next().c_str());   // print chip levels every N frames
 	}
 	RomSet rs;
@@ -53,6 +63,7 @@ int main(int argc, char **argv)
 	uint32_t sound_cmds = 0;
 	FILE *slog = sound_log.empty() ? nullptr : fopen(sound_log.c_str(), "w");
 	int cur_frame = 0;
+	FILE *rdump = ram_dump.empty() ? nullptr : fopen(ram_dump.c_str(), "wb");
 	if (stats_every || slog)
 		m.board.on_sound_command = [&](uint8_t c) { sound_cmds++; if (slog) fprintf(slog, "%d %02X\n", cur_frame, c); };
 	InputScript inp;
@@ -66,8 +77,21 @@ int main(int argc, char **argv)
 	{
 		std::string snap;
 		cur_frame = f;
+		for (const auto &pk : pokes)
+			if (pk.frame == f && pk.addr < 0x0fff)
+			{
+				m.board.main_ram()[pk.addr] = (uint8_t)pk.value;
+				m.board.main_ram()[pk.addr + 1] = (uint8_t)(pk.value >> 8);
+			}
 		inp.apply(f, m.board.input, snap);
 		m.run_frame();
+		if (rdump)
+		{
+			fwrite(m.board.main_ram(), 1, 0x1000, rdump);
+			fwrite(m.board.mo_ram(), 2, 0x400, rdump);
+			const uint16_t sc[2] = { m.board.xscroll(), m.board.yscroll() };
+			fwrite(sc, 2, 2, rdump);
+		}
 		if (!snap.empty() || (png_every && (f % png_every) == png_every - 1))
 		{
 			m.board.frame_rgb(rgb.data());
@@ -100,6 +124,7 @@ int main(int argc, char **argv)
 		printf("audio: %zu frames, rms %.1f, peak %d\n", audio.size() / 2, std::sqrt(sumsq / std::max<size_t>(1, audio.size())), peak);
 	}
 	if (slog) fclose(slog);
+	if (rdump) fclose(rdump);
 	printf("done: %d frames\n", frames);
 	return 0;
 }

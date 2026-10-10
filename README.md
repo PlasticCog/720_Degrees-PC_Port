@@ -36,19 +36,41 @@ Tested with MSYS2 UCRT64 GCC 15. Visual Studio uses the SDL3 VC package (`-G "Vi
 
 ## Controls
 
-| Action | Keyboard | Gamepad | Mouse |
-|---|---|---|---|
-| Point the skater | Arrows / WASD (8 directions) | Left stick or d-pad | Move left/right after clicking the window |
-| Rotate | Q / E | | |
-| Jump | Space / Z | A | Left button |
-| Kick | Left Ctrl / X | B / X | Right button |
-| Coin | 5 (left), 6 (right) | Back | |
-| Service mode | F2 | | |
-| Reset / Pause / Fullscreen | F3 / P / F11 or Alt+Enter | | |
-| Help overlay | F1 | | |
+Default controls are below. Press **F4** in the game to change any of them; the settings are
+saved in `controls.cfg` in the game's settings folder (`%APPDATA%\Atari\720Degrees` on Windows).
 
-High scores and settings are kept in the game's EEPROM image, saved under
-`%APPDATA%\Atari\720Degrees\720.eeprom`. DIP switches: `--dsw0 0xNN --dsw1 0xNN`.
+| Action | Keyboard | Xbox controller | Mouse |
+|---|---|---|---|
+| Point the skater | Arrows / WASD | Left stick or d-pad | |
+| Rotate | Q / E | Right stick, LB / RB | Move left/right after clicking the game |
+| Jump | Ctrl | A or RT | Left button |
+| Kick | Shift | X or B | Right button |
+| Coin | 5 (left), 6 (right) | View | |
+| Pause | P | Menu | |
+| Debug menu / controls / help | Tab / F4 / F1 | | |
+| Service mode / reset / fullscreen | F2 / F3 / F11 or Alt+Enter | | |
+
+Any controller SDL recognises works; the button names follow the Xbox layout. Controllers can be
+connected and removed while the game runs.
+
+High scores and settings are kept in the game's EEPROM image, saved in the same settings folder
+as `720.eeprom`. DIP switches: `--dsw0 0xNN --dsw1 0xNN`.
+
+## Debug menu
+
+Press **Tab** in the game. The menu has these tabs:
+
+* **Game.** Pause, single-frame steps, game speed, machine reset, and hiding the playfield, sprite
+  or text layer.
+* **Overlays.** Sprite boxes with their screen coordinates, and a coloured mask of the terrain
+  height map. Hover over the game to read the tile and terrain value under the mouse.
+* **Skater.** Position, velocity, speed, kick or jump phase and the terrain under the skater.
+* **Objects.** The game's 32 object slots with world position, height and velocity.
+* **Physics.** Jump power, gravity, kick power, top speed and kick start speed, changed live.
+* **Cheats.** Freeze or refill the timer, add a park ticket, set cash, score and equipment level.
+* **Sound.** Send any sound command to the sound CPU, replay the commands heard so far, watch the
+  level of each sound chip and mute chips.
+* **Memory.** Edit main RAM, keep watches (optionally frozen) and search RAM for values.
 
 ## Level editor
 
@@ -111,8 +133,8 @@ port/src/editor   level editor (SDL3 + Dear ImGui)
 | Tool | Purpose |
 |---|---|
 | `verify720` | Lockstep check: translated game against the reference model |
-| `render720` | Run the game headless; write screenshots, a WAV of the audio (`--wav`), per-chip audio levels (`--audio-stats N`) and the sound command log (`--sound-log FILE`) |
-| `ref720` | Reference model with coverage, memory tracing and breakpoints (reverse engineering) |
+| `render720` | Run the game headless; write screenshots, a WAV of the audio (`--wav`), per-chip audio levels (`--audio-stats N`), the sound command log (`--sound-log FILE`) and per-frame RAM dumps (`--ram-dump FILE`); poke RAM with `--poke FRAME:ADDR:VALUE` |
+| `ref720` | Reference model with coverage, breakpoints (`--break ADDR`) and RAM write watches (`--watch A-B --watch-frames F-G`) for reverse engineering |
 | `editor720` | Level editor; `--capture-test` and `--screenshot FILE` for automated checks |
 | `leveltool` | `stats`, `png DIR` (render all maps), `zones` (zone bytes per map), `roundtrip [LEVEL]` (patch, re-decode and compare), `identity FILE` / `demo-mod FILE` (test mods) |
 | `tools/listing.py` | Annotated disassembly of the main program (`re/main_t11.lst`) |

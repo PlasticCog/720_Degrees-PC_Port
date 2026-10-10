@@ -67,6 +67,7 @@ public:
 	static constexpr int CYCLES_PER_SAMPLE = 32;   // 6502 cycles per YM2151 sample
 	static double output_rate() { return (14318181.0 / 8.0) / CYCLES_PER_SAMPLE; }
 	bool audio_enabled = true;
+	float debug_gain[3] = {1.0f, 1.0f, 1.0f};   // YM2151, POKEYs, speech (debug menu mutes)
 	size_t take_samples(int16_t *dst, size_t max_frames);   // drains generated stereo frames
 	size_t available_frames() const { return m_audio.size() / 2; }
 

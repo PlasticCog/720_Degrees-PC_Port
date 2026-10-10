@@ -130,6 +130,18 @@ public:
 		return 0x10000 + (size_t)m_bank_entry[window] * 0x2000 + (addr & 0x1fff);
 	}
 
+	// ---- debug menu support
+	struct Debug {
+		bool hide_pf = false, hide_mo = false, hide_alpha = false;
+		bool capture_tiles = false;            // record the playfield tile code under every pixel
+	} debug;
+	// playfield tile code (bank-resolved, 0..8191) under each pixel of the last frame
+	const uint16_t *debug_tile_codes() const { return m_dbg_tiles.data(); }
+	int pf_tile_bank(int i) const { return m_pf_tile_bank[i & 1]; }
+	// send a command to the sound CPU as if the main program wrote the sound latch;
+	// returns false while the previous command has not been read yet
+	bool debug_send_sound(uint8_t cmd);
+
 	// hooks for tooling
 	std::function<void(uint8_t)> on_sound_command;
 	std::function<void(int from, int to, uint32_t addr, int bank)> on_slapstic;
@@ -167,6 +179,7 @@ private:
 	int m_mo_last_xpos = 0;
 	std::vector<uint16_t> m_frame;
 	std::vector<uint16_t> m_mobuf;
+	std::vector<uint16_t> m_dbg_tiles = std::vector<uint16_t>(SCREEN_W * SCREEN_H, 0);
 
 	void update_interrupts();
 	void update_partial(int line);

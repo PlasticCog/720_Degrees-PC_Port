@@ -58,7 +58,10 @@ def h(v):
 
 
 # immediates that mods may change at runtime (see port/src/native/t11rt.h)
-PATCH_IMM = {('F', 0xE8B6): ('g_patch_town_alt_base', 0x6000), ('F', 0xE8B0): ('g_patch_park_odd_base', 0xA000)}
+# immediates turned into runtime variables: level mods (block banks) and the debug menu (physics)
+PATCH_IMM = {('F', 0xE8B6): ('g_patch_town_alt_base', 0x6000), ('F', 0xE8B0): ('g_patch_park_odd_base', 0xA000),
+             ('F', 0xA068): ('g_patch_gravity', 0x000C),          # MOV #12,@#0x02EE   gravity while airborne
+             ('A5', 0x4F2C): ('g_patch_kick_speed', 0x0180)}      # MOV #0x180,@#0x01B4 speed of a kick from standstill
 
 
 class Unsupported(Exception):

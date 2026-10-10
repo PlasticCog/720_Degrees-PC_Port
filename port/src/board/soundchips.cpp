@@ -299,14 +299,14 @@ void SoundChips::produce_sample()
 	const double tms = m_tms->sample_at_rate(output_rate());
 	double l = 0, r = 0;
 	// MAME routes: YM2151 L/R 0.60, POKEY1 left 1.35, POKEY2 right 1.35, TMS5220 both 0.75
-	l += out.data[0] / 32768.0 * 0.60 * m_gain_ym;
-	r += out.data[1] / 32768.0 * 0.60 * m_gain_ym;
+	l += out.data[0] / 32768.0 * 0.60 * m_gain_ym * debug_gain[0];
+	r += out.data[1] / 32768.0 * 0.60 * m_gain_ym * debug_gain[0];
 	const double pg = (32767.0 / 11 / 4) / 32768.0 / CYCLES_PER_SAMPLE;
-	l += std::min(32767.0, m_pokey_acc[0] * (32767.0 / 11 / 4) / CYCLES_PER_SAMPLE) / 32768.0 * 1.35 * m_gain_pokey;
-	r += std::min(32767.0, m_pokey_acc[1] * (32767.0 / 11 / 4) / CYCLES_PER_SAMPLE) / 32768.0 * 1.35 * m_gain_pokey;
+	l += std::min(32767.0, m_pokey_acc[0] * (32767.0 / 11 / 4) / CYCLES_PER_SAMPLE) / 32768.0 * 1.35 * m_gain_pokey * debug_gain[1];
+	r += std::min(32767.0, m_pokey_acc[1] * (32767.0 / 11 / 4) / CYCLES_PER_SAMPLE) / 32768.0 * 1.35 * m_gain_pokey * debug_gain[1];
 	(void)pg;
-	l += tms * 0.75 * m_gain_tms;
-	r += tms * 0.75 * m_gain_tms;
+	l += tms * 0.75 * m_gain_tms * debug_gain[2];
+	r += tms * 0.75 * m_gain_tms * debug_gain[2];
 	{
 		const double y = (out.data[0] + out.data[1]) / 65536.0 * 0.60 * m_gain_ym;
 		const double p0 = m_pokey_acc[0] * (32767.0 / 11 / 4) / CYCLES_PER_SAMPLE / 32768.0 * 1.35 * m_gain_pokey;

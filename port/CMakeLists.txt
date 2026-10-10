@@ -18,8 +18,29 @@ option(D720_REGENERATE "Re-run the static translators at configure time" OFF)
 # Static translation of the arcade program ROMs into C++ (src/game).
 # The generated code is derived from the user's ROMs and is not part of the repository.
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+# re-translate whenever the translators or their inputs change (hash stamp in src/game)
+set(D720_TRANSLATOR_INPUTS
+  ${REPO_ROOT}/tools/t11_to_cpp.py ${REPO_ROOT}/tools/m6502_to_cpp.py ${REPO_ROOT}/tools/codedb.py
+  ${REPO_ROOT}/tools/t11dis.py ${REPO_ROOT}/tools/romset.py ${REPO_ROOT}/tools/t11_cycles.txt
+  ${REPO_ROOT}/re/coverage/main_cov.txt ${REPO_ROOT}/re/coverage/main_edges.txt
+  ${REPO_ROOT}/re/coverage/sound_cov.txt ${REPO_ROOT}/re/coverage/sound_edges.txt)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${D720_TRANSLATOR_INPUTS})
+set(D720_TRANSLATOR_HASH "")
+foreach(f ${D720_TRANSLATOR_INPUTS})
+  if(EXISTS ${f})
+    file(SHA256 ${f} h)
+    string(APPEND D720_TRANSLATOR_HASH ${h})
+  endif()
+endforeach()
+string(SHA256 D720_TRANSLATOR_HASH "${D720_TRANSLATOR_HASH}")
+set(D720_STAMP ${CMAKE_CURRENT_SOURCE_DIR}/src/game/translator.sha256)
+set(D720_OLD_HASH "")
+if(EXISTS ${D720_STAMP})
+  file(READ ${D720_STAMP} D720_OLD_HASH)
+endif()
 if(D720_REGENERATE OR NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/game/files.cmake
-   OR NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/game/s65_code.cpp)
+   OR NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/game/s65_code.cpp
+   OR NOT D720_OLD_HASH STREQUAL D720_TRANSLATOR_HASH)
   if(NOT EXISTS ${D720_ROM_DIR}/136047-3126.7lm)
     message(FATAL_ERROR "720 Degrees ROM files not found in '${D720_ROM_DIR}'. "
       "Copy the rev 4 ROM set (MAME '720') there or pass -DD720_ROM_DIR=<folder>.")
@@ -35,6 +56,7 @@ if(D720_REGENERATE OR NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/game/files.cmak
       message(FATAL_ERROR "${tool} failed")
     endif()
   endforeach()
+  file(WRITE ${D720_STAMP} "${D720_TRANSLATOR_HASH}")
 endif()
 add_custom_target(regenerate
   COMMAND ${CMAKE_COMMAND} -E env D720_ROM_DIR=${D720_ROM_DIR} ${Python3_EXECUTABLE} -I tools/t11_to_cpp.py
@@ -112,9 +134,18 @@ target_include_directories(leveldata PUBLIC src/level)
 target_link_libraries(leveldata PUBLIC board)
 
 # ---------------------------------------------------------------------------
+# Dear ImGui (vendored in third_party/imgui): debug menu, controls window, level editor
+set(IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui)
+add_library(imgui STATIC
+  ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp
+  ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp ${IMGUI_DIR}/backends/imgui_impl_sdlrenderer3.cpp)
+target_include_directories(imgui PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+target_link_libraries(imgui PUBLIC SDL3::SDL3)
+
+# ---------------------------------------------------------------------------
 # The game
-add_executable(720degrees WIN32 src/app/main.cpp)
-target_link_libraries(720degrees PRIVATE gamecore leveldata SDL3::SDL3)
+add_executable(720degrees WIN32 src/app/main.cpp src/app/input_config.cpp src/app/debugui.cpp)
+target_link_libraries(720degrees PRIVATE gamecore leveldata imgui SDL3::SDL3)
 set(D720_OUTPUT_DIR "${REPO_ROOT}" CACHE PATH "Folder the finished game and editor are copied to (the ROMs go in its Game subfolder)")
 add_custom_command(TARGET 720degrees POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:SDL3::SDL3> $<TARGET_FILE_DIR:720degrees>
@@ -123,13 +154,7 @@ add_custom_command(TARGET 720degrees POST_BUILD
   COMMENT "Copying the game to ${D720_OUTPUT_DIR}")
 
 # ---------------------------------------------------------------------------
-# Level editor (Dear ImGui is vendored in third_party/imgui)
-set(IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui)
-add_library(imgui STATIC
-  ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp
-  ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp ${IMGUI_DIR}/backends/imgui_impl_sdlrenderer3.cpp)
-target_include_directories(imgui PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backends)
-target_link_libraries(imgui PUBLIC SDL3::SDL3)
+# Level editor
 
 add_executable(editor720 WIN32 src/editor/editor.cpp)
 target_link_libraries(editor720 PRIVATE gamecore leveldata imgui SDL3::SDL3)

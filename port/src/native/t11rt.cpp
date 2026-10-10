@@ -14,6 +14,8 @@ uint16_t shadow[256];
 int shadow_top = 0;
 uint16_t g_patch_town_alt_base = 0x6000;
 uint16_t g_patch_park_odd_base = 0xA000;
+uint16_t g_patch_gravity = 0x000C;
+uint16_t g_patch_kick_speed = 0x0180;
 
 void *g_game_fiber = nullptr;
 void *g_host_fiber = nullptr;

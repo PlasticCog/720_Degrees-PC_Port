@@ -507,7 +507,10 @@ void Board::render_line(int y)
 		const int color = (data >> 11) & 7;
 		dst[x] = (uint16_t)(128 + color * 16 + m_gfx.tiles[code * 64 + (ty & 7) * 8 + (tx & 7)]);
 		pri[x] = (~data >> 14) & 3;
+		if (debug.capture_tiles) m_dbg_tiles[y * SCREEN_W + x] = (uint16_t)code;
 	}
+	if (debug.hide_pf)
+		for (int x = 0; x < SCREEN_W; x++) dst[x] = 0;
 
 	// motion objects: linked list from entry 0, drawn in list order (MAME atarimo semantics)
 	std::fill(m_mobuf.begin(), m_mobuf.end(), 0xffff);
@@ -548,7 +551,7 @@ void Board::render_line(int y)
 			link = nlink;
 		}
 	}
-	for (int x = 0; x < SCREEN_W; x++)
+	for (int x = 0; x < SCREEN_W && !debug.hide_mo; x++)
 	{
 		const uint16_t mo = m_mobuf[x];
 		if (mo == 0xffff) continue;
@@ -561,7 +564,7 @@ void Board::render_line(int y)
 	}
 
 	// alphanumerics on top, pen 0 transparent
-	for (int x = 0; x < SCREEN_W; x++)
+	for (int x = 0; x < SCREEN_W && !debug.hide_alpha; x++)
 	{
 		const uint16_t data = m_alpha[(y >> 3) * 64 + (x >> 3)];
 		const int pen = m_gfx.chars[(data & 0x3ff) * 64 + (y & 7) * 8 + (x & 7)];
@@ -634,5 +637,15 @@ bool write_png(const std::string &path, const uint32_t *argb, int w, int h)
 		uint8_t(h >> 24), uint8_t(h >> 16), uint8_t(h >> 8), uint8_t(h), 8, 2, 0, 0, 0});
 	chunk("IDAT", z);
 	chunk("IEND", {});
+	return true;
+}
+
+bool Board::debug_send_sound(uint8_t cmd)
+{
+	if (m_soundlatch_pending) return false;
+	m_soundlatch = cmd;
+	m_soundlatch_pending = true;
+	m_link.sound_set_nmi(true);
+	if (on_sound_command) on_sound_command(cmd);
 	return true;
 }
