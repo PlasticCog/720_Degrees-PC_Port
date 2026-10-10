@@ -321,14 +321,14 @@ LOGIC_TABLE(boot,
 	irq_routine("F", 0x8924, "irq_32v_count", irq_32v_count, 156),
 	wait_routine("F", 0x8D60, "wait_button_press", wait_button_press, 21),
 	asm_routine("F", 0xF40C, "init_display_b6", init_display_b6, 336),
-	asm_routine("F", 0xF4C0, "print_ok", print_ok, 293),
+	asm_routine("F", 0xF4C0, "print_ok", print_ok, 117),
 	c_routine("F", 0xF8EA, "button_hold_timer", button_hold_timer, 0, 456),
 	c_routine("F", 0x8E2E, "rotary_step", rotary_step, 0, 230),
 	wait_routine("B6", 0x72B0, "selftest_colour_screen", selftest_colour_screen, 21),
 	c_routine("F", 0xF896, "rotary_zone_step", rotary_zone_step, 0, 111),
 	irq_routine("F", 0x8938, "irq_vblank_selftest", irq_vblank_selftest, 612),
 	wait_routine("F", 0xF90E, "selftest_scroll_screen", selftest_scroll_screen, 21),
-	c_routine("F", 0xF98E, "selftest_items_screen", selftest_items_screen, 0, -563533),
+	c_routine("F", 0xF98E, "selftest_items_screen", selftest_items_screen, 0, 8367),
 )
 
 }

@@ -62,11 +62,11 @@ def parse(text):
             key, name, calls, rest = m.group(1), m.group(2), int(m.group(3)), m.group(4)
             r = {'name': name, 'calls': calls, 'tested': 0, 'bad': 0, 'cycles': 0.0, 'native': 0.0, 'charged': None,
                  'waits': 0, 'unwound': 0, 'first': None}
-            t = re.search(r'tested\s+(\d+)\s+mismatches (\d+)\s+original (\d+) cycles/call \(charged (\d+)\)', rest)
+            t = re.search(r'tested\s+(\d+)\s+mismatches (\d+)\s+original (\d+) cycles/call \(charged (-?\d+)\)', rest)
             if t:
                 r['tested'], r['bad'] = int(t.group(1)), int(t.group(2))
                 r['cycles'], r['charged'] = float(t.group(3)), int(t.group(4))
-            n = re.search(r'\(charged \d+\) native (\d+)', rest)
+            n = re.search(r'\(charged -?\d+\) native (\d+)', rest)
             if n:
                 r['native'] = float(n.group(1))
             w = re.search(r'waits \(not compared\) (\d+)', rest)

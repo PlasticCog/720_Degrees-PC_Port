@@ -151,10 +151,10 @@ void flash_text_colours()
 }
 
 LOGIC_TABLE(screen,
-	asm_routine("F", 0x8B52, "draw_large_char", draw_large_char, 836),
+	asm_routine("F", 0x8B52, "draw_large_char", draw_large_char, 835),
 	asm_routine("F", 0x8D2C, "clear_playfield_ram", clear_playfield_ram, 69),
 	asm_routine("F", 0x8D3E, "clear_text_ram", clear_text_ram, 69),
-	irq_routine("F", 0xB9D4, "irq_32v_play", irq_32v_play, 617),
+	irq_routine("F", 0xB9D4, "irq_32v_play", irq_32v_play, 618),
 	asm_routine("F", 0xDD10, "flash_text_colours", flash_text_colours, 57),
 )
 

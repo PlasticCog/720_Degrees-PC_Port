@@ -5,6 +5,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 extern const logic::Original t11_originals[];
@@ -23,6 +24,7 @@ const Routine *routines_screen(int &count);
 const Routine *routines_boot(int &count);
 const Routine *routines_parks(int &count);
 const Routine *routines_scores(int &count);
+const Routine *routines_fhigh(int &count);
 
 bool g_enabled = true;
 bool g_difftest = false;
@@ -40,7 +42,7 @@ struct Slot {
 };
 
 // the routine tables of the routines_*.cpp files
-const TableFn TABLES[] = { routines_core, routines_small, routines_misc, routines_world, routines_system, routines_wait, routines_screen, routines_boot, routines_parks, routines_scores };
+const TableFn TABLES[] = { routines_core, routines_small, routines_misc, routines_world, routines_system, routines_wait, routines_screen, routines_boot, routines_parks, routines_scores, routines_fhigh };
 
 std::vector<Routine> &registry()
 {
@@ -57,7 +59,7 @@ std::vector<Routine> &registry()
 
 std::vector<Slot> g_slots;
 bool g_inited = false;
-int g_testing = 0;              // > 0 while a difference test runs (nested calls are not tested)
+int g_testing = 0;              // depth of difference tests in progress
 bool g_original_side = false;   // the original side of a test runs without replacements
 
 constexpr uint16_t RETURN_SENTINEL = 0xFFFE;
@@ -129,18 +131,30 @@ std::string fmt(const char *f, ...)
 	return buf;
 }
 
+// A rewritten routine called by another rewritten routine under test (on the replacement's
+// side) is tested as well, with its own snapshots; the outer test then continues with the
+// original's result of the inner call, as everywhere else.
+struct Snapshots { Board::Snapshot b0, b1, b2; };
+std::vector<std::unique_ptr<Snapshots>> g_snapshots;   // one set per nesting depth
+
 void difftest(Slot &s)
 {
-	static Board::Snapshot b0, b1, b2;
+	const bool outer = g_testing == 0;
+	if ((int)g_snapshots.size() <= g_testing) g_snapshots.push_back(std::make_unique<Snapshots>());
+	Snapshots &sn = *g_snapshots[g_testing];
+	Board::Snapshot &b0 = sn.b0, &b1 = sn.b1, &b2 = sn.b2;
 	g_testing++;
 	const Ctx t0 = T;
 	const int sh0 = shadow_top;
 	const bool atomic0 = g_atomic;
+	const uint16_t min_outer = g_min_sp;
+	const uint32_t steps0 = outer ? 0 : g_atomic_steps;
 	B->save(b0);
 	const uint16_t args[4] = { rw(t0.r[6] + 2), rw(t0.r[6] + 4), rw(t0.r[6] + 6), rw(t0.r[6] + 8) };
 	g_atomic = true;
-	// a polling routine that has to wait is given up on quickly
-	g_atomic_limit = (s.r->flags & WAIT) ? 20000 : ATOMIC_STEP_LIMIT;
+	// a polling routine that has to wait is given up on quickly (the outermost test sets the
+	// budget, nested tests share it)
+	if (outer) g_atomic_limit = (s.r->flags & WAIT) ? 20000 : ATOMIC_STEP_LIMIT;
 
 	// a call that waits for an interrupt cannot be compared: run it normally instead
 	auto give_up = [&]() {
@@ -149,7 +163,8 @@ void difftest(Slot &s)
 		T = t0;
 		shadow_top = sh0;
 		g_atomic = atomic0;
-		g_atomic_limit = ATOMIC_STEP_LIMIT;
+		if (outer) g_atomic_limit = ATOMIC_STEP_LIMIT;
+		g_min_sp = min_outer;
 		s.timeouts++;
 		// the routine now waits for real: what interrupts call meanwhile is tested as usual
 		g_testing--;
@@ -159,7 +174,7 @@ void difftest(Slot &s)
 	// the original translation, without any replacements
 	T.check_irqs = true;
 	g_min_sp = 0xffff;
-	g_atomic_steps = 0;
+	g_atomic_steps = steps0;
 	g_original_side = true;
 	T.r[7] = s.orig->addr;
 	try { s.orig->fn(); }
@@ -176,7 +191,7 @@ void difftest(Slot &s)
 	shadow_top = sh0;
 	B->load(b0);
 	g_min_sp = 0xffff;
-	g_atomic_steps = 0;
+	g_atomic_steps = steps0;
 	try { run_native(*s.r); }
 	catch (const AtomicTimeout &) { give_up(); return; }
 	const Ctx t2 = T;
@@ -233,7 +248,8 @@ void difftest(Slot &s)
 	T.check_irqs = true;
 	shadow_top = sh0;
 	g_atomic = atomic0;
-	g_atomic_limit = ATOMIC_STEP_LIMIT;
+	if (outer) g_atomic_limit = ATOMIC_STEP_LIMIT;
+	g_min_sp = std::min<uint16_t>({min_outer, min1, min2});
 	g_testing--;
 }
 
@@ -246,7 +262,7 @@ bool enter(int index)
 	Slot &s = g_slots[index];
 	if (!s.r) return false;
 	s.calls++;
-	if (g_difftest && !g_testing)
+	if (g_difftest)
 		difftest(s);
 	else
 		run(s);

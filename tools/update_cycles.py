@@ -23,15 +23,15 @@ def main():
     measured = {}
     for line in open(sys.argv[1], encoding='utf-8', errors='replace'):
         m = re.match(r'\s+\S+:[0-9A-F]{4} (\S+)\s+calls\s+\d+\s+tested\s+(\d+)\s+mismatches \d+\s+original (\d+) cycles/call'
-                     r' \(charged (\d+)\)(?: native (\d+))?', line)
+                     r' \(charged (-?\d+)\)(?: native (\d+))?', line)
         if m and int(m.group(2)) > 0:
             orig, charged = int(m.group(3)), int(m.group(4))
-            measured[m.group(1)] = charged + orig - int(m.group(5)) if m.group(5) else orig
+            measured[m.group(1)] = max(0, charged + orig - int(m.group(5))) if m.group(5) else orig
     changed = 0
     for path in glob.glob(os.path.join(ROOT, 'port', 'src', 'logic', 'routines_*.cpp')):
         s = open(path, encoding='utf-8').read()
         for name, cyc in measured.items():
-            s, n = re.subn(r'((?<![A-Za-z_])(?:c|asm|irq)_routine\("[A-Z0-9]+", 0x[0-9A-Fa-f]+, "%s",[^)]*?, )\d+\)' % re.escape(name), r'\g<1>%d)' % cyc, s)
+            s, n = re.subn(r'((?<![A-Za-z_])(?:c|asm|irq)_routine\("[A-Z0-9]+", 0x[0-9A-Fa-f]+, "%s",[^)]*?, )-?\d+\)' % re.escape(name), r'\g<1>%d)' % cyc, s)
             changed += n
         open(path, 'w', encoding='utf-8', newline='\n').write(s)
     print('updated %d routine costs from %d measurements' % (changed, len(measured)))

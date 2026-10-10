@@ -208,15 +208,15 @@ LOGIC_TABLE(parks,
 	c_routine("B3", 0x7F80, "clear_0fb4", clear_0fb4, 0, 1767),
 	c_routine("A7", 0x5602, "set_ticket_bits", set_ticket_bits, 0, 447),
 	c_routine("F", 0xF002, "add_cash", add_cash, 0, 177),
-	c_routine("B3", 0x65D6, "add_park_counter", add_park_counter, 0, 155),
-	c_routine("A7", 0x5360, "park_at_gate", park_at_gate, 0, 118),
+	c_routine("B3", 0x65D6, "add_park_counter", add_park_counter, 0, 154),
+	c_routine("A7", 0x5360, "park_at_gate", park_at_gate, 0, 122),
 	c_routine("A7", 0x5326, "park_at_area", park_at_area, 0, 201),
 	c_routine("F", 0xCDD0, "find_slot_with", find_slot_with, 0, 2769),
 	c_routine("F", 0xE106, "call_cf5e_keep_banks", call_cf5e_keep_banks, 0, 441),
 	c_routine("A7", 0x50C8, "a7_50c8", a7_50c8, 0, 99),
 	c_routine("F", 0xDA02, "open_park_gate", open_park_gate, 0, 897),
 	c_routine("B3", 0x6E38, "set_medal_level", set_medal_level, 0, 548),
-	c_routine("F", 0xD97C, "set_gate_animation", set_gate_animation, 0, 12688),
+	c_routine("F", 0xD97C, "set_gate_animation", set_gate_animation, 0, 786),
 )
 
 }

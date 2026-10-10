@@ -248,11 +248,11 @@ void selftest_charset_screen()
 }
 
 LOGIC_TABLE(scores,
-	c_routine("B6", 0x68E2, "print_time", print_time, 0, 1148),
+	c_routine("B6", 0x68E2, "print_time", print_time, 0, 906),
 	asm_routine("B6", 0x6938, "divide_time", divide_time, 189),
-	c_routine("B6", 0x6FAE, "draw_bar_table", draw_bar_table, 0, -138748),
+	c_routine("B6", 0x6FAE, "draw_bar_table", draw_bar_table, 0, 11661),
 	wait_routine("B6", 0x6F48, "statistics_screens", statistics_screens, 21),
-	c_routine("B6", 0x7304, "colour_test_pattern", colour_test_pattern, 0, -521528),
+	c_routine("B6", 0x7304, "colour_test_pattern", colour_test_pattern, 0, 52932),
 	wait_routine("B6", 0x706A, "selftest_charset_screen", selftest_charset_screen, 21),
 )
 
