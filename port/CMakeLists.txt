@@ -123,6 +123,23 @@ add_custom_command(TARGET 720degrees POST_BUILD
   COMMENT "Copying the game to ${D720_GAME_DIR}")
 
 # ---------------------------------------------------------------------------
+# Level editor (Dear ImGui is vendored in third_party/imgui)
+set(IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui)
+add_library(imgui STATIC
+  ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp
+  ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp ${IMGUI_DIR}/backends/imgui_impl_sdlrenderer3.cpp)
+target_include_directories(imgui PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+target_link_libraries(imgui PUBLIC SDL3::SDL3)
+
+add_executable(editor720 WIN32 src/editor/editor.cpp)
+target_link_libraries(editor720 PRIVATE gamecore leveldata imgui SDL3::SDL3)
+add_custom_command(TARGET editor720 POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:SDL3::SDL3> $<TARGET_FILE_DIR:editor720>
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${D720_GAME_DIR}
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:editor720> $<TARGET_FILE:SDL3::SDL3> ${D720_GAME_DIR}
+  COMMENT "Copying the level editor to ${D720_GAME_DIR}")
+
+# ---------------------------------------------------------------------------
 # Tools
 add_executable(ref720 src/ref/refmain.cpp)
 target_link_libraries(ref720 PRIVATE refcpu)
@@ -138,5 +155,7 @@ if(MINGW)
   foreach(t ref720 verify720 render720 leveltool)
     target_link_options(${t} PRIVATE -static)
   endforeach()
-  target_link_options(720degrees PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic)
+  foreach(t 720degrees editor720)
+    target_link_options(${t} PRIVATE -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic)
+  endforeach()
 endif()

@@ -13,8 +13,9 @@ inline bool apply_mod_file(RomSet &roms, const std::string &path, std::string &e
 	ModPatch p;
 	if (!p.load(path, err)) return false;
 	p.apply(roms);
-	t11rt::g_patch_town_alt_base = p.town_alt_base;
-	t11rt::g_patch_park_odd_base = p.park_odd_base;
+	// a mod that leaves a patch point at its default keeps what an earlier mod set
+	if (p.town_alt_base != 0x6000) t11rt::g_patch_town_alt_base = p.town_alt_base;
+	if (p.park_odd_base != 0xA000) t11rt::g_patch_park_odd_base = p.park_odd_base;
 	return true;
 }
 

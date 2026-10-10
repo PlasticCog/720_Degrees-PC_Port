@@ -10,9 +10,10 @@
 
 namespace {
 struct LevelRenderInfo { int level; int tile_bank[2]; uint16_t palette[256]; };
-// Palettes are captured from the running game (they are loaded by game code, not stored
-// per level).  level_palettes.inc is produced locally by tools/capture_palettes.py; without
-// it the editor captures them at startup (see LevelSet::set_render_info).
+// Palettes are set up by game code at runtime, not stored per level.  The editor captures
+// them by running the game headless on first start (see LevelSet::set_palette); a locally
+// generated level_palettes.inc, if present, provides defaults for other tools.  Its tile
+// bank values are not used: the banks come from ROM tables.
 #if __has_include("level_palettes.inc")
 #include "level_palettes.inc"
 #else
@@ -35,6 +36,8 @@ const char *LEVEL_NAMES[8] = {
 
 // fixed-ROM tables (see tools/levels.py)
 constexpr uint32_t MAP_BANK_TAB = 0xFEB2, BLOCK_BANK_TAB = 0xFEA2, SUBST_TAB = 0xFF54;
+constexpr uint32_t FEC2_BANK0_TAB = 0xFEC2, FECA_BANK1_TAB = 0xFECA;    // starting tile banks per level
+constexpr int PARK_LAYOUTS = 6, MAX_ROWS = 128;   // maps also end at the next map (see load)
 constexpr uint16_t TOWN_BASE = 0x0180;
 constexpr int TOWN_ROWS = 24;
 
@@ -92,8 +95,8 @@ bool LevelSet::decode_block(LevelBlock &blk, int level, uint16_t p, bool alt, st
 {
 	const auto &m = m_roms->main;
 	uint16_t base = r16(BLOCK_BANK_TAB + 2 * level);
-	if (alt) base = 0x6000;
-	else if (level >= 1 && level <= 4 && (p & 1)) base = 0xA000;
+	if (alt) base = town_alt_base;
+	else if (level >= 1 && level <= 4 && (p & 1)) base = park_odd_base;
 	Reader rd{m, (uint16_t)(((p >> 3) & 0x1C00) + base), (uint32_t)(0x4000 + (p & 0x1fff))};
 	const uint8_t b0 = rd.at(0), b1 = rd.at(1), b2 = rd.at(2);
 	blk.half[0].attr = b0 & 0x7f;
@@ -155,36 +158,46 @@ bool LevelSet::load(const RomSet &roms, std::string &err)
 	maps.clear();
 	auto b3 = [](uint32_t a) { return 0x10000 + 3 * 0x2000 + (a - 0x6000); };
 	const auto &m = roms.main;
-	struct Def { int level, cls; };
-	std::vector<Def> defs = { {0, 0} };
-	for (int lv = 1; lv <= 4; lv++)
-		for (int c = 0; c < 4; c++) defs.push_back({lv, c});
-	defs.push_back({5, 0}); defs.push_back({6, 0}); defs.push_back({7, 0});
+	// Map table (bank 3, 0x7F8C): one word per level.  For the parks it points to a
+	// sub-table of six map bases followed by six row strides; the layout in use is FE8F[n]
+	// (0,1,1,2,2,3,3,4,4,5) for a progress counter n.  Maps are stored back to back, so a map
+	// ends where the next one in the same map bank begins.
+	struct Def { int level, layout; uint16_t base; int stride; uint16_t mapbank; };
+	std::vector<Def> defs;
+	for (int lv = 0; lv < 8; lv++)
+	{
+		const uint16_t mapbank = r16(MAP_BANK_TAB + 2 * lv);
+		if (lv >= 1 && lv <= 4)
+		{
+			const uint16_t sub = r16(b3(0x7F8C) + 2 * lv);
+			for (int k = 0; k < PARK_LAYOUTS; k++)
+				defs.push_back({lv, k, r16(b3(sub) + 2 * k), m[b3(sub) + 12 + k], mapbank});
+		}
+		else
+			defs.push_back({lv, 0, r16(b3(0x7F8C) + 2 * lv), m[b3(0x7F9C) + lv], mapbank});
+	}
+	// tile banks when a level starts (FEC2/FECA); the parks then switch bank 1 to the value
+	// in a table indexed by park (bank 3 page 0x3800, 0x567A, bits 3+)
+	const size_t park_bank_tab = (size_t)rom_bank_offset(0x3800) + (0x567A - 0x4000);
 
 	for (const Def &d : defs)
 	{
 		LevelMap lm;
 		lm.level = d.level;
-		lm.cls = d.cls;
+		lm.layout = d.layout;
 		char nm[64];
-		if (d.level >= 1 && d.level <= 4) snprintf(nm, sizeof(nm), "%s, class %d", LEVEL_NAMES[d.level], d.cls + 1);
+		if (d.level >= 1 && d.level <= 4) snprintf(nm, sizeof(nm), "%s, layout %d", LEVEL_NAMES[d.level], d.layout + 1);
 		else snprintf(nm, sizeof(nm), "%s", LEVEL_NAMES[d.level]);
 		lm.name = nm;
-		if (d.level >= 1 && d.level <= 4)
-		{
-			const uint16_t sub = r16(b3(0x7F8C) + 2 * d.level);
-			// two duplicate maps exist for the same park; skip identical class entries
-			lm.base = r16(b3(sub) + 2 * d.cls);
-			lm.stride = m[b3(sub) + 12 + d.cls];
-		}
-		else
-		{
-			lm.base = r16(b3(0x7F8C) + 2 * d.level);
-			lm.stride = m[b3(0x7F9C) + d.level];
-		}
+		lm.base = d.base;
+		lm.stride = d.stride;
 		lm.cols = lm.stride / 2;
-		const uint16_t mapbank = r16(MAP_BANK_TAB + 2 * d.level);
-		const int maxrows = d.level == 0 ? TOWN_ROWS : 64;
+		if (lm.cols == 0) continue;
+		const uint16_t mapbank = d.mapbank;
+		int maxrows = d.level == 0 ? TOWN_ROWS : MAX_ROWS;
+		for (const Def &o : defs)
+			if (o.mapbank == d.mapbank && o.base > d.base)
+				maxrows = std::min(maxrows, (o.base - d.base) / d.stride);
 		std::map<std::pair<uint16_t, bool>, int> index;
 		std::vector<int> cells;
 		std::vector<uint8_t> alts;
@@ -215,7 +228,7 @@ bool LevelSet::load(const RomSet &roms, std::string &err)
 					if (!decode_block(blk, d.level, p, alt, e2))
 					{
 						if (getenv("D720_LEVEL_DEBUG"))
-							fprintf(stderr, "level %d class %d cell %d,%d P=%04X alt=%d: %s\n", d.level, d.cls, cx, cy, p, (int)alt, e2.c_str());
+							fprintf(stderr, "level %d layout %d cell %d,%d P=%04X alt=%d: %s\n", d.level, d.layout, cx, cy, p, (int)alt, e2.c_str());
 						ok = false;
 						break;
 					}
@@ -238,8 +251,12 @@ bool LevelSet::load(const RomSet &roms, std::string &err)
 		if (lm.rows == 0) continue;
 		const LevelRenderInfo *ri = &LEVEL_RENDER_INFO[0];
 		for (const auto &r : LEVEL_RENDER_INFO) if (r.level == d.level) ri = &r;
-		lm.tile_bank[0] = ri->tile_bank[0];
-		lm.tile_bank[1] = ri->tile_bank[1];
+		for (int i = 0; i < 16; i++) lm.subst[i] = r16(r16(SUBST_TAB + 2 * d.level) + 2 * i);
+		lm.tile_bank[0] = m[FEC2_BANK0_TAB + d.level] & 15;
+		lm.tile_bank[1] = m[FECA_BANK1_TAB + d.level] & 15;
+		if (d.level >= 1 && d.level <= 4 && park_bank_tab + 2 * d.level < m.size())
+			lm.tile_bank[1] = (m[park_bank_tab + 2 * (d.level - 1)] >> 3) & 15;
+		lm.zone_banks = d.level == 0;
 		memcpy(lm.palette.data(), ri->palette, sizeof(ri->palette));
 		bool any = false;
 		for (uint16_t v : lm.palette) any |= v != 0;
@@ -248,7 +265,7 @@ bool LevelSet::load(const RomSet &roms, std::string &err)
 				lm.palette[i] = (uint16_t)(((i & 15) * 0x1110) | 0x000f);
 		bool dup = false;
 		for (auto &o : maps)
-			if (o.level == lm.level && o.base == lm.base && o.stride == lm.stride) { o.shared_classes.push_back(lm.cls); dup = true; }
+			if (o.level == lm.level && o.base == lm.base && o.stride == lm.stride) { o.shared_layouts.push_back(lm.layout); dup = true; }
 		if (dup) continue;
 		maps.push_back(std::move(lm));
 	}
@@ -399,6 +416,8 @@ void ModPatch::apply(RomSet &roms) const
 
 namespace {
 // linear writer over the 8+1 relative pages of one bank base
+constexpr uint16_t GROUP_TOWN_ALT = 9, GROUP_PARK_ODD = 10;   // extension groups (see build_patch)
+
 struct PageSpace {
 	uint16_t base;                       // bank register base (low bits = extension group)
 	std::vector<uint8_t> bytes;          // linear image, page k at k*0x2000
@@ -424,30 +443,47 @@ ModPatch LevelSet::build_patch(const RomSet &orig, std::string &report) const
 {
 	ModPatch patch;
 	report.clear();
-	int next_group = 1;
-	bool park_secondary_used = false;
+	(void)orig;
 	auto add_chunk = [&](uint32_t off, std::vector<uint8_t> data) {
 		patch.required_size = std::max<uint32_t>(patch.required_size, off + (uint32_t)data.size());
 		patch.chunks.push_back({off, std::move(data)});
 	};
-	(void)orig;
+	auto emit_space = [&](const PageSpace &ps) {
+		for (size_t page = 0; page * 0x2000 < ps.bytes.size(); page++)
+		{
+			const uint16_t bankreg = (uint16_t)(ps.base + page * 0x400);
+			const uint32_t off = (uint32_t)rom_bank_offset(bankreg);
+			const size_t from = page * 0x2000;
+			const size_t len = std::min<size_t>(0x2000, ps.bytes.size() - from);
+			add_chunk(off, std::vector<uint8_t>(ps.bytes.begin() + from, ps.bytes.begin() + from + len));
+		}
+	};
+
+	// Extension groups are fixed per level so that mods editing different levels can be
+	// combined: level L keeps its blocks in group 1+L, the town's alternate cells use one
+	// group and the parks share another for their odd block pointers.  The odd-pointer bank
+	// is a single patch point serving all four parks, so editing any park relocates them all.
+	bool any_park_dirty = false;
+	for (const LevelMap &lm : maps) any_park_dirty |= lm.dirty && lm.level >= 1 && lm.level <= 4;
+	PageSpace park_sec{GROUP_PARK_ODD};
+	bool park_sec_used = false;
 
 	for (int level = 0; level < 8; level++)
 	{
+		const bool town = level == 0;
+		const bool park = level >= 1 && level <= 4;
 		std::vector<const LevelMap *> lmaps;
-		bool dirty = false;
+		bool dirty = park && any_park_dirty;
 		for (const LevelMap &lm : maps)
 			if (lm.level == level) { lmaps.push_back(&lm); dirty |= lm.dirty; }
 		if (!dirty || lmaps.empty()) continue;
 
-		// Relocate every block of every map of this level into extension pages.
-		// Two spaces: primary (the level block bank table entry) and secondary
-		// (town: alternate-cell bank; parks: odd-pointer bank), each up to 64 KB.
-		const bool town = level == 0;
-		const bool park = level >= 1 && level <= 4;
-		const bool can_secondary = town || (park && !park_secondary_used);
-		PageSpace prim{(uint16_t)next_group++};
-		PageSpace sec{(uint16_t)(can_secondary ? next_group++ : 0)};
+		// Two spaces: primary (the level's block bank table entry) and secondary (town:
+		// alternate-cell bank; parks: shared odd-pointer bank), each up to 64 KB.
+		PageSpace prim{(uint16_t)(1 + level)};
+		PageSpace town_sec{GROUP_TOWN_ALT};
+		PageSpace &sec = town ? town_sec : park_sec;
+		const bool can_secondary = town || park;
 		bool sec_used = false;
 
 		struct Placed { uint16_t ptr; bool secondary; };
@@ -507,8 +543,8 @@ ModPatch LevelSet::build_patch(const RomSet &orig, std::string &report) const
 				                         : (try_space(prim, false) || try_space(sec, true));
 				if (!ok)
 				{
-					report += "ERROR: level " + std::to_string(level) + ": block data does not fit (" +
-						std::to_string(prim.used + sec.used) + " bytes)\n";
+					report += "ERROR: " + std::string(LEVEL_NAMES[level]) + ": the block data does not fit in the space available (" +
+						std::to_string(prim.used + sec.used) + " bytes); use fewer distinct blocks\n";
 					patch.chunks.clear();
 					return patch;
 				}
@@ -517,18 +553,9 @@ ModPatch LevelSet::build_patch(const RomSet &orig, std::string &report) const
 				dedupe[key] = pl;
 			}
 		}
-		auto emit_space = [&](const PageSpace &ps) {
-			for (size_t page = 0; page * 0x2000 < ps.bytes.size(); page++)
-			{
-				const uint16_t bankreg = (uint16_t)(ps.base + page * 0x400);
-				const uint32_t off = (uint32_t)rom_bank_offset(bankreg);
-				const size_t from = page * 0x2000;
-				const size_t len = std::min<size_t>(0x2000, ps.bytes.size() - from);
-				add_chunk(off, std::vector<uint8_t>(ps.bytes.begin() + from, ps.bytes.begin() + from + len));
-			}
-		};
 		emit_space(prim);
-		if (sec_used) emit_space(sec);
+		if (town && sec_used) emit_space(town_sec);
+		park_sec_used |= park && sec_used;
 
 		const uint16_t mapbank = r16(MAP_BANK_TAB + 2 * level);
 		std::vector<uint8_t> bitmap(6 * TOWN_ROWS, 0);
@@ -557,29 +584,38 @@ ModPatch LevelSet::build_patch(const RomSet &orig, std::string &report) const
 		add_chunk(BLOCK_BANK_TAB + 2 * level, { (uint8_t)prim.base, (uint8_t)(prim.base >> 8) });
 		if (town)
 		{
-			patch.town_alt_base = sec.base;
+			patch.town_alt_base = town_sec.base;
 			add_chunk((uint32_t)rom_bank_offset(0x2C00) + (0x7F16 - 0x6000), bitmap);
 		}
-		if (park && sec_used)
-		{
-			patch.park_odd_base = sec.base;
-			park_secondary_used = true;
-		}
 		char line[200];
-		snprintf(line, sizeof(line), "level %d: %zu map(s) relocated, %zu + %zu bytes of block data\n",
-			level, lmaps.size(), prim.used, sec_used ? sec.used : (size_t)0);
+		snprintf(line, sizeof(line), "%s: %zu map(s) relocated, %zu bytes of block data%s\n",
+			LEVEL_NAMES[level], lmaps.size(), prim.used + (town && sec_used ? town_sec.used : 0),
+			park && sec_used ? " (plus the shared park bank)" : "");
 		report += line;
+	}
+	if (park_sec_used)
+	{
+		emit_space(park_sec);
+		patch.park_odd_base = park_sec.base;
+		report += "parks: " + std::to_string(park_sec.used) + " bytes in the shared odd-pointer bank\n";
+	}
+	// coalesce the byte patches into contiguous runs (later writes win)
+	std::map<uint32_t, uint8_t> bytes;
+	for (const auto &c : patch.chunks)
+		for (size_t i = 0; i < c.data.size(); i++) bytes[c.offset + (uint32_t)i] = c.data[i];
+	patch.chunks.clear();
+	for (const auto &kv : bytes)
+	{
+		if (patch.chunks.empty() || patch.chunks.back().offset + patch.chunks.back().data.size() != kv.first)
+			patch.chunks.push_back({kv.first, {}});
+		patch.chunks.back().data.push_back(kv.second);
 	}
 	return patch;
 }
 
-void LevelSet::set_render_info(int level, const int tile_bank[2], const uint16_t palette[256])
+void LevelSet::set_palette(int level, const uint16_t palette[256])
 {
 	for (LevelMap &lm : maps)
 		if (lm.level == level)
-		{
-			lm.tile_bank[0] = tile_bank[0];
-			lm.tile_bank[1] = tile_bank[1];
 			memcpy(lm.palette.data(), palette, 256 * sizeof(uint16_t));
-		}
 }

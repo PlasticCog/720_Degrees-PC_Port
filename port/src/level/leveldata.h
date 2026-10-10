@@ -15,7 +15,7 @@
 struct RomSet;
 
 struct BlockHalf {
-	uint8_t attr = 0;                    // terrain attribute byte (top half: 7 bits)
+	uint8_t attr = 0;                    // zone byte (top half: 7 bits); see LevelMap::half_bank1
 	std::array<uint16_t, 128> tiles{};   // raw tile words (codes < 16 are randomised ground)
 };
 
@@ -30,26 +30,33 @@ struct LevelBlock {
 	bool operator==(const LevelBlock &o) const;
 };
 
-struct LevelInfo {
-	int level = 0, cls = 0;
-	const char *name = "";
-	int rows = 0;                        // map rows
-};
-
 struct LevelMap {
-	int level = 0, cls = 0;
+	int level = 0;                       // 0 Skate City, 1-4 parks, 5-7 attract screens
+	int layout = 0;                      // parks: map variant 0-5 (FE8F maps game progress to it)
 	std::string name;
 	bool dirty = false;                  // edited: relocate this level when building a mod
-	std::vector<int> shared_classes;     // other classes using the very same map
+	std::vector<int> shared_layouts;     // other park layouts using the very same map
 	uint16_t base = 0;                   // banked pointer of cell (0,0)
 	int stride = 0;                      // bytes per map row
 	int cols = 0, rows = 0;
 	std::vector<int> cells;              // block index per cell (rows*cols), -1 = invalid
 	std::vector<uint8_t> alt;            // town: cell uses the alternate block bank
 	std::vector<LevelBlock> blocks;
-	// rendering hints
-	int tile_bank[2] = {0, 0};
+	// rendering
+	int tile_bank[2] = {0, 0};           // playfield tile banks selected by tile word bit 10
+	bool zone_banks = false;             // Skate City: a half's zone byte selects tile bank 1
 	std::array<uint16_t, 256> palette{};
+	std::array<uint16_t, 16> subst{};    // ground placeholder substitution (tile codes 0..15)
+
+	// Tile bank 1 while a block half is on screen.  In Skate City the half's zone byte
+	// (BlockHalf::attr) holds the bank in bits 3+ and a switch mode in bits 0-2; the game
+	// switches bank 1 as the view enters zoned halves.  Halves with zone 0 keep the current
+	// bank (none of the original ones use bank 1 tiles).
+	int half_bank1(const BlockHalf &h) const
+	{
+		const int z = (h.attr >> 3) & 15;
+		return zone_banks && z ? z : tile_bank[1];
+	}
 
 	int cell(int cx, int cy) const { return cells[cy * cols + cx]; }
 	uint16_t cell_ptr(int cx, int cy) const { return (uint16_t)(base + cy * stride + cx * 2); }
@@ -72,13 +79,16 @@ class LevelSet {
 public:
 	bool load(const RomSet &roms, std::string &err);
 	std::vector<LevelMap> maps;          // town, parks x classes, screens
+	// banks behind the translated code's patch points; set from a mod before load() to
+	// decode a modded ROM image
+	uint16_t town_alt_base = 0x6000, park_odd_base = 0xA000;
 
 	// decode helpers (exposed for tools)
 	static int rom_bank_offset(uint16_t bankreg);          // ROM offset of an 8K page selected by bank register value
 	// encode a half; returns RLE bytes
 	static std::vector<uint8_t> encode_half(const BlockHalf &h);
-	// replace the rendering palette / tile banks of every map of a level (captured from the game)
-	void set_render_info(int level, const int tile_bank[2], const uint16_t palette[256]);
+	// replace the rendering palette of every map of a level (captured from the running game)
+	void set_palette(int level, const uint16_t palette[256]);
 	// build a mod patch for all maps that contain modifications
 	ModPatch build_patch(const RomSet &original, std::string &report) const;
 
