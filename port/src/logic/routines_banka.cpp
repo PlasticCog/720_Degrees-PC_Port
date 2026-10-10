@@ -437,10 +437,10 @@ void town_music()
 
 // ---------------------------------------------------------------- objects
 
-// A5:4984  draw_tile_block(int kind, int row, int col): draw a 3 x 3 block of text tiles
+// A5:4984  draw_text_block_3x3(int kind, int row, int col): draw a 3 x 3 block of text tiles
 // (table 0x495C: kind 0, or any other kind as 9; colour 0x0188) at row * 0x180 plus the
 // column offset 0x4980[col].  A non-zero kind is written back as 9 into the argument.
-uint16_t draw_tile_block(const Args &a)
+uint16_t draw_text_block_3x3(const Args &a)
 {
 	call(0x8068, {});                                  // select_video_bank0
 	uint16_t r0 = (uint16_t)(a.u(1) * 0x0180 + peek((uint16_t)(0x4980 + (a.u(2) << 1))));
@@ -1641,33 +1641,33 @@ void shapes_touch()
 }
 
 LOGIC_TABLE(banka,
-	c_routine("A5", 0x438C, "step_map_column", step_map_column, 0, 438),
-	asm_routine("A5", 0x42BC, "step_map_row", step_map_row, 464),
-	asm_routine("A5", 0x41CE, "draw_map_strip", draw_map_strip, 384),
-	c_routine("A5", 0x4000, "init_map_view", init_map_view, 0, 2993035),
-	asm_routine("A5", 0x48CC, "update_map_slots", update_map_slots, 30236),
-	c_routine("A5", 0x5D08, "stop_effect_sound", stop_effect_sound, 0, 308),
-	c_routine("A5", 0x5B46, "rolling_sound", rolling_sound, 0, 438),
+	c_routine("A5", 0x438C, "step_map_column", step_map_column, 0, 418),
+	asm_routine("A5", 0x42BC, "step_map_row", step_map_row, 460),
+	asm_routine("A5", 0x41CE, "draw_map_strip", draw_map_strip, 370),
+	c_routine("A5", 0x4000, "init_map_view", init_map_view, 0, 4776),
+	asm_routine("A5", 0x48CC, "update_map_slots", update_map_slots, 28583),
+	c_routine("A5", 0x5D08, "stop_effect_sound", stop_effect_sound, 0, 319),
+	c_routine("A5", 0x5B46, "rolling_sound", rolling_sound, 0, 418),
 	wait_routine("A5", 0x5BD2, "town_music", town_music, 420),
-	c_routine("A5", 0x4984, "draw_tile_block", draw_tile_block, 0, 3117),
-	c_routine("A5", 0x51EE, "slope_height", slope_height, 0, 600),
+	c_routine("A5", 0x4984, "draw_text_block_3x3", draw_text_block_3x3, 0, 3014),
+	c_routine("A5", 0x51EE, "slope_height", slope_height, 0, 646),
 	asm_routine("A7", 0x4098, "move_objects_0_3", move_objects_0_3, 3003),
-	c_routine("A7", 0x410C, "project_speed", project_speed, 0, 6609),
-	c_routine("A7", 0x4F98, "direction_from_object7", direction_from_object7, 0, 762),
+	c_routine("A7", 0x410C, "project_speed", project_speed, 0, 1140),
+	c_routine("A7", 0x4F98, "direction_from_object7", direction_from_object7, 0, 750),
 	c_routine("A7", 0x4ECC, "hold_object", hold_object, 0, 636),
-	c_routine("A7", 0x4D30, "message_box", message_box, 0, 10195),
-	asm_routine("A7", 0x4B84, "expire_messages", expire_messages, 164),
-	asm_routine("A7", 0x4C28, "show_next_message", show_next_message, 160),
-	c_routine("A7", 0x5A7E, "credit_messages", credit_messages, 0, 22898),
-	c_routine("A7", 0x5018, "chaser_step", chaser_step, 0, 661),
+	c_routine("A7", 0x4D30, "message_box", message_box, 0, 9624),
+	asm_routine("A7", 0x4B84, "expire_messages", expire_messages, 192),
+	asm_routine("A7", 0x4C28, "show_next_message", show_next_message, 98),
+	c_routine("A7", 0x5A7E, "credit_messages", credit_messages, 0, 978),
+	c_routine("A7", 0x5018, "chaser_step", chaser_step, 0, 478),
 	c_routine("A7", 0x5248, "shop_purchase", shop_purchase, 0, 267),
 	c_routine("A7", 0x43C0, "insert_high_score", insert_high_score, 0, 7800),
-	c_routine("A7", 0x5684, "find_collision", find_collision, 0, 2698),
-	asm_routine("A7", 0x50F8, "fallen_skater", fallen_skater, 95),
+	c_routine("A7", 0x5684, "find_collision", find_collision, 0, 1882),
+	asm_routine("A7", 0x50F8, "fallen_skater", fallen_skater, 74),
 	wait_c_routine("A7", 0x4B3E, "poll_sound_status", poll_sound_status, 267),
-	asm_routine("A5", 0x454A, "scan_zone_switches", scan_zone_switches, 409),
-	c_routine("A7", 0x538E, "terrain_event", terrain_event, 0, 123),
-	asm_routine("A7", 0x572A, "shapes_touch", shapes_touch, 2264),
+	asm_routine("A5", 0x454A, "scan_zone_switches", scan_zone_switches, 380),
+	c_routine("A7", 0x538E, "terrain_event", terrain_event, 0, 136),
+	asm_routine("A7", 0x572A, "shapes_touch", shapes_touch, 3283),
 )
 
 }
