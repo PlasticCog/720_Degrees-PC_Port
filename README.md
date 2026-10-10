@@ -1,6 +1,6 @@
 # 720 Degrees - native PC port
 
-A native Windows port of Atari Games' **720 Degrees** (1986 arcade, rev 4) written in C++ with SDL3,
+A native port of Atari Games' **720 Degrees** (1986 arcade, rev 4) for Windows, Linux and macOS, written in C++ with SDL3,
 plus a level editor. The game logic is the original arcade program, statically translated from
 its machine code into C++; graphics, sound chips and controls are reimplemented natively. No CPU
 emulator runs inside the game.
@@ -12,7 +12,7 @@ emulator runs inside the game.
 
 1. Put the 37 ROM files of the MAME set `720` (rev 4) into the [`Game`](Game/README.txt) folder, or just
    drop the MAME `720.zip` there; it is unpacked automatically.
-2. Install a C++20 compiler, CMake 3.20+, Ninja (or Visual Studio 2022) and Python 3.
+2. Install a C++20 compiler, CMake 3.20+, Ninja and Python 3 (details per platform below).
 3. Build:
 
    ```sh
@@ -21,19 +21,44 @@ emulator runs inside the game.
    ```
 
    Configuration translates the program ROMs to C++ (`tools/t11_to_cpp.py`,
-   `tools/m6502_to_cpp.py`) and downloads the SDL3 development package if SDL3 is not installed.
-4. Run `720degrees.exe` in the top folder of the repository. The build puts the game, the level
-   editor (`editor720.exe`) and `SDL3.dll` there; the `Game` folder holds only the ROMs.
+   `tools/m6502_to_cpp.py`). On Windows it downloads the SDL3 development package if SDL3 is not
+   installed; on Linux and macOS it builds SDL3 from source as a static library.
+4. Run `720degrees` (`720degrees.exe` on Windows) in the top folder of the repository. The build puts
+   the game and the level editor there; the `Game` folder holds only the ROMs.
 
 ```
-720degrees.exe   the game
-editor720.exe    the level editor
-SDL3.dll
-Game/            your ROM files
-mods/            level mods (created by the editor)
+720degrees(.exe)   the game
+editor720(.exe)    the level editor
+SDL3.dll           Windows only
+Game/              your ROM files
+mods/              level mods (created by the editor)
 ```
 
-Tested with MSYS2 UCRT64 GCC 15. Visual Studio uses the SDL3 VC package (`-G "Visual Studio 17 2022"`).
+### Windows
+
+MSYS2 UCRT64 (GCC) is the tested toolchain: `pacman -S mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,python}`.
+Visual Studio 2022 also works (`-G "Visual Studio 17 2022"`, SDL3's VC package is downloaded).
+
+### Linux
+
+```sh
+sudo apt install build-essential cmake ninja-build python3 libx11-dev libxext-dev libxrandr-dev \
+  libxcursor-dev libxi-dev libxss-dev libxtst-dev libwayland-dev libxkbcommon-dev libegl1-mesa-dev \
+  libasound2-dev libpulse-dev libudev-dev libdbus-1-dev
+```
+
+(Debian/Ubuntu package names; SDL3 picks X11 or Wayland and ALSA or PulseAudio/PipeWire at run time.)
+
+### macOS
+
+Install the Xcode command line tools (`xcode-select --install`) and `brew install cmake ninja python`.
+Apple Silicon and Intel Macs are both supported.
+
+### Packaging
+
+`python tools/package.py` puts the built programs, an empty `Game` folder, this README and the
+third-party licences into `dist/720degrees-<version>-<platform>.zip`. The program code inside the
+executables is translated from your ROMs, so such a package is for your own use: do not publish it.
 
 ## Controls
 
@@ -136,6 +161,7 @@ port/src/editor   level editor (SDL3 + Dear ImGui)
 | `verify720` | Lockstep check: translated game against the reference model |
 | `render720` | Run the game headless; write screenshots, a WAV of the audio (`--wav`), per-chip audio levels (`--audio-stats N`), the sound command log (`--sound-log FILE`) and per-frame RAM dumps (`--ram-dump FILE`); poke RAM with `--poke FRAME:ADDR:VALUE` |
 | `ref720` | Reference model with coverage, breakpoints (`--break ADDR`) and RAM write watches (`--watch A-B --watch-frames F-G`) for reverse engineering |
+| `coro_test` | Self-test of the coroutine (context switch) backend, run in CI |
 | `editor720` | Level editor; `--capture-test` and `--screenshot FILE` for automated checks |
 | `leveltool` | `stats`, `png DIR` (render all maps), `zones` (zone bytes per map), `roundtrip [LEVEL]` (patch, re-decode and compare), `identity FILE` / `demo-mod FILE` (test mods) |
 | `tools/listing.py` | Annotated disassembly of the main program (`re/main_t11.lst`) |
@@ -149,8 +175,10 @@ port/src/editor   level editor (SDL3 + Dear ImGui)
   the original, and edits show up in the game.
 * Still open: the park palettes, which the colour capture does not reach, and the exact meaning of
   the zone switch modes.
-* Windows is the first target. Linux and macOS are planned; the main platform-specific piece is
-  the fiber-based time slicing in `port/src/native/coro_win32.cpp`.
+* Platforms: Windows is the tested platform for the full game. On Linux and macOS (x86-64 and ARM64)
+  everything that does not need the ROMs is built and tested in CI, including the context switch
+  the translated game runs on (`port/src/native/coro_posix.cpp`); the full game has not been run
+  there yet.
 
 ## Credits
 

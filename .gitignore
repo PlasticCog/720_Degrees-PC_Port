@@ -25,6 +25,7 @@
 /SDL3.dll
 /mods/
 /exports/
+/dist/
 __pycache__/
 *.pyc
 /re/ghidra/PDP11/data/languages/*.sla
