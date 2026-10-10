@@ -66,8 +66,8 @@ void draw_large_char()
 }
 
 // F:8D2C / F:8D3E (assembly): clear video RAM window 0 from 0x2000 to 0x37FF (playfield)
-// or from 0x3800 to 0x3FFF (text layer and sprites)
-void clear_video(uint16_t from, uint16_t last)
+// or from 0x3800 to 0x3FFF (text layer and sprites); interrupts may come in after every word
+void clear_video(uint16_t from, uint16_t last, uint16_t loop_pc)
 {
 	call(0x8068, {});                                  // select_video_bank0
 	uint16_t a = from;
@@ -75,12 +75,13 @@ void clear_video(uint16_t from, uint16_t last)
 	{
 		poke(a, 0);
 		a = (uint16_t)(a + 2);
+		tick(loop_pc, 21 + 18 + 12);
 	} while (a <= last);
 	T.r[0] = a;
 	fl::cmp(a, last);
 }
-void clear_playfield_ram() { clear_video(0x2000, 0x37FE); }
-void clear_text_ram() { clear_video(0x3800, 0x3FFE); }
+void clear_playfield_ram() { clear_video(0x2000, 0x37FE, 0x8D34); }
+void clear_text_ram() { clear_video(0x3800, 0x3FFE, 0x8D46); }
 
 // F:B9D4 (interrupt, 32V during play): count the quarter frame in 0x0191; at the first and
 // the fourth the sprite list link is rebuilt (F:B1C8) with 0x0993 = 1 / 0.  Other interrupts
@@ -151,8 +152,8 @@ void flash_text_colours()
 
 LOGIC_TABLE(screen,
 	asm_routine("F", 0x8B52, "draw_large_char", draw_large_char, 836),
-	asm_routine("F", 0x8D2C, "clear_playfield_ram", clear_playfield_ram, 156741),
-	asm_routine("F", 0x8D3E, "clear_text_ram", clear_text_ram, 52293),
+	asm_routine("F", 0x8D2C, "clear_playfield_ram", clear_playfield_ram, 69),
+	asm_routine("F", 0x8D3E, "clear_text_ram", clear_text_ram, 69),
 	irq_routine("F", 0xB9D4, "irq_32v_play", irq_32v_play, 617),
 	asm_routine("F", 0xDD10, "flash_text_colours", flash_text_colours, 57),
 )

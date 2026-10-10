@@ -285,17 +285,26 @@ uint16_t lane_choice(const Args &)
 	return r1 & 0x0003;
 }
 
-// F:8CE8: clear both halves of the playfield video RAM
+// F:8CE8: clear both halves of the playfield video RAM.  This takes over two frames, so the
+// loops let interrupts in after every word, as the original does.
 void clear_playfield()
 {
 	wb(0x1800, 0);
 	T.r[0] = 0x4000;
 	call(0x8078, {});
-	for (uint32_t a = 0x2000; a <= 0x3FFE; a += 2) ww(a, 0);
+	for (uint32_t a = 0x2000; a <= 0x3FFE; a += 2)
+	{
+		ww((uint16_t)a, 0);
+		tick(0x8CF8, 21 + 18 + 12);
+	}
 	wb(0x1800, 0);
 	T.r[0] = 0x6000;
 	call(0x8078, {});
-	for (uint32_t a = 0x2000; a <= 0x3FFE; a += 2) ww(a, 0);
+	for (uint32_t a = 0x2000; a <= 0x3FFE; a += 2)
+	{
+		ww((uint16_t)a, 0);
+		tick(0x8D10, 21 + 18 + 12);
+	}
 	T.r[0] = 0x4000;
 	fl::cmp(0x4000, 0x3FFE);
 }
@@ -461,7 +470,7 @@ LOGIC_TABLE(misc,
 	c_routine("B6", 0x7E28, "countdown", countdown, 0, 365),
 	asm_routine("F", 0x9152, "next_random", next_random, 276),
 	c_routine("F", 0xDDFE, "lane_choice", lane_choice, 0, 462),
-	asm_routine("F", 0x8CE8, "clear_playfield", clear_playfield, 417995),
+	asm_routine("F", 0x8CE8, "clear_playfield", clear_playfield, 203),
 	asm_routine("F", 0xCDFA, "find_other_slot", find_other_slot, 4331),
 	asm_routine("F", 0x8C56, "draw_big_char", draw_big_char, 504),
 	c_routine("F", 0xE6FE, "open_parks", open_parks, 0, 725),

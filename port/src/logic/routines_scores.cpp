@@ -176,11 +176,11 @@ uint16_t colour_test_pattern(const Args &)
 }
 
 LOGIC_TABLE(scores,
-	c_routine("B6", 0x68E2, "print_time", print_time, 0, 1146),
+	c_routine("B6", 0x68E2, "print_time", print_time, 0, 1148),
 	asm_routine("B6", 0x6938, "divide_time", divide_time, 189),
-	c_routine("B6", 0x6FAE, "draw_bar_table", draw_bar_table, 0, 16267),
+	c_routine("B6", 0x6FAE, "draw_bar_table", draw_bar_table, 0, -138748),
 	wait_routine("B6", 0x6F48, "statistics_screens", statistics_screens, 21),
-	c_routine("B6", 0x7304, "colour_test_pattern", colour_test_pattern, 0, 52936),
+	c_routine("B6", 0x7304, "colour_test_pattern", colour_test_pattern, 0, -521528),
 )
 
 }
