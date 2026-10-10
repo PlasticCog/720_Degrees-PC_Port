@@ -67,6 +67,11 @@ bool sync_slow(uint16_t next);
 // ending its time slice; the lowest stack pointer reached is recorded
 extern bool g_atomic;
 extern uint16_t g_min_sp;
+// code that waits for an interrupt cannot finish in atomic mode: after this many
+// instructions AtomicTimeout is thrown and the difference tester gives up on that call
+extern uint32_t g_atomic_steps;
+constexpr uint32_t ATOMIC_STEP_LIMIT = 4000000;
+struct AtomicTimeout {};
 inline bool sync(uint16_t next)
 {
 	if (T.icount > 0 && !T.check_irqs) return true;

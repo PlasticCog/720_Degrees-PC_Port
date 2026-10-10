@@ -27,7 +27,7 @@ using namespace t11rt;
 struct Slot {
 	const Original *orig = nullptr;
 	const Routine *r = nullptr;
-	uint64_t calls = 0, tests = 0, bad = 0;
+	uint64_t calls = 0, tests = 0, bad = 0, timeouts = 0;
 	double orig_cycles = 0;
 	std::string first_bad;
 };
@@ -113,12 +113,26 @@ void difftest(Slot &s)
 	const uint16_t args[4] = { rw(t0.r[6] + 2), rw(t0.r[6] + 4), rw(t0.r[6] + 6), rw(t0.r[6] + 8) };
 	g_atomic = true;
 
+	// a call that waits for an interrupt cannot be compared: run it normally instead
+	auto give_up = [&]() {
+		g_original_side = false;
+		B->load(b0);
+		T = t0;
+		shadow_top = sh0;
+		g_atomic = atomic0;
+		s.timeouts++;
+		run_native(*s.r);
+		g_testing--;
+	};
+
 	// the original translation, without any replacements
 	T.check_irqs = true;
 	g_min_sp = 0xffff;
+	g_atomic_steps = 0;
 	g_original_side = true;
 	T.r[7] = s.orig->addr;
-	s.orig->fn();
+	try { s.orig->fn(); }
+	catch (const AtomicTimeout &) { give_up(); return; }
 	g_original_side = false;
 	const Ctx t1 = T;
 	const uint16_t min1 = g_min_sp;
@@ -131,7 +145,9 @@ void difftest(Slot &s)
 	shadow_top = sh0;
 	B->load(b0);
 	g_min_sp = 0xffff;
-	run_native(*s.r);
+	g_atomic_steps = 0;
+	try { run_native(*s.r); }
+	catch (const AtomicTimeout &) { give_up(); return; }
 	const Ctx t2 = T;
 	const uint16_t min2 = g_min_sp;
 	B->save(b2);
@@ -222,7 +238,7 @@ uint16_t call(uint16_t addr, std::initializer_list<uint16_t> args)
 
 void reset_stats()
 {
-	for (auto &s : g_slots) { s.calls = s.tests = s.bad = 0; s.orig_cycles = 0; s.first_bad.clear(); }
+	for (auto &s : g_slots) { s.calls = s.tests = s.bad = s.timeouts = 0; s.orig_cycles = 0; s.first_bad.clear(); }
 }
 
 int rewritten_count()
@@ -262,6 +278,7 @@ std::string report(bool all)
 		if (s.tests)
 			out += fmt("  tested %8llu  mismatches %llu  original %.0f cycles/call (charged %d)",
 				(unsigned long long)s.tests, (unsigned long long)s.bad, s.orig_cycles / s.tests, s.r->cycles);
+		if (s.timeouts) out += fmt("  waits (not compared) %llu", (unsigned long long)s.timeouts);
 		out += "\n";
 		if (!s.first_bad.empty()) out += "      first mismatch: " + s.first_bad + "\n";
 	}

@@ -103,6 +103,7 @@ void check_irqs()
 
 bool g_atomic = false;
 uint16_t g_min_sp = 0xffff;
+uint32_t g_atomic_steps = 0;
 
 bool sync_slow(uint16_t next)
 {
@@ -110,6 +111,7 @@ bool sync_slow(uint16_t next)
 	if (g_atomic)
 	{
 		if (T.r[6] < g_min_sp) g_min_sp = T.r[6];
+		if (++g_atomic_steps > ATOMIC_STEP_LIMIT) throw AtomicTimeout{};
 		return true;
 	}
 	for (;;)
