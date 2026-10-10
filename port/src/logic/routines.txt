@@ -98,3 +98,8 @@ F:8938  irq_vblank_selftest
 F:F90E  selftest_scroll_screen
 F:F98E  selftest_items_screen
 F:D97C  set_gate_animation
+B6:68E2 print_time
+B6:6938 divide_time
+B6:6FAE draw_bar_table
+B6:6F48 statistics_screens
+B6:7304 colour_test_pattern

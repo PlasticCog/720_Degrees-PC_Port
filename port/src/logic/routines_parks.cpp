@@ -216,7 +216,7 @@ LOGIC_TABLE(parks,
 	c_routine("A7", 0x50C8, "a7_50c8", a7_50c8, 0, 99),
 	c_routine("F", 0xDA02, "open_park_gate", open_park_gate, 0, 897),
 	c_routine("B3", 0x6E38, "set_medal_level", set_medal_level, 0, 548),
-	c_routine("F", 0xD97C, "set_gate_animation", set_gate_animation, 0, 12610),
+	c_routine("F", 0xD97C, "set_gate_animation", set_gate_animation, 0, 12688),
 )
 
 }
