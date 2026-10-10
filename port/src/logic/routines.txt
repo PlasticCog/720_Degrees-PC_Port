@@ -99,3 +99,7 @@ F:BFBC  move_map_object
 F:C4E4  create_map_object
 F:B8FC  irq_32v_sprites
 F:B66E  irq_32v_game
+F:C850  try_map_object_move
+F:C868  try_next_map_definition
+F:CA4C  update_map_object_slot
+F:BC52  check_map_objects_in_view

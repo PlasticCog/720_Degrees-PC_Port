@@ -1532,6 +1532,160 @@ void check_map_object_view()
 	fl::mov(r);
 }
 
+// F:C850 (assembly; R1-R5 kept): the current map object takes the definition its record
+// points to (F:BE7C) when that is free: F:BFBC, R0 = 1; otherwise R0 = -1
+void try_map_object_move()
+{
+	if (jsr(0xBE7C, 0xC854))
+	{
+		fl::tst(T.r[0]);
+		T.r[0] = 0xFFFF;
+		fl::mov(T.r[0]);
+		return;
+	}
+	jsr(0xBFBC, 0xC85C);
+	T.r[0] = 1;
+	fl::mov(T.r[0]);
+}
+
+// F:C868  try_next_map_definition(int group): the same with the next record entry (0x09B2 + 4),
+// only if that definition is free and in the given group (0xFD91 by properties 0x4000 bits
+// 0-3; definitions without a group always qualify).  Returns 0 when moved, else -1.
+uint16_t try_next_map_definition(const Args &a)
+{
+	CFrame frame;
+	push(T.r[1]);
+	poke(0x09B2, (uint16_t)(peek(0x09B2) + 4));
+	if (jsr(0xBE7C, 0xC874))
+	{
+		set_c(false);
+		return 0xFFFF;
+	}
+	T.r[0] = peek(0x09B4);
+	if (peekb((uint16_t)(0x4000 + T.r[0])) & 0x0F)
+	{
+		T.r[0] = sext8(peekb((uint16_t)(0x4000 + T.r[0]))) & 0x000F;
+		T.r[1] = peekb((uint16_t)(0xFD91 + T.r[0]));
+		if (T.r[1] != a.u(0))
+		{
+			set_c(T.r[1] < a.u(0));                     // CMP R1,arg
+			return 0xFFFF;
+		}
+	}
+	jsr(0xBFBC, 0xC89C);
+	set_c(false);
+	return 0;
+}
+
+// F:CA4C (assembly): the map object of object slot 0x022C (map object 0x09AA, located) moves
+// on: objects flagged 0x01 (0x04B0) follow their record (the second half with flag 0x02);
+// the others toggle their definition's bit in the bitmap 0x0DAA and try their own record
+// (F:C850) or, for definitions with properties bit 6, the next entry (F:C868) in their type's
+// group.  When neither works the object stops (speed 0, animation from 0xFD8A by 0x65CC kind,
+// 0x0770 bit 7); flag 0x02 of 0x04B0 records whether it moved (R0 = 0) or not.
+void update_map_object_slot()
+{
+	T.r[1] = peek(0x022C);
+	T.r[5] = (uint16_t)(0x04B0 + T.r[1]);
+	if (peekb(T.r[5]) & 0x01)
+	{
+		if (peekb(T.r[5]) & 0x02) poke(0x09B2, (uint16_t)(peek(0x09B2) + 4));
+		jsr(0xBE7C, 0xCA6C);
+		jsr(0xBFBC, 0xCA70);
+		return;
+	}
+	T.r[0] = 0xFFFF;
+	T.r[2] = peek(0x09B6);
+	T.r[3] = asr(T.r[2], 3);
+	T.r[4] = (uint16_t)(0x0DAA + T.r[3]);
+	T.r[3] = T.r[2] & 7;
+	const uint16_t bit = (uint16_t)(0xFC74 + T.r[3]);
+	if (!(peekb(T.r[4]) & peekb(bit)))
+	{
+		jsr(0xC850, 0xCA98);
+		if (peekb((uint16_t)(0x4560 + T.r[2])) & 0x40)
+		{
+			pokeb(T.r[4], peekb(T.r[4]) | peekb(bit));
+			if ((int16_t)T.r[0] < 0)
+			{
+				push(peekb((uint16_t)(0x0370 + T.r[1])));
+				jsr(0xC868, 0xCAB2);
+				T.r[6] = (uint16_t)(T.r[6] + 2);
+			}
+		}
+	}
+	else
+	{
+		pokeb(T.r[4], (uint8_t)(peekb(T.r[4]) & ~peekb(bit)));
+		push(peekb((uint16_t)(0x0370 + T.r[1])));
+		jsr(0xC868, 0xCAC2);
+		if ((int16_t)T.r[0] < 0)
+		{
+			poke(0x09B2, (uint16_t)(peek(0x09B2) - 4));
+			jsr(0xC850, 0xCAD0);
+		}
+		T.r[6] = (uint16_t)(T.r[6] + 2);
+	}
+	fl::tst(T.r[0]);
+	if ((int16_t)T.r[0] < 0)
+	{
+		poke(0x01D2, 0);
+		poke(0x1400, 0);
+		T.r[0] = 0x0400;
+		set_bank_b(0x0400);
+		T.r[0] = (uint16_t)(T.r[1] << 1);
+		T.r[2] = peekb((uint16_t)(0x0370 + T.r[1]));
+		T.r[2] = sext8(peekb((uint16_t)(0x65CC + T.r[2])));
+		pokeb((uint16_t)(0x0430 + T.r[0]), peekb((uint16_t)(0xFD8A + T.r[2])));
+		pokeb((uint16_t)(0x0431 + T.r[0]), 0);
+		poke((uint16_t)(0x04F0 + T.r[0]), 0);
+		poke((uint16_t)(0x0570 + T.r[0]), 0);
+		fl::clr();
+		const uint8_t f = peekb((uint16_t)(0x0770 + T.r[1])) | 0x80;
+		pokeb((uint16_t)(0x0770 + T.r[1]), f);
+		f_nzv(nzb(f));
+		return;
+	}
+	if (!T.r[0])
+	{
+		const uint8_t f = peekb(T.r[5]) | 0x02;
+		pokeb(T.r[5], f);
+		f_nzv(nzb(f));
+		return;
+	}
+	T.r[0] = 0xFF02;                                    // MOV #0xFFFD,R0; COMB R0
+	const uint8_t f = (uint8_t)(peekb(T.r[5]) & ~0x02);
+	pokeb(T.r[5], f);
+	f_nzvc(nzb(f) | CF);
+}
+
+// F:BC52 (assembly): check four map objects a frame for entering or leaving the view
+// (F:BCB8), going round from 0x09AC (skipping 0x09A8 and those above 0x09AE without a slot
+// entry); the view window 0x0224-0x022A is taken from 0x0996-0x099C.  Banks 0x1000 / 0x1400.
+void check_map_objects_in_view()
+{
+	T.r[0] = 0x1000;
+	set_bank_a(0x1000);
+	T.r[0] = 0x1400;
+	set_bank_b(0x1400);
+	poke(0x0224, peek(0x099A));
+	poke(0x0226, peek(0x099C));
+	poke(0x0228, peek(0x0996));
+	poke(0x022A, peek(0x0998));
+	push(4);
+	do
+	{
+		poke(0x09AA, peek(0x09AC));
+		poke(0x09AC, (uint16_t)(peek(0x09AC) + 1));
+		T.r[0] = peek(0x09AA);
+		if (T.r[0] != peek(0x09A8) && (int16_t)T.r[0] <= (int16_t)peek(0x09AE) && peekb((uint16_t)(0x09B8 + T.r[0])))
+			jsr(0xBCB8, 0xBCAA);
+		ww(T.r[6], (uint16_t)(rw(T.r[6]) - 1));
+	} while (rw(T.r[6]));
+	poke(0x09AC, peek(0x09AC) & 0x003F);
+	fl::tst(pop());
+}
+
 // ---------------------------------------------------------------- 32V interrupts
 //
 // Four times a frame.  Both handlers acknowledge, count the quarter (0x0191) and, unless a
@@ -1925,7 +2079,7 @@ LOGIC_TABLE(fmid,
 	asm_routine("F", 0xB120, "update_chains_b", update_chains_b, 4636),
 	asm_routine("F", 0xB1EA, "build_sprite_pieces", build_sprite_pieces, 11675),
 	asm_routine("F", 0xB378, "move_objects", move_objects, 9224),
-	c_routine("F", 0xB4B6, "show_object", show_object, 0, 1240),
+	c_routine("F", 0xB4B6, "show_object", show_object, 0, 1239),
 	c_routine("F", 0xB602, "queue_piece_count", queue_piece_count, 0, 990),
 	c_routine("F", 0xBA2E, "clear_objects_and_text", clear_objects_and_text, 0, 132999),
 	c_routine("F", 0xC98E, "restart_object_animation", restart_object_animation, 0, 1047),
@@ -1933,19 +2087,23 @@ LOGIC_TABLE(fmid,
 	c_routine("F", 0xBE7C, "map_object_state", map_object_state, 0, 716),
 	c_routine("F", 0xBF5E, "map_object_position", map_object_position, 0, 798),
 	asm_routine("F", 0xBD78, "map_object_enters", map_object_enters, 301),
-	c_routine("F", 0xBA96, "print_number_small", print_number_small, 0, 6289),
-	c_routine("F", 0xBA9A, "print_number_large", print_number_large, 0, 5134),
+	c_routine("F", 0xBA96, "print_number_small", print_number_small, 0, 6161),
+	c_routine("F", 0xBA9A, "print_number_large", print_number_large, 0, 5050),
 	c_routine("F", 0xBF18, "release_map_definition", release_map_definition, 0, 1113),
 	c_routine("F", 0xC114, "turn_map_object", turn_map_object, 0, 3232),
 	c_routine("F", 0xCF5E, "remove_map_object", remove_map_object, 0, 2289),
-	c_routine("F", 0xCE24, "add_map_object", add_map_object, 0, 5561),
+	c_routine("F", 0xCE24, "add_map_object", add_map_object, 0, 5449),
 	c_routine("F", 0xCFD6, "init_map_objects", init_map_objects, 0, 240105),
-	c_routine("F", 0xC3E6, "map_object_leaves", map_object_leaves, 0, 1953),
+	c_routine("F", 0xC3E6, "map_object_leaves", map_object_leaves, 0, 1936),
 	asm_routine("F", 0xBCB8, "check_map_object_view", check_map_object_view, 494),
 	c_routine("F", 0xBFBC, "move_map_object", move_map_object, 0, 2430),
-	c_routine("F", 0xC4E4, "create_map_object", create_map_object, 0, 7131),
-	irq_routine("F", 0xB8FC, "irq_32v_sprites", irq_32v_sprites, 6670),
-	irq_routine("F", 0xB66E, "irq_32v_game", irq_32v_game, 11714),
+	c_routine("F", 0xC4E4, "create_map_object", create_map_object, 0, 7220),
+	irq_routine("F", 0xB8FC, "irq_32v_sprites", irq_32v_sprites, 5857),
+	irq_routine("F", 0xB66E, "irq_32v_game", irq_32v_game, 11808),
+	asm_routine("F", 0xC850, "try_map_object_move", try_map_object_move, 2158),
+	c_routine("F", 0xC868, "try_next_map_definition", try_next_map_definition, 0, 2830),
+	asm_routine("F", 0xCA4C, "update_map_object_slot", update_map_object_slot, 5648),
+	asm_routine("F", 0xBC52, "check_map_objects_in_view", check_map_objects_in_view, 2062),
 )
 
 }
