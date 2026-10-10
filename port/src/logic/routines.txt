@@ -103,3 +103,4 @@ B6:6938 divide_time
 B6:6FAE draw_bar_table
 B6:6F48 statistics_screens
 B6:7304 colour_test_pattern
+B6:706A selftest_charset_screen

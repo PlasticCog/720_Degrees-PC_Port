@@ -173,6 +173,78 @@ uint16_t colour_test_pattern(const Args &)
 	return r0;
 }
 
+
+// B6:706A (assembly, self test): the character sets: titles, the digits in the big font,
+// the letters A-^ in the large font, then digits and letters in the small font, ten per line
+// with the next colour (0x0188 += 0x2000) per line; until a button press
+void selftest_charset_screen()
+{
+	poke(0x0184, 0x5BBC);
+	T.r[0] = 0x001F;
+	T.icount -= 33 + 18 + 30;
+	call(0x8AB6, {});
+	poke(0x0184, 0x5C04);
+	T.r[0] = 0x001F;
+	T.icount -= 33 + 18 + 30;
+	call(0x8AB6, {});
+	poke(0x0186, 0x2322);
+	poke(0x0188, 0);
+	T.icount -= 33 + 27 + 18;
+	for (uint16_t c = 0x30; c <= 0x39; c++)
+	{
+		T.r[0] = c;
+		T.icount -= 12 + 30;
+		call(0x8C56, {});                              // draw_big_char
+		poke(0x0186, (uint16_t)(peek(0x0186) + 2));
+		T.icount -= 33 + 12 + 18 + 12;
+	}
+	uint16_t n = 10;
+	T.icount -= 18 + 18;
+	auto letters = [&](uint16_t line_step, uint16_t draw) {
+		for (uint16_t c = 0x41; c <= 0x5E; c++)
+		{
+			T.icount -= 18 + 12;
+			if (n == 10)
+			{
+				poke(0x0186, (uint16_t)(peek(0x0186) + line_step));
+				n = 0;
+				poke(0x0188, (uint16_t)(peek(0x0188) + 0x2000));
+				T.icount -= 33 + 12 + 33;
+			}
+			n++;
+			T.r[0] = c;
+			T.icount -= 12 + 12 + 30;
+			call(draw, {});
+			poke(0x0186, (uint16_t)(peek(0x0186) + 2));
+			T.icount -= 33 + 12 + 18 + 12;
+		}
+	};
+	letters(0x0144, 0x8B52);                           // draw_large_char
+	poke(0x0186, 0x2F2C);
+	poke(0x0188, (uint16_t)(peek(0x0188) + 0x2000));
+	T.icount -= 33 + 33 + 18;
+	for (uint16_t c = 0x30; c <= 0x39; c++)
+	{
+		T.r[0] = c;
+		T.icount -= 12 + 30;
+		call(0x8C12, {});                              // put_small_char
+		poke(0x0186, (uint16_t)(peek(0x0186) + 2));
+		T.icount -= 33 + 12 + 18 + 12;
+	}
+	n = 10;
+	T.icount -= 18 + 18;
+	letters(0x0158, 0x8C12);
+	T.icount -= 30;
+	call(0x8D60, {});                                  // wait_button_press
+	T.icount -= 30;
+	call(0x8D2C, {});                                  // clear_text_ram
+	pokeb(0x0FE6, 0);
+	T.icount -= 27;
+	T.r[1] = n;
+	T.r[2] = 0x005F;
+	fl::clr();
+}
+
 }
 
 LOGIC_TABLE(scores,
@@ -181,6 +253,7 @@ LOGIC_TABLE(scores,
 	c_routine("B6", 0x6FAE, "draw_bar_table", draw_bar_table, 0, -138748),
 	wait_routine("B6", 0x6F48, "statistics_screens", statistics_screens, 21),
 	c_routine("B6", 0x7304, "colour_test_pattern", colour_test_pattern, 0, -521528),
+	wait_routine("B6", 0x706A, "selftest_charset_screen", selftest_charset_screen, 21),
 )
 
 }
