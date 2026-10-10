@@ -20,6 +20,7 @@
 #include "soundchips.h"
 #include "controls.h"
 #include "modloader.h"
+#include "audioout.h"
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -38,6 +39,7 @@ struct Options {
 	bool invert_rotation = false;
 	std::vector<std::string> mods;
 	bool no_mods = false;
+	double quit_after = 0;               // testing: quit after this many seconds and print audio stats
 };
 
 std::string find_roms(const std::string &requested)
@@ -95,6 +97,7 @@ int main(int argc, char **argv)
 		else if (a == "--invert-rotation") opt.invert_rotation = true;
 		else if (a == "--mod") opt.mods.push_back(next());
 		else if (a == "--no-mods") opt.no_mods = true;
+		else if (a == "--quit-after") opt.quit_after = atof(next().c_str());
 	}
 
 	if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD))
@@ -127,10 +130,9 @@ int main(int argc, char **argv)
 	SDL_Texture *tex = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 512, 384);
 	SDL_SetTextureScaleMode(tex, opt.smooth ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
 
-	const SDL_AudioSpec spec = { SDL_AUDIO_S16, 2, (int)std::lround(SoundChips::output_rate()) };
-	SDL_AudioStream *audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
-	if (audio) SDL_ResumeAudioStreamDevice(audio);
-	else SDL_Log("audio unavailable: %s", SDL_GetError());
+	AudioOut audio;
+	if (!audio.open((int)std::lround(SoundChips::output_rate())))
+		SDL_Log("audio unavailable: %s", SDL_GetError());
 
 	// level mods: Game/mods/*.720mod (unless --no-mods) and --mod <file>
 	{
@@ -164,11 +166,14 @@ int main(int argc, char **argv)
 	bool test_switch = false;
 	double mouse_accum = 0;
 	std::vector<uint32_t> pixels(512 * 384);
-	std::vector<int16_t> samples(8192 * 2);
+	std::vector<int16_t> samples(8192 * 2), frame_audio;
 	const double frame_ns = 1e9 * 640.0 * 416.0 / 16000000.0;   // 60.096 Hz
 	uint64_t next_frame = SDL_GetTicksNS();
 	uint64_t fps_t0 = next_frame;
 	int fps_frames = 0;
+	bool was_paused = false;
+	const uint64_t t_start = next_frame;
+	uint64_t total_frames = 0;
 	double fps = 0;
 
 	while (running)
@@ -265,6 +270,8 @@ int main(int argc, char **argv)
 		const uint64_t now = SDL_GetTicksNS();
 		if (now > next_frame + (uint64_t)(frame_ns * 8)) next_frame = now;   // resync after a stall
 		int frames_run = 0;
+		if (was_paused && !paused) audio.restart();
+		was_paused = paused;
 		while (!paused && now >= next_frame && frames_run < 4)
 		{
 			rotary.update();
@@ -280,12 +287,14 @@ int main(int argc, char **argv)
 			next_frame += (uint64_t)frame_ns;
 			frames_run++;
 			fps_frames++;
+			total_frames++;
 			// audio
 			auto &chips = machine->board.chips();
+			frame_audio.clear();
 			size_t n;
 			while ((n = chips.take_samples(samples.data(), samples.size() / 2)) > 0)
-				if (audio && SDL_GetAudioStreamQueued(audio) < (int)(spec.freq * 4 / 5))   // cap latency (~200 ms)
-					SDL_PutAudioStreamData(audio, samples.data(), (int)(n * 4));
+				frame_audio.insert(frame_audio.end(), samples.begin(), samples.begin() + n * 2);
+			audio.push(frame_audio.data(), frame_audio.size() / 2);
 		}
 		if (paused) next_frame = now;
 
@@ -328,11 +337,20 @@ int main(int argc, char **argv)
 			SDL_RenderDebugText(renderer, 232, 8, "PAUSED");
 		}
 		SDL_RenderPresent(renderer);
+		if (opt.quit_after > 0 && (SDL_GetTicksNS() - t_start) / 1e9 >= opt.quit_after) running = false;
+	}
+	if (opt.quit_after > 0)
+	{
+		const auto &st = audio.stats;
+		printf("%llu frames in %.1f s; audio queue ran dry %llu times in %llu frames (min %.1f ms, mean %.1f ms), %llu dropped\n",
+			(unsigned long long)total_frames, (SDL_GetTicksNS() - t_start) / 1e9, (unsigned long long)st.dry,
+			(unsigned long long)st.checks, st.checks ? st.min_ms : 0.0, st.checks ? st.sum_ms / st.checks : 0.0,
+			(unsigned long long)st.dropped);
 	}
 
 	save_eeprom(machine->board);
 	machine.reset();
-	if (audio) SDL_DestroyAudioStream(audio);
+	audio.close();
 	if (pad) SDL_CloseGamepad(pad);
 	SDL_DestroyTexture(tex);
 	SDL_DestroyRenderer(renderer);

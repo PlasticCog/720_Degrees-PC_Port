@@ -101,7 +101,7 @@ port/src/editor   level editor (SDL3 + Dear ImGui)
 | Tool | Purpose |
 |---|---|
 | `verify720` | Lockstep check: translated game against the reference model |
-| `render720` | Run the game headless; write screenshots and a WAV of the audio |
+| `render720` | Run the game headless; write screenshots, a WAV of the audio (`--wav`), per-chip audio levels (`--audio-stats N`) and the sound command log (`--sound-log FILE`) |
 | `ref720` | Reference model with coverage, memory tracing and breakpoints (reverse engineering) |
 | `editor720` | Level editor; `--capture-test` and `--screenshot FILE` for automated checks |
 | `leveltool` | `stats`, `png DIR` (render all maps), `zones` (zone bytes per map), `roundtrip [LEVEL]` (patch, re-decode and compare), `identity FILE` / `demo-mod FILE` (test mods) |

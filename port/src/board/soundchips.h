@@ -70,6 +70,13 @@ public:
 	size_t take_samples(int16_t *dst, size_t max_frames);   // drains generated stereo frames
 	size_t available_frames() const { return m_audio.size() / 2; }
 
+	// diagnostics: per-chip signal energy and register writes since the last reset
+	struct Stats {
+		double ym = 0, pokey[2] = {0, 0}, tms = 0;   // sums of squared output
+		uint64_t samples = 0;
+		uint32_t ym_writes = 0, pokey_writes[2] = {0, 0}, tms_writes = 0;
+	} stats;
+
 private:
 	Pokey m_pokey[2];
 	std::unique_ptr<Ym2151Host> m_ym;

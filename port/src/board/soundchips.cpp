@@ -307,6 +307,14 @@ void SoundChips::produce_sample()
 	(void)pg;
 	l += tms * 0.75 * m_gain_tms;
 	r += tms * 0.75 * m_gain_tms;
+	{
+		const double y = (out.data[0] + out.data[1]) / 65536.0 * 0.60 * m_gain_ym;
+		const double p0 = m_pokey_acc[0] * (32767.0 / 11 / 4) / CYCLES_PER_SAMPLE / 32768.0 * 1.35 * m_gain_pokey;
+		const double p1 = m_pokey_acc[1] * (32767.0 / 11 / 4) / CYCLES_PER_SAMPLE / 32768.0 * 1.35 * m_gain_pokey;
+		const double t = tms * 0.75 * m_gain_tms;
+		stats.ym += y * y; stats.pokey[0] += p0 * p0; stats.pokey[1] += p1 * p1; stats.tms += t * t;
+		stats.samples++;
+	}
 	m_pokey_acc[0] = m_pokey_acc[1] = 0;
 	auto clip = [](double v) { v *= 32767.0; return (int16_t)std::clamp(v, -32768.0, 32767.0); };
 	if (m_audio.size() < 2 * 48000)   // cap backlog at ~1s if nobody drains it
@@ -361,6 +369,7 @@ uint8_t SoundChips::pokey_read(int which, int offset, uint8_t allpot)
 void SoundChips::pokey_write(int which, int offset, uint8_t data)
 {
 	if (now) sync(now());
+	stats.pokey_writes[which & 1]++;
 	m_pokey[which].write(offset, data);
 }
 
@@ -373,6 +382,7 @@ uint8_t SoundChips::ym_read(int offset)
 void SoundChips::ym_write(int offset, uint8_t data)
 {
 	if (now) sync(now());
+	stats.ym_writes++;
 	m_ym->chip.write(offset, data);
 }
 
@@ -385,6 +395,7 @@ bool SoundChips::tms_readyq()
 void SoundChips::tms_data_w(uint8_t data)
 {
 	if (now) sync(now());
+	stats.tms_writes++;
 	m_tms->data_w(data);
 }
 
