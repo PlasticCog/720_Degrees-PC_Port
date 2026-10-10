@@ -28,6 +28,7 @@ const Routine *routines_fhigh(int &count);
 const Routine *routines_banka(int &count);
 const Routine *routines_bankb(int &count);
 const Routine *routines_flow(int &count);
+const Routine *routines_fmid(int &count);
 
 bool g_enabled = true;
 bool g_difftest = false;
@@ -45,7 +46,7 @@ struct Slot {
 };
 
 // the routine tables of the routines_*.cpp files
-const TableFn TABLES[] = { routines_core, routines_small, routines_misc, routines_world, routines_system, routines_wait, routines_screen, routines_boot, routines_parks, routines_scores, routines_fhigh, routines_banka, routines_bankb, routines_flow };
+const TableFn TABLES[] = { routines_core, routines_small, routines_misc, routines_world, routines_system, routines_wait, routines_screen, routines_boot, routines_parks, routines_scores, routines_fhigh, routines_banka, routines_bankb, routines_flow, routines_fmid };
 
 std::vector<Routine> &registry()
 {
