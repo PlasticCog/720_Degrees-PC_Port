@@ -74,11 +74,11 @@ uint16_t set_tile_bank(const Args &a)
 }
 
 LOGIC_TABLE(core,
-	asm_routine("F", 0x8078, "select_video_bank", select_video_bank, 158),
-	c_routine("F", 0x80D8, "mul16", mul16, 0, 898),
-	c_routine("F", 0x80FA, "mul32", mul32, 0, 1941),
+	asm_routine("F", 0x8078, "select_video_bank", select_video_bank, 154),
+	c_routine("F", 0x80D8, "mul16", mul16, 0, 831),
+	c_routine("F", 0x80FA, "mul32", mul32, 0, 1895),
 	c_routine("F", 0x8E78, "queue_sound", queue_sound, 0, 282),
-	c_routine("F", 0xEEE6, "set_tile_bank", set_tile_bank, 0, 273),
+	c_routine("F", 0xEEE6, "set_tile_bank", set_tile_bank, 0, 274),
 )
 
 }

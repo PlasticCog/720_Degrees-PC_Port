@@ -16,6 +16,8 @@ namespace logic {
 const Routine *routines_core(int &count);
 const Routine *routines_small(int &count);
 const Routine *routines_misc(int &count);
+const Routine *routines_world(int &count);
+const Routine *routines_system(int &count);
 
 bool g_enabled = true;
 bool g_difftest = false;
@@ -33,7 +35,7 @@ struct Slot {
 };
 
 // the routine tables of the routines_*.cpp files
-const TableFn TABLES[] = { routines_core, routines_small, routines_misc };
+const TableFn TABLES[] = { routines_core, routines_small, routines_misc, routines_world, routines_system };
 
 std::vector<Routine> &registry()
 {
