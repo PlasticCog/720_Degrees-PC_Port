@@ -7,6 +7,11 @@ calls become C++ calls, and every instruction ends with a cheap checkpoint (`syn
 interrupts and time-slice ends are handled.
 
 Output: port/src/game/t11_<segment>.cpp and t11_tables.cpp
+
+Rewritten routines: port/src/logic/routines.txt lists the routines that have a hand-written
+C++ replacement (port/src/logic).  For each, the translated function is renamed fn_..._orig
+and a small wrapper is generated that hands calls to the replacement (logic::enter); the
+original stays available for the difference tester and for falling back.
 """
 import sys, os, re, collections
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -55,6 +60,19 @@ def fn_name(seg, addr):
 
 def h(v):
     return '0x%04X' % (v & 0xffff)
+
+
+# routines with a hand-written replacement (port/src/logic/routines.txt)
+OVERRIDES = []          # [(seg, addr, name)]
+_ovf = os.path.join(ROOT, 'port', 'src', 'logic', 'routines.txt')
+if os.path.exists(_ovf):
+    for line in open(_ovf):
+        line = line.split('#')[0].strip()
+        if not line:
+            continue
+        parts = line.split()
+        seg, addr = parts[0].upper().split(':')
+        OVERRIDES.append((seg, int(addr, 16), parts[1] if len(parts) > 1 else ''))
 
 
 # immediates that mods may change at runtime (see port/src/native/t11rt.h)
@@ -519,10 +537,20 @@ using namespace t11rt;
 '''
 
 
-def gen_function(db, f, fnmap):
+def gen_function(db, f, fnmap, override_index=None):
     out = []
     out.append('// ---- %s:%04X%s' % (f.seg, f.entry, ('  ' + db.entries.get((f.seg, f.entry), '')) if (f.seg, f.entry) in db.entries else ''))
-    out.append('void %s()' % f.name)
+    if override_index is not None:
+        # hand-written replacement in port/src/logic; the translation stays as _orig
+        out.append('void %s_orig();' % f.name)
+        out.append('void %s()' % f.name)
+        out.append('{')
+        out.append('\tif (T.r[7] == 0x%04X && logic::enter(%d)) return;' % (f.entry, override_index))
+        out.append('\t%s_orig();' % f.name)
+        out.append('}')
+        out.append('void %s_orig()' % f.name)
+    else:
+        out.append('void %s()' % f.name)
     out.append('{')
     out.append('\tint s = 0, d = 0, res = 0; uint32_t ea = 0;')
     out.append('dispatch_local:')
@@ -568,6 +596,21 @@ def main():
         files[f.seg].append(f)
     total_unsupported = 0
     decls = []
+    funcs_by_entry = {(f.seg, f.entry): f for f in funcs}
+    override_index = {}
+    override_rows = []
+    for (seg, addr, oname) in OVERRIDES:
+        f = funcs_by_entry.get((seg, addr))
+        if f is None:
+            print('warning: rewritten routine %s:%04X (%s) is not a routine entry; ignored' % (seg, addr, oname))
+            continue
+        # size of the routine: its entry plus a body reached through the C register-save helper
+        size = len(f.addrs)
+        body = funcs_by_entry.get((seg, addr + 4))
+        if body is not None and db.entries.get((seg, addr + 4)) == 'csvbody':
+            size += len(body.addrs)
+        override_index[(seg, addr)] = len(override_rows)
+        override_rows.append((seg, addr, f.name, size))
     file_list = []
     for seg, fl in sorted(files.items()):
         fl.sort(key=lambda x: x.entry)
@@ -583,9 +626,9 @@ def main():
             chunks.append(chunk)
         for ci, ch in enumerate(chunks):
             name = 't11_%s_%d.cpp' % (seg, ci)
-            lines = [HEADER, '#include "t11_decls.h"', '']
+            lines = [HEADER, '#include "t11_decls.h"', '#include "logic.h"', '']
             for f in ch:
-                body, u = gen_function(db, f, fnmap)
+                body, u = gen_function(db, f, fnmap, override_index.get((f.seg, f.entry)))
                 total_unsupported += u
                 lines.extend(body)
             open(os.path.join(OUTDIR, name), 'w').write('\n'.join(lines))
@@ -619,13 +662,25 @@ def main():
                 row.append('&seg_%s' % s if s in by_seg else 'nullptr')
             fh.write('\t{ ' + ', '.join(row) + ' },\n')
         fh.write('};\n')
+    # rewritten routines: table used by port/src/logic to find originals, plus size statistics
+    with open(os.path.join(OUTDIR, 't11_overrides.cpp'), 'w') as fh:
+        fh.write(HEADER + '#include "t11_decls.h"\n#include "logic.h"\n\n')
+        for (seg, addr, name, size) in override_rows:
+            fh.write('void %s_orig();\n' % name)
+        fh.write('\nextern const logic::Original t11_originals[] = {\n')
+        for (seg, addr, name, size) in override_rows:
+            fh.write('\t{ "%s", 0x%04X, %s_orig, %d },\n' % (seg, addr, name, size))
+        fh.write('\t{ nullptr, 0, nullptr, 0 }\n};\n')
+        fh.write('extern const int t11_original_count = %d;\n' % len(override_rows))
+        fh.write('extern const int t11_total_instructions = %d;\n' % sum(len(f.addrs) for f in funcs))
+    file_list.append('t11_overrides.cpp')
     with open(os.path.join(OUTDIR, 'files.cmake'), 'w') as fh:
         fh.write('set(T11_GENERATED\n')
         for n in file_list + ['t11_tables.cpp']:
             fh.write('  src/game/%s\n' % n)
         fh.write(')\n')
-    print('functions: %d, instructions: %d, files: %d, unsupported: %d' %
-          (len(funcs), sum(len(f.addrs) for f in funcs), len(file_list), total_unsupported))
+    print('functions: %d, instructions: %d, files: %d, unsupported: %d, rewritten routines: %d' %
+          (len(funcs), sum(len(f.addrs) for f in funcs), len(file_list), total_unsupported, len(override_rows)))
 
 
 if __name__ == '__main__':

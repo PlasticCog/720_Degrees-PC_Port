@@ -654,3 +654,33 @@ bool Board::debug_send_sound(uint8_t cmd)
 	if (on_sound_command) on_sound_command(cmd);
 	return true;
 }
+
+void Board::save(Snapshot &s) const
+{
+	s.ram = m_ram; s.palette = m_palette; s.alpha = m_alpha; s.mo = m_mo; s.pft = m_pft; s.pfb = m_pfb; s.eeprom = m_eeprom;
+	s.slap_state = m_slap.state; s.slap_current = m_slap.current; s.slap_loaded = m_slap.loaded; s.slap_armed = m_slap_armed;
+	s.bank_entry[0] = m_bank_entry[0]; s.bank_entry[1] = m_bank_entry[1];
+	s.xscroll = m_xscroll; s.yscroll = m_yscroll;
+	s.pf_scrollx = m_pf_scrollx; s.pf_scrolly = m_pf_scrolly;
+	s.pf_tile_bank[0] = m_pf_tile_bank[0]; s.pf_tile_bank[1] = m_pf_tile_bank[1]; s.pending_yscroll = m_pending_yscroll;
+	s.interrupt_enable = m_interrupt_enable; s.pending_int_enable = m_pending_int_enable;
+	s.scanline_int = m_scanline_int; s.video_int = m_video_int; s.p2portwr = m_p2portwr; s.p2portrd = m_p2portrd;
+	s.soundlatch = m_soundlatch; s.mainlatch = m_mainlatch;
+	s.soundlatch_pending = m_soundlatch_pending; s.mainlatch_pending = m_mainlatch_pending; s.sound_reset = m_sound_reset;
+	s.last_rendered = m_last_rendered; s.mo_last_xpos = m_mo_last_xpos; s.scanline = scanline;
+}
+
+void Board::load(const Snapshot &s)
+{
+	m_ram = s.ram; m_palette = s.palette; m_alpha = s.alpha; m_mo = s.mo; m_pft = s.pft; m_pfb = s.pfb; m_eeprom = s.eeprom;
+	m_slap.state = s.slap_state; m_slap.current = s.slap_current; m_slap.loaded = s.slap_loaded; m_slap_armed = s.slap_armed;
+	m_bank_entry[0] = s.bank_entry[0]; m_bank_entry[1] = s.bank_entry[1];
+	m_xscroll = s.xscroll; m_yscroll = s.yscroll;
+	m_pf_scrollx = s.pf_scrollx; m_pf_scrolly = s.pf_scrolly;
+	m_pf_tile_bank[0] = s.pf_tile_bank[0]; m_pf_tile_bank[1] = s.pf_tile_bank[1]; m_pending_yscroll = s.pending_yscroll;
+	m_interrupt_enable = s.interrupt_enable; m_pending_int_enable = s.pending_int_enable;
+	m_scanline_int = s.scanline_int; m_video_int = s.video_int; m_p2portwr = s.p2portwr; m_p2portrd = s.p2portrd;
+	m_soundlatch = s.soundlatch; m_mainlatch = s.mainlatch;
+	m_soundlatch_pending = s.soundlatch_pending; m_mainlatch_pending = s.mainlatch_pending; m_sound_reset = s.sound_reset;
+	m_last_rendered = s.last_rendered; m_mo_last_xpos = s.mo_last_xpos; scanline = s.scanline;
+}

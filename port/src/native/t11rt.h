@@ -63,6 +63,10 @@ inline bool fC() { return (T.psw & CF) != 0; }
 // ---------------------------------------------------------------- control
 // slow path of the per-instruction checkpoint: interrupts, end of time slice
 bool sync_slow(uint16_t next);
+// atomic mode (difference tester): code runs to completion without taking interrupts or
+// ending its time slice; the lowest stack pointer reached is recorded
+extern bool g_atomic;
+extern uint16_t g_min_sp;
 inline bool sync(uint16_t next)
 {
 	if (T.icount > 0 && !T.check_irqs) return true;

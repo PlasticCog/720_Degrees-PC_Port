@@ -27,7 +27,8 @@ set(D720_TRANSLATOR_INPUTS
   ${REPO_ROOT}/tools/t11_to_cpp.py ${REPO_ROOT}/tools/m6502_to_cpp.py ${REPO_ROOT}/tools/codedb.py
   ${REPO_ROOT}/tools/t11dis.py ${REPO_ROOT}/tools/romset.py ${REPO_ROOT}/tools/t11_cycles.txt
   ${REPO_ROOT}/re/coverage/main_cov.txt ${REPO_ROOT}/re/coverage/main_edges.txt
-  ${REPO_ROOT}/re/coverage/sound_cov.txt ${REPO_ROOT}/re/coverage/sound_edges.txt)
+  ${REPO_ROOT}/re/coverage/sound_cov.txt ${REPO_ROOT}/re/coverage/sound_edges.txt
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/logic/routines.txt)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${D720_TRANSLATOR_INPUTS})
 set(D720_TRANSLATOR_HASH "")
 foreach(f ${D720_TRANSLATOR_INPUTS})
@@ -156,15 +157,17 @@ target_link_libraries(refcpu PUBLIC board)
 # Native game core: translated programs + runtime
 if(D720_GAME)
 include(src/game/files.cmake)
+file(GLOB D720_LOGIC_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/logic/*.cpp)
 add_library(gamecore STATIC
   src/native/t11rt.cpp
   ${CORO_SRC}
+  ${D720_LOGIC_SOURCES}
   src/native/nativemachine.cpp
   src/native/s65rt.cpp
   src/game/s65_code.cpp
   src/game/s65_tables.cpp
   ${T11_GENERATED})
-target_include_directories(gamecore PUBLIC src/native src/game)
+target_include_directories(gamecore PUBLIC src/native src/game src/logic)
 target_link_libraries(gamecore PUBLIC board)
 if(NOT MSVC)
   set_source_files_properties(${T11_GENERATED} src/game/s65_code.cpp PROPERTIES COMPILE_OPTIONS "-O1;-fno-strict-aliasing")

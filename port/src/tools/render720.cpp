@@ -4,6 +4,7 @@
 #include "soundchips.h"
 #include "inputscript.h"
 #include "modloader.h"
+#include "logic.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -44,6 +45,8 @@ int main(int argc, char **argv)
 		else if (a == "--mod") mod = next();
 		else if (a == "--sound-log") sound_log = next();   // "frame command" per sound command
 		else if (a == "--ram-dump") ram_dump = next();     // per frame: main RAM, MO RAM, x/y scroll
+		else if (a == "--difftest") logic::g_difftest = true;   // compare rewritten routines with the originals
+		else if (a == "--no-rewrite") logic::g_enabled = false; // run only the translated original
 		else if (a == "--poke")                            // FRAME:ADDR:VALUE (hex addr/value), main RAM word
 		{
 			const std::string v = next();
@@ -125,6 +128,7 @@ int main(int argc, char **argv)
 	}
 	if (slog) fclose(slog);
 	if (rdump) fclose(rdump);
+	if (logic::g_difftest || logic::g_enabled) printf("%s", logic::report().c_str());
 	printf("done: %d frames\n", frames);
 	return 0;
 }

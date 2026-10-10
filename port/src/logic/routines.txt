@@ -1,0 +1,10 @@
+# Routines of the original main program that have a hand-written replacement in this
+# folder (see logic.h).  One per line: SEGMENT:ADDRESS name.  The translator turns each
+# into a call of the replacement; the original translation is kept for comparison.
+#
+# Check a change with:  render720 --frames N --random SEED --difftest
+F:8078  select_video_bank
+F:80D8  mul16
+F:80FA  mul32
+F:8E78  queue_sound
+F:EEE6  set_tile_bank

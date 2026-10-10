@@ -7,6 +7,7 @@
 #include "t11rt.h"
 #include "s65rt.h"
 #include "inputscript.h"
+#include "logic.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -30,6 +31,9 @@ int main(int argc, char **argv)
 {
 	std::string roms = "Game", out = ".", script;
 	int frames = 600, seed = 0;
+	// lockstep checks the instruction-exact translation against the reference model; the
+	// rewritten routines are checked separately (render720 --difftest)
+	logic::g_enabled = false;
 	for (int i = 1; i < argc; i++)
 	{
 		std::string a = argv[i];

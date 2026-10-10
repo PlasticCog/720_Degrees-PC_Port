@@ -101,9 +101,17 @@ void check_irqs()
 }
 }
 
+bool g_atomic = false;
+uint16_t g_min_sp = 0xffff;
+
 bool sync_slow(uint16_t next)
 {
 	T.r[7] = next;
+	if (g_atomic)
+	{
+		if (T.r[6] < g_min_sp) g_min_sp = T.r[6];
+		return true;
+	}
 	for (;;)
 	{
 		if (T.check_irqs)

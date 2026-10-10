@@ -142,6 +142,30 @@ public:
 	// returns false while the previous command has not been read yet
 	bool debug_send_sound(uint8_t cmd);
 
+	// full state seen by the main CPU (memory, video RAM, registers, latches), for the
+	// difference tester of the rewritten routines (port/src/logic)
+	struct Snapshot {
+		std::array<uint8_t, 0x1000> ram;
+		std::array<uint16_t, 0x100> palette;
+		std::array<uint16_t, 0xc00> alpha;
+		std::array<uint16_t, 0x400> mo;
+		std::array<uint16_t, 0x1000> pft, pfb;
+		std::array<uint8_t, 0x200> eeprom;
+		int slap_state, slap_current, slap_loaded;
+		bool slap_armed;
+		int bank_entry[2];
+		uint16_t xscroll, yscroll;
+		int pf_scrollx, pf_scrolly, pf_tile_bank[2], pending_yscroll;
+		uint8_t interrupt_enable;
+		int pending_int_enable;
+		bool scanline_int, video_int, p2portwr, p2portrd;
+		uint8_t soundlatch, mainlatch;
+		bool soundlatch_pending, mainlatch_pending, sound_reset;
+		int last_rendered, mo_last_xpos, scanline;
+	};
+	void save(Snapshot &s) const;
+	void load(const Snapshot &s);
+
 	// hooks for tooling
 	std::function<void(uint8_t)> on_sound_command;
 	std::function<void(int from, int to, uint32_t addr, int bank)> on_slapstic;
