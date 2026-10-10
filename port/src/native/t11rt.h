@@ -69,7 +69,7 @@ extern bool g_atomic;
 extern uint16_t g_min_sp;
 // code that waits for an interrupt cannot finish in atomic mode: after this many
 // instructions AtomicTimeout is thrown and the difference tester gives up on that call
-extern uint32_t g_atomic_steps;
+extern uint32_t g_atomic_steps, g_atomic_limit;
 constexpr uint32_t ATOMIC_STEP_LIMIT = 4000000;
 struct AtomicTimeout {};
 inline bool sync(uint16_t next)

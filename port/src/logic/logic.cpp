@@ -18,6 +18,7 @@ const Routine *routines_small(int &count);
 const Routine *routines_misc(int &count);
 const Routine *routines_world(int &count);
 const Routine *routines_system(int &count);
+const Routine *routines_wait(int &count);
 
 bool g_enabled = true;
 bool g_difftest = false;
@@ -29,13 +30,13 @@ using namespace t11rt;
 struct Slot {
 	const Original *orig = nullptr;
 	const Routine *r = nullptr;
-	uint64_t calls = 0, tests = 0, bad = 0, timeouts = 0;
+	uint64_t calls = 0, tests = 0, bad = 0, timeouts = 0, unwound = 0;
 	double orig_cycles = 0;
 	std::string first_bad;
 };
 
 // the routine tables of the routines_*.cpp files
-const TableFn TABLES[] = { routines_core, routines_small, routines_misc, routines_world, routines_system };
+const TableFn TABLES[] = { routines_core, routines_small, routines_misc, routines_world, routines_system, routines_wait };
 
 std::vector<Routine> &registry()
 {
@@ -78,6 +79,19 @@ void init()
 	g_inited = true;
 }
 
+// a polling routine whose interrupt returned elsewhere stops; like the translated code, the
+// frame that expects the new PC continues (or the original routine, if the PC is inside it)
+void run_native(const Routine &r);
+void run(Slot &s)
+{
+	try { run_native(*s.r); }
+	catch (const Unwound &)
+	{
+		if (!s.unwound++) fprintf(stderr, "logic: %s:%04X %s was left at %04X by an interrupt\n", s.r->seg, s.r->addr, s.r->name, T.r[7]);
+		if (!in_shadow(T.r[7])) s.orig->fn();
+	}
+}
+
 void run_native(const Routine &r)
 {
 	if (r.c)
@@ -114,6 +128,8 @@ void difftest(Slot &s)
 	B->save(b0);
 	const uint16_t args[4] = { rw(t0.r[6] + 2), rw(t0.r[6] + 4), rw(t0.r[6] + 6), rw(t0.r[6] + 8) };
 	g_atomic = true;
+	// a polling routine that has to wait is given up on quickly
+	g_atomic_limit = (s.r->flags & WAIT) ? 20000 : ATOMIC_STEP_LIMIT;
 
 	// a call that waits for an interrupt cannot be compared: run it normally instead
 	auto give_up = [&]() {
@@ -122,8 +138,9 @@ void difftest(Slot &s)
 		T = t0;
 		shadow_top = sh0;
 		g_atomic = atomic0;
+		g_atomic_limit = ATOMIC_STEP_LIMIT;
 		s.timeouts++;
-		run_native(*s.r);
+		run(s);
 		g_testing--;
 	};
 
@@ -202,6 +219,7 @@ void difftest(Slot &s)
 	T.check_irqs = true;
 	shadow_top = sh0;
 	g_atomic = atomic0;
+	g_atomic_limit = ATOMIC_STEP_LIMIT;
 	g_testing--;
 }
 
@@ -217,7 +235,7 @@ bool enter(int index)
 	if (g_difftest && !g_testing)
 		difftest(s);
 	else
-		run_native(*s.r);
+		run(s);
 	return true;
 }
 
@@ -240,7 +258,7 @@ uint16_t call(uint16_t addr, std::initializer_list<uint16_t> args)
 
 void reset_stats()
 {
-	for (auto &s : g_slots) { s.calls = s.tests = s.bad = s.timeouts = 0; s.orig_cycles = 0; s.first_bad.clear(); }
+	for (auto &s : g_slots) { s.calls = s.tests = s.bad = s.timeouts = s.unwound = 0; s.orig_cycles = 0; s.first_bad.clear(); }
 }
 
 int rewritten_count()
@@ -281,6 +299,7 @@ std::string report(bool all)
 			out += fmt("  tested %8llu  mismatches %llu  original %.0f cycles/call (charged %d)",
 				(unsigned long long)s.tests, (unsigned long long)s.bad, s.orig_cycles / s.tests, s.r->cycles);
 		if (s.timeouts) out += fmt("  waits (not compared) %llu", (unsigned long long)s.timeouts);
+		if (s.unwound) out += fmt("  left by an interrupt %llu", (unsigned long long)s.unwound);
 		out += "\n";
 		if (!s.first_bad.empty()) out += "      first mismatch: " + s.first_bad + "\n";
 	}

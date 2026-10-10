@@ -65,3 +65,7 @@ F:81AA  install_interrupts_a
 F:820C  install_interrupts_b
 F:DB00  fade_playfield_palette
 F:8C12  put_small_char
+F:8D50  wait_vblank
+F:DC24  wait_fade
+F:8EA2  send_sound_command
+F:8ED2  read_sound_response

@@ -34,6 +34,8 @@ struct Args {
 enum : uint8_t {
 	VOID = 1,        // R0 after the call is not a result (not compared by the tester)
 	ASM = 2,         // register/flag interface: compare all registers and flags
+	WAIT = 4,        // polls for an interrupt or the sound CPU (see tick): the tester only
+	                 // compares the calls that finish without waiting
 };
 
 using CFn = uint16_t (*)(const Args &a);
@@ -59,6 +61,22 @@ inline Routine c_routine(const char *seg, uint16_t addr, const char *name, CFn f
 { return Routine{seg, addr, name, f, nullptr, flags, cycles}; }
 inline Routine asm_routine(const char *seg, uint16_t addr, const char *name, AsmFn f, int cycles)
 { return Routine{seg, addr, name, nullptr, f, ASM, cycles}; }
+// polling routines charge their cycles themselves (tools/update_cycles.py leaves them alone)
+inline Routine wait_routine(const char *seg, uint16_t addr, const char *name, AsmFn f, int cycles)
+{ return Routine{seg, addr, name, nullptr, f, ASM | WAIT, cycles}; }
+inline Routine wait_c_routine(const char *seg, uint16_t addr, const char *name, CFn f, int cycles)
+{ return Routine{seg, addr, name, f, nullptr, WAIT, cycles}; }
+
+// Native code that waits for an interrupt or for the sound CPU polls like the original: each
+// pass of the loop charges the cycles the original's pass takes and lets the board run (and
+// interrupts be taken) at the original's loop address pc.  If an interrupt handler returns
+// somewhere else, the routine is abandoned (Unwound) and execution continues there.
+struct Unwound {};
+inline void tick(uint16_t pc, int cycles)
+{
+	t11rt::T.icount -= cycles;
+	if (!t11rt::sync(pc)) throw Unwound{};
+}
 
 // called by the generated wrappers; false = run the original translation
 bool enter(int index);
