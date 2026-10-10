@@ -26,7 +26,7 @@ def main():
     for path in glob.glob(os.path.join(ROOT, 'port', 'src', 'logic', 'routines_*.cpp')):
         s = open(path, encoding='utf-8').read()
         for name, cyc in measured.items():
-            s, n = re.subn(r'((?<![A-Za-z_])(?:c|asm)_routine\("[A-Z0-9]+", 0x[0-9A-Fa-f]+, "%s",[^)]*?, )\d+\)' % re.escape(name), r'\g<1>%d)' % cyc, s)
+            s, n = re.subn(r'((?<![A-Za-z_])(?:c|asm|irq)_routine\("[A-Z0-9]+", 0x[0-9A-Fa-f]+, "%s",[^)]*?, )\d+\)' % re.escape(name), r'\g<1>%d)' % cyc, s)
             changed += n
         open(path, 'w', encoding='utf-8', newline='\n').write(s)
     print('updated %d routine costs from %d measurements' % (changed, len(measured)))

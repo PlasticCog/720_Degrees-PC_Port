@@ -69,3 +69,7 @@ F:8D50  wait_vblank
 F:DC24  wait_fade
 F:8EA2  send_sound_command
 F:8ED2  read_sound_response
+F:8B52  draw_large_char
+F:8D2C  clear_playfield_ram
+F:8D3E  clear_text_ram
+F:B9D4  irq_32v_play

@@ -36,6 +36,7 @@ enum : uint8_t {
 	ASM = 2,         // register/flag interface: compare all registers and flags
 	WAIT = 4,        // polls for an interrupt or the sound CPU (see tick): the tester only
 	                 // compares the calls that finish without waiting
+	IRQ = 8,         // interrupt handler: returns with RTI
 };
 
 using CFn = uint16_t (*)(const Args &a);
@@ -61,6 +62,8 @@ inline Routine c_routine(const char *seg, uint16_t addr, const char *name, CFn f
 { return Routine{seg, addr, name, f, nullptr, flags, cycles}; }
 inline Routine asm_routine(const char *seg, uint16_t addr, const char *name, AsmFn f, int cycles)
 { return Routine{seg, addr, name, nullptr, f, ASM, cycles}; }
+inline Routine irq_routine(const char *seg, uint16_t addr, const char *name, AsmFn f, int cycles)
+{ return Routine{seg, addr, name, nullptr, f, ASM | IRQ, cycles}; }
 // polling routines charge their cycles themselves (tools/update_cycles.py leaves them alone)
 inline Routine wait_routine(const char *seg, uint16_t addr, const char *name, AsmFn f, int cycles)
 { return Routine{seg, addr, name, nullptr, f, ASM | WAIT, cycles}; }

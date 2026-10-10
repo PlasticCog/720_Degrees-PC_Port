@@ -19,6 +19,7 @@ const Routine *routines_misc(int &count);
 const Routine *routines_world(int &count);
 const Routine *routines_system(int &count);
 const Routine *routines_wait(int &count);
+const Routine *routines_screen(int &count);
 
 bool g_enabled = true;
 bool g_difftest = false;
@@ -36,7 +37,7 @@ struct Slot {
 };
 
 // the routine tables of the routines_*.cpp files
-const TableFn TABLES[] = { routines_core, routines_small, routines_misc, routines_world, routines_system, routines_wait };
+const TableFn TABLES[] = { routines_core, routines_small, routines_misc, routines_world, routines_system, routines_wait, routines_screen };
 
 std::vector<Routine> &registry()
 {
@@ -106,6 +107,13 @@ void run_native(const Routine &r)
 		r.asm_fn();
 	T.r[7] = pop();
 	T.icount -= r.cycles;
+	if (r.flags & IRQ)
+	{
+		// RTI: the PSW comes back too, and a pending interrupt may be taken at once
+		T.psw = (uint8_t)pop();
+		T.check_irqs = true;
+		sync_dyn();
+	}
 }
 
 std::string fmt(const char *f, ...)
