@@ -7763,872 +7763,1479 @@ uint16_t velocity_direction(const Args &)
 
 // ---------------------------------------------------------------- the skater
 
-// A5:4A2A (assembly)  skater_physics(): the skater's frame step.
-//   Steering: the joystick direction 0x031A (from the table 0x6000, bank B 0x2C00, by 0x01C6)
-//   is turned towards (A5:4A0A); 0x031B holds a forced direction for 0x031C frames.
-//   0x031E (jump table 0x5160): 1 = landing (0x0325/0x0328 cleanup), 0/2 = rolling:
-//     on the ground the kick counter 0x0323 / 0x0321 and the turn accumulators 0x02F2-0x02F6
-//     give the direction 0x01F8; in the air the slope 0x0327 decides: a ramp (type 5-7) runs
-//     the spin sequence of 0x02F8 (0x0325/0x0326, F:90A6), a slope turns the skater to its
-//     direction and lets him fall back (F:A2BE / F:A45A / 0x0322, or sound 0x58, B3:7E44 and
-//     0x01EA = 1 when he is too slow).
-//   Kick (0x01EB = 5): speed from 0x02E8, A5:5B46, F:9FB4 into the air.
-//   In the air: F:9B82, gravity 0x02EE, kick phases 0x0A/0x0B/1/2/3 adjust the speed 0x01B4
-//   with the friction tables 0x7BE8/0x7C28/0x7C38/0x7C64/0x7C68 (0x0F59 = 3 downhill), it stops
-//   at the slope's limit; F:91A6; on flat ground the velocities are rounded and the vertical
-//   speed 0x05B0 follows the height table 0xFCB0 (limit 0x7CD0) or F:80FA on slopes.
-//   Falling: 0x05B2 -= gravity down to -0x200 (not downhill).
-//   Finally the sprite flags 0x0470-0x0473 get 0x40 / 0xC0 by 0x032F.
-// Registers end as the original leaves them.
+// A5:4A2A (assembly)  skater_physics(): one frame of the skater's motion (bank B 0x2C00 for its
+// tables).  The direction from the controls (0x031A from the table 0x6000 by 0x01C6) is
+// approached through A5:4A0A unless held (0x031B); the slide state 0x031E (jump table 0x5160)
+// keeps a minimum speed; on the ground the kick / carve state 0x0323 (0x02F2-0x02F6, the
+// direction table 0x6000), in the air (0x01EA) the spin of the trick tables (0x0325/0x0326,
+// 0x02F8, 0x7A08, F:90A6) or the landing (A5:4A0A, F:A2BE, F:A45A, F:E238, F:7E44); move 5
+// sets the speed from 0x02E8 with the sounds; then the speed 0x01B4 by the slope (0x02EE),
+// the friction tables 0x7BE8/0x7C28/0x7C38/0x7C64/0x7C68, the vertical speed (F:91A6, F:80FA,
+// 0x05B0/0x05B2, 0xFCB0/0x7CD0) and the sprite priority bits of 0x0470-0x0473 (0x032F).
+// Registers and flags end as the original leaves them.  Followed instruction by
+// instruction; the labels are the original's addresses where paths join.
 void skater_physics()
 {
-	auto tbl = [](uint16_t a) { return peek(a); };
-	blk(0x4A2A, 186);
+	bool b;                                            // a tested value (read before its tick)
 	T.r[0] = 0x2C00;
-	set_bank_b(0x2C00);
-	T.r[0] = asr(peek(0x01C6), 1);
+	tick(0x4A2E, 18);
+	poke(0x01D4, T.r[0]);
+	tick(0x4A32, 27);
+	poke(0x1402, T.r[0]);
+	tick(0x4A36, 27);
+	T.r[0] = peek(0x01C6);
+	tick(0x4A3A, 24);
+	T.r[0] = asr(T.r[0], 1);
+	tick(0x4A3C, 12);
 	pokeb(0x031A, peekb((uint16_t)(0x6000 + T.r[0])));
+	tick(0x4A42, 42);
 	T.r[0] = sext8(peekb(0x031B));
-	if (!(T.r[0] & 0x8000))
+	tick(0x4A46, 24);
+	if (T.r[0] & 0x8000)
+		tick(0x4A92, 12);                              // BLT
+	else
 	{
-		blk(0x4A48, 30);
-		if ((int16_t)T.r[0] < 0x003F)
+		tick(0x4A48, 12);
+		tick(0x4A4C, 18);                              // CMP R0,#0x3F
+		if ((int16_t)T.r[0] >= 0x003F)
 		{
-			blk(0x4A4E, 42);
-			if (peekb(0x01EA) != 1)
-			{
-				blk(0x4A56, 33);
-				pokeb(0x031B, 0x3F);
-			}
-			blk(0x4A5C, 36);
-			T.r[2] = sext8(peekb(0x031B));
-		}
-		else
-		{
-			blk(0x4A62, 72);
+			tick(0x4A62, 12);                          // BGE
 			T.r[2] = sext8(peekb(0x031A));
+			tick(0x4A66, 24);
 			T.r[0] = sext8(peekb(0x01F8));
+			tick(0x4A6A, 24);
+			tick(0x4A6C, 12);                          // CMP R2,R0
 			if (T.r[2] == T.r[0])
 			{
-				blk(0x4A6E, 33);
+				tick(0x4A6E, 12);                      // BNE
 				pokeb(0x031B, 0xFF);
+				tick(0x4A74, 33);
 			}
+			else
+				tick(0x4A74, 12);
 		}
-		blk(0x4A74, 66);
+		else
+		{
+			tick(0x4A4E, 12);
+			b = peekb(0x01EA) == 1;
+			tick(0x4A54, 30);                          // CMPB @#0x01EA,#1
+			if (!b)
+			{
+				tick(0x4A56, 12);                      // BEQ
+				pokeb(0x031B, 0x3F);
+				tick(0x4A5C, 33);
+			}
+			else
+				tick(0x4A5C, 12);
+			T.r[2] = sext8(peekb(0x031B));
+			tick(0x4A60, 24);
+			tick(0x4A74, 12);                          // BR
+		}
 		T.r[0] = sext8(peekb(0x01F8));
+		tick(0x4A78, 24);
 		T.r[2] = (uint16_t)(T.r[2] - T.r[0]);
-		call(0x4A0A, {});                              // fold_direction
-		blk(0x4A7E, 120);
-		T.r[0] = (uint16_t)(sext8(peekb(0x01F8)) + T.r[1]);
-		T.r[3] = T.r[0] & 0x000F;
-		pokeb(0x031A, (uint8_t)T.r[3]);
+		tick(0x4A7A, 12);
+		jsr(0x4A7E, 0x4A0A);                           // fold_direction
+		T.r[0] = sext8(peekb(0x01F8));
+		tick(0x4A82, 24);
+		T.r[0] = (uint16_t)(T.r[0] + T.r[1]);
+		tick(0x4A84, 12);
+		T.r[3] = T.r[0];
+		tick(0x4A86, 12);
+		T.r[3] &= 0x000F;
+		tick(0x4A8A, 18);
+		pokeb(0x031A, 0);
+		tick(0x4A8E, 27);
+		pokeb(0x031A, (uint8_t)(peekb(0x031A) | T.r[3]));
+		tick(0x4A92, 27);
 	}
-	blk(0x4A92, 36);
 	T.r[3] = sext8(peekb(0x031E));
+	tick(0x4A96, 24);
 	if (T.r[3])
 	{
-		blk(0x4A98, 36);
+		tick(0x4A98, 12);                              // BEQ
 		T.r[0] = peek(0x01B4);
+		tick(0x4A9C, 24);
 		if (T.r[0] & 0x8000)
 		{
-			blk(0x4A9E, 12);
+			tick(0x4A9E, 12);                          // BGE
 			T.r[0] = (uint16_t)-T.r[0];
+			tick(0x4AA0, 12);
 		}
-		blk(0x4AA0, 30);
+		else
+			tick(0x4AA0, 12);
+		tick(0x4AA4, 18);                              // CMP R0,#0x80
 		if ((int16_t)T.r[0] < 0x0080)
 		{
-			blk(0x4AA6, 69);
+			tick(0x4AA6, 12);                          // BGE
 			pokeb(0x031C, 3);
-			if ((int16_t)peek(0x01B6) < 0)
+			tick(0x4AAC, 33);
+			b = (int16_t)peek(0x01B6) < 0;
+			tick(0x4AB0, 24);                          // TST @#0x01B6
+			if (b)
 			{
-				blk(0x4ABA, 33);
+				tick(0x4ABA, 12);                      // BLT
 				poke(0x01B4, 0xFEA0);
+				tick(0x4AC0, 33);
 			}
 			else
 			{
-				blk(0x4AB2, 45);
+				tick(0x4AB2, 12);
 				poke(0x01B4, 0x0160);
+				tick(0x4AB8, 33);
+				tick(0x4AC0, 12);                      // BR
 			}
 		}
-		blk(0x4AC0, 39);
+		else
+			tick(0x4AC0, 12);
 		poke(0x01B6, peek(0x01B4));
+		tick(0x4AC6, 39);
 	}
-	blk(0x4AC6, 51);
-	T.r[0] = (uint16_t)(T.r[3] << 1);
+	else
+		tick(0x4AC6, 12);
+	T.r[0] = T.r[3];
+	tick(0x4AC8, 12);
+	T.r[0] = (uint16_t)(T.r[0] << 1);
+	tick(0x4ACA, 12);
+	// the slide state (jump table 0x5160): 1 at 0x4DD0, 0 and 2 at 0x4ACE (others are not used)
 	if (T.r[3] == 1)
-		goto landing;                                  // 0x4DD0
-	// T.r[3] 0 or 2 (other values are not used: they jump outside the routine)
-	blk(0x4ACE, 30);
+	{
+		tick(0x4DD0, 27);                              // ADD 0x5160(R0),PC
+		goto at_4DD0;
+	}
+	tick(0x4ACE, 27);
+	tick(0x4AD2, 18);                                  // CMP R3,#2
 	if (T.r[3] == 2)
 	{
-		blk(0x4AD4, 48);
-		if (peekb(0x0329) != peekb(0x0328))
+		tick(0x4AD4, 12);                              // BNE
+		b = peekb(0x0329) == peekb(0x0328);
+		tick(0x4ADA, 36);                              // CMPB @#0x0329,@#0x0328
+		if (!b)
 		{
-			blk(0x4ADC, 75);
-			T.r[0] = (uint16_t)(sext8(peekb(0x031C)) - 1);
+			tick(0x4ADC, 12);                          // BEQ
+			T.r[0] = sext8(peekb(0x031C));
+			tick(0x4AE0, 24);
+			T.r[0]--;
+			tick(0x4AE2, 12);
 			pokeb(0x031C, (uint8_t)T.r[0]);
+			tick(0x4AE6, 27);
 			if (!(uint8_t)T.r[0])
 			{
-				blk(0x4AE8, 60);
+				tick(0x4AE8, 12);                      // BNE
 				pokeb(0x031E, 0);
+				tick(0x4AEC, 27);
 				pokeb(0x0328, 0xFE);
+				tick(0x4AF2, 33);
 			}
-		}
-	}
-	blk(0x4AF2, 36);
-	if (peekb(0x031F))
-	{
-		blk(0x4BA4, 18);
-		goto kick;                                     // JMP 0x4E34
-	}
-	blk(0x4AF8, 36);
-	if (!peekb(0x01EA))
-	{
-		// on the ground: kicks and turns
-		blk(0x4AFE, 36);
-		T.r[5] = sext8(peekb(0x0323));
-		if (!T.r[5])
-		{
-			blk(0x4B04, 129);
-			T.r[3] = (uint16_t)(peek(0x01C8) << 1);
-			T.r[0] = peekb((uint16_t)(0x7CA0 + sext8(peekb(0x025D))));
-			if (!((int16_t)T.r[3] < (int16_t)T.r[0]))
-			{
-				blk(0x4B1A, 87);
-				T.r[3] = (uint16_t)(T.r[5] + 1);
-				pokeb(0x0323, (uint8_t)T.r[3]);
-				if (!((int16_t)peek(0x01CA) > 0))
-				{
-					blk(0x4B28, 12);
-					T.r[0] = (uint16_t)-T.r[0];
-				}
-				blk(0x4B2A, 27);
-				pokeb(0x0321, (uint8_t)T.r[0]);
-			}
-			blk(0x4B2E, 51);
-			pokeb(0x01F8, peekb(0x031A));
+			else
+				tick(0x4AF2, 12);
 		}
 		else
+			tick(0x4AF2, 12);
+	}
+	else
+		tick(0x4AF2, 12);                              // BNE
+	b = peekb(0x031F) != 0;
+	tick(0x4AF6, 24);                                  // TSTB @#0x031F
+	if (b)
+	{
+		tick(0x4BA4, 12);                              // BNE
+		tick(0x4E34, 18);                              // JMP
+		goto at_4E34;
+	}
+	tick(0x4AF8, 12);
+	b = peekb(0x01EA) != 0;
+	tick(0x4AFC, 24);                                  // TSTB @#0x01EA
+	if (b)
+	{
+		tick(0x4BA8, 12);                              // BNE
+		goto at_4BA8;
+	}
+	// on the ground: the kick / carve state 0x0323
+	tick(0x4AFE, 12);
+	T.r[5] = sext8(peekb(0x0323));
+	tick(0x4B02, 24);
+	if (!T.r[5])
+	{
+		tick(0x4B04, 12);                              // BNE
+		T.r[3] = peek(0x01C8);
+		tick(0x4B08, 24);
+		T.r[3] = (uint16_t)(T.r[3] << 1);
+		tick(0x4B0A, 12);
+		T.r[0] = sext8(peekb(0x025D));
+		tick(0x4B0E, 24);
+		T.r[0] = sext8(peekb((uint16_t)(0x7CA0 + T.r[0])));
+		tick(0x4B12, 27);
+		T.r[0] &= 0x00FF;
+		tick(0x4B16, 18);
+		tick(0x4B18, 12);                              // CMP R3,R0
+		if ((int16_t)T.r[3] >= (int16_t)T.r[0])
 		{
-			blk(0x4B36, 30);
-			if (T.r[5] == 1)
+			tick(0x4B1A, 12);                          // BLT
+			T.r[3] = T.r[5];
+			tick(0x4B1C, 12);
+			T.r[3]++;
+			tick(0x4B1E, 12);
+			pokeb(0x0323, (uint8_t)T.r[3]);
+			tick(0x4B22, 27);
+			b = (int16_t)peek(0x01CA) > 0;
+			tick(0x4B26, 24);                          // TST @#0x01CA
+			if (!b)
 			{
-				blk(0x4B3C, 201);
-				T.r[4] = sext8(peekb(0x0321));
-				poke(0x02F4, (uint16_t)(peek(0x02F4) + T.r[4]));
-				T.r[0] = (uint16_t)((peek(0x01CA) << 1) + peek(0x02F2));
-				poke(0x02F2, T.r[0]);
-				poke(0x02F6, (uint16_t)(peek(0x02F6) + T.r[4]));
-				T.r[0] = peek(0x02F6);
-				if (T.r[0] & 0x8000)
+				tick(0x4B28, 12);                      // BGT
+				T.r[0] = (uint16_t)-T.r[0];
+				tick(0x4B2A, 12);
+			}
+			else
+				tick(0x4B2A, 12);
+			pokeb(0x0321, (uint8_t)T.r[0]);
+			tick(0x4B2E, 27);
+		}
+		else
+			tick(0x4B2E, 12);
+		pokeb(0x01F8, peekb(0x031A));
+		tick(0x4B34, 39);
+		tick(0x4B94, 12);                              // BR
+	}
+	else
+	{
+		tick(0x4B36, 12);                              // BNE
+		tick(0x4B3A, 18);                              // CMP R5,#1
+		if (T.r[5] == 1)
+		{
+			tick(0x4B3C, 12);                          // BNE
+			T.r[4] = sext8(peekb(0x0321));
+			tick(0x4B40, 24);
+			poke(0x02F4, (uint16_t)(peek(0x02F4) + T.r[4]));
+			tick(0x4B44, 27);
+			T.r[0] = peek(0x01CA);
+			tick(0x4B48, 24);
+			T.r[0] = (uint16_t)(T.r[0] << 1);
+			tick(0x4B4A, 12);
+			T.r[0] = (uint16_t)(T.r[0] + peek(0x02F2));
+			tick(0x4B4E, 24);
+			poke(0x02F2, T.r[0]);
+			tick(0x4B52, 27);
+			poke(0x02F6, (uint16_t)(peek(0x02F6) + T.r[4]));
+			tick(0x4B56, 27);
+			T.r[0] = peek(0x02F6);
+			tick(0x4B5A, 24);
+			if (T.r[0] & 0x8000)
+			{
+				tick(0x4B5C, 12);                      // BGE
+				poke(0x02F6, (uint16_t)(peek(0x02F6) + 0x0120));
+				tick(0x4B62, 33);
+				tick(0x4B70, 12);                      // BR
+			}
+			else
+			{
+				tick(0x4B64, 12);
+				tick(0x4B68, 18);                      // CMP R0,#0x0120
+				if ((int16_t)T.r[0] >= 0x0120)
 				{
-					blk(0x4B5C, 45);
-					poke(0x02F6, (uint16_t)(peek(0x02F6) + 0x0120));
+					tick(0x4B6A, 12);                  // BLT
+					poke(0x02F6, (uint16_t)(peek(0x02F6) - 0x0120));
+					tick(0x4B70, 33);
 				}
 				else
-				{
-					blk(0x4B64, 30);
-					if (!((int16_t)T.r[0] < 0x0120))
-					{
-						blk(0x4B6A, 33);
-						poke(0x02F6, (uint16_t)(peek(0x02F6) - 0x0120));
-					}
-				}
-				blk(0x4B70, 174);
-				T.r[0] = asr(peek(0x02F6), 2);
-				pokeb(0x01F8, peekb((uint16_t)(0x6000 + T.r[0])));
-				T.r[2] = (uint16_t)(peek(0x02F4) - peek(0x02F2));
-				T.r[3] = (uint16_t)(T.r[4] ^ T.r[2]);
-				if (!(T.r[3] & 0x8000))
-				{
-					blk(0x4B8C, 51);
-					T.r[0] = (uint16_t)(T.r[5] - 1);
-					pokeb(0x0323, (uint8_t)T.r[0]);
-				}
+					tick(0x4B70, 12);
+			}
+			T.r[0] = peek(0x02F6);
+			tick(0x4B74, 24);
+			T.r[0] = asr(T.r[0], 1);
+			tick(0x4B76, 12);
+			T.r[0] = asr(T.r[0], 1);
+			tick(0x4B78, 12);
+			pokeb(0x01F8, peekb((uint16_t)(0x6000 + T.r[0])));
+			tick(0x4B7E, 42);
+			T.r[2] = peek(0x02F4);
+			tick(0x4B82, 24);
+			T.r[2] = (uint16_t)(T.r[2] - peek(0x02F2));
+			tick(0x4B86, 24);
+			T.r[3] = T.r[4];
+			tick(0x4B88, 12);
+			T.r[3] ^= T.r[2];
+			tick(0x4B8A, 12);
+			if (T.r[3] & 0x8000)
+				tick(0x4B94, 12);                      // BLT
+			else
+			{
+				tick(0x4B8C, 12);
+				T.r[0] = T.r[5];
+				tick(0x4B8E, 12);
+				T.r[0]--;
+				tick(0x4B90, 12);
+				pokeb(0x0323, (uint8_t)T.r[0]);
+				tick(0x4B94, 27);
 			}
 		}
-		blk(0x4B94, 96 + 18);                          // and JMP 0x4E34
-		T.r[0] = sext8(peekb(0x01F8)) & 0x000F;
-		pokeb(0x01F8, (uint8_t)T.r[0]);
-		goto kick;
+		else
+			tick(0x4B94, 12);                          // BNE
 	}
-	// in the air
-	blk(0x4BA8, 111);
+	T.r[0] = sext8(peekb(0x01F8));
+	tick(0x4B98, 24);
+	T.r[0] &= 0x000F;
+	tick(0x4B9C, 18);
+	pokeb(0x01F8, 0);
+	tick(0x4BA0, 27);
+	pokeb(0x01F8, (uint8_t)(peekb(0x01F8) | T.r[0]));
+	tick(0x4BA4, 27);
+	tick(0x4E34, 18);                                  // JMP
+	goto at_4E34;
+
+at_4BA8:                                               // in the air
 	pokeb(0x01F8, peekb(0x031A));
-	T.r[0] = sext8(peekb(0x0327)) & 0x0007;
+	tick(0x4BAE, 39);
+	T.r[0] = sext8(peekb(0x0327));
+	tick(0x4BB2, 24);
+	T.r[0] &= 0x0007;
+	tick(0x4BB6, 18);
+	tick(0x4BBA, 18);                                  // CMP R0,#5
 	if (T.r[0] < 5)
 	{
-		blk(0x4BBC, 18);
-		goto slope;                                    // JMP 0x4CD8
+		tick(0x4BBC, 12);                              // BCC
+		tick(0x4CD8, 18);                              // JMP
+		goto at_4CD8;
 	}
-	// a ramp: the spin sequence
-	blk(0x4BC0, 36);
-	if (peekb(0x0325) & 0x80)
+	tick(0x4BC0, 12);
+	b = (peekb(0x0325) & 0x80) != 0;
+	tick(0x4BC4, 24);                                  // TSTB @#0x0325
+	if (!b)
 	{
-		blk(0x4BC6, 30);
-		call(0xE238, {});                              // reset_skater_state
-		blk(0x4BCA, 60);
-		T.r[2] = sext8(peekb(0x031D));
-		T.r[3] = peek(0x01B4);
-		if (T.r[3] & 0x8000)
-		{
-			blk(0x4BD4, 144);
-			T.r[1] = (uint16_t)-T.r[3];
-			T.r[0] = (uint16_t)(sext8(peekb(0x025F)) << 1);
-			poke(0x01B4, (uint16_t)(peek(0x01B4) + tbl((uint16_t)(0x7C80 + T.r[0]))));
-			T.r[0] = 0x0008;
-			T.r[2] ^= T.r[0];
-		}
+		tick(0x4C52, 12);                              // BGE
+		goto at_4C52;
+	}
+	tick(0x4BC6, 12);
+	jsr(0x4BCA, 0xE238);                               // reset_skater_state
+	T.r[2] = sext8(peekb(0x031D));
+	tick(0x4BCE, 24);
+	T.r[3] = peek(0x01B4);
+	tick(0x4BD2, 24);
+	if (T.r[3] & 0x8000)
+	{
+		tick(0x4BD4, 12);                              // BGE
+		T.r[1] = T.r[3];
+		tick(0x4BD6, 12);
+		T.r[1] = (uint16_t)-T.r[1];
+		tick(0x4BD8, 12);
+		T.r[0] = sext8(peekb(0x025F));
+		tick(0x4BDC, 24);
+		T.r[0] = (uint16_t)(T.r[0] << 1);
+		tick(0x4BDE, 12);
+		poke(0x01B4, (uint16_t)(peek(0x01B4) + peek((uint16_t)(0x7C80 + T.r[0]))));
+		tick(0x4BE4, 42);
+		T.r[0] = 0x0008;
+		tick(0x4BE8, 18);
+		T.r[2] ^= T.r[0];
+		tick(0x4BEA, 12);
+		tick(0x4C04, 12);                              // BR
+	}
+	else
+	{
+		tick(0x4BEC, 12);
+		T.r[1] = T.r[3];
+		tick(0x4BEE, 12);
+		b = (int16_t)T.r[1] >= (int16_t)peek(0x02FC);
+		tick(0x4BF2, 24);                              // CMP R1,@#0x02FC
+		if (b)
+			tick(0x4C04, 12);                          // BGE
 		else
 		{
-			blk(0x4BEC, 48);
-			T.r[1] = T.r[3];
-			if ((int16_t)T.r[1] < (int16_t)peek(0x02FC))
-			{
-				blk(0x4BF4, 99);
-				T.r[0] = (uint16_t)(asr((uint16_t)(peek(0x02FC) - T.r[3]), 1) + peek(0x01B4));
-				poke(0x01B4, T.r[0]);
-			}
-		}
-		blk(0x4C04, 231);
-		T.r[0] = (uint16_t)(asr(sext8(peekb(0x0327)), 3) << 1);
-		poke(0x02F8, tbl((uint16_t)(0x7A08 + T.r[0])));
-		T.r[0] = (uint16_t)((T.r[2] << 1) + peek(0x02F8));
-		poke(0x02F8, peek(T.r[0]));
-		if (peek(T.r[0]) == 0xFFFF)
-		{
-			blk(0x4C28, 45);
-			pokeb(0x0325, 0x7F);
-		}
-		else
-		{
-			blk(0x4C30, 84);
-			push(0x0580);
-			push(T.r[1]);
-			T.r[0] = call(0x90A6, {});                 // divide
-			blk(0x4C3A, 51);
-			pokeb(0x0325, (uint8_t)T.r[0]);
-			T.r[0] = sext8((uint8_t)T.r[0]);
-			if (!T.r[0])
-			{
-				blk(0x4C42, 51);
-				T.r[3] = (uint16_t)(T.r[0] + 1);
-				pokeb(0x0325, (uint8_t)T.r[3]);
-			}
-			blk(0x4C4A, 63);
-			pokeb(0x0326, peekb(0x0325));
-			T.r[6] = (uint16_t)(T.r[6] + 4);
+			tick(0x4BF4, 12);
+			T.r[0] = peek(0x02FC);
+			tick(0x4BF8, 24);
+			T.r[0] = (uint16_t)(T.r[0] - T.r[3]);
+			tick(0x4BFA, 12);
+			T.r[0] = asr(T.r[0], 1);
+			tick(0x4BFC, 12);
+			T.r[0] = (uint16_t)(T.r[0] + peek(0x01B4));
+			tick(0x4C00, 24);
+			poke(0x01B4, T.r[0]);
+			tick(0x4C04, 27);
 		}
 	}
-	blk(0x4C52, 54);
+	T.r[0] = sext8(peekb(0x0327));
+	tick(0x4C08, 24);
+	for (uint16_t pc = 0x4C0A; pc <= 0x4C0E; pc = (uint16_t)(pc + 2))
+	{
+		T.r[0] = asr(T.r[0], 1);
+		tick(pc, 12);
+	}
+	T.r[0] = (uint16_t)(T.r[0] << 1);
+	tick(0x4C10, 12);
+	poke(0x02F8, peek((uint16_t)(0x7A08 + T.r[0])));
+	tick(0x4C16, 42);
+	T.r[0] = T.r[2];
+	tick(0x4C18, 12);
+	T.r[0] = (uint16_t)(T.r[0] << 1);
+	tick(0x4C1A, 12);
+	T.r[0] = (uint16_t)(T.r[0] + peek(0x02F8));
+	tick(0x4C1E, 24);
+	poke(0x02F8, peek(T.r[0]));
+	tick(0x4C22, 33);
+	b = peek(T.r[0]) == 0xFFFF;
+	tick(0x4C26, 24);                                  // CMP (R0),#-1
+	if (b)
+	{
+		tick(0x4C28, 12);                              // BNE
+		pokeb(0x0325, 0x7F);
+		tick(0x4C2E, 33);
+		tick(0x4C52, 12);                              // BR
+	}
+	else
+	{
+		tick(0x4C30, 12);
+		push(0x0580);
+		tick(0x4C34, 30);
+		push(T.r[1]);
+		tick(0x4C36, 24);
+		jsr(0x4C3A, 0x90A6);                           // divide
+		pokeb(0x0325, (uint8_t)T.r[0]);
+		tick(0x4C3E, 27);
+		T.r[0] = sext8((uint8_t)T.r[0]);
+		tick(0x4C40, 12);                              // MOVB R0,R0
+		if (!T.r[0])
+		{
+			tick(0x4C42, 12);                          // BNE
+			T.r[3] = T.r[0];
+			tick(0x4C44, 12);
+			T.r[3]++;
+			tick(0x4C46, 12);
+			pokeb(0x0325, (uint8_t)T.r[3]);
+			tick(0x4C4A, 27);
+		}
+		else
+			tick(0x4C4A, 12);
+		pokeb(0x0326, peekb(0x0325));
+		tick(0x4C50, 39);
+		T.r[6] = (uint16_t)(T.r[6] + 4);
+		tick(0x4C52, 24);                              // CMP (SP)+,(SP)+
+	}
+at_4C52:
 	T.r[0] = sext8(peekb(0x0325));
+	tick(0x4C56, 24);
+	tick(0x4C5A, 18);                                  // CMP R0,#0x7F
 	if (T.r[0] == 0x007F)
 	{
-		blk(0x4D48, 12);
-		goto direction;                                // 0x4DBE
+		tick(0x4D48, 12);                              // BEQ
+		tick(0x4DBE, 12);                              // BR
+		goto at_4DBE;
 	}
-	blk(0x4C5C, 30);
+	tick(0x4C5C, 12);
+	tick(0x4C60, 18);                                  // CMP R0,#0x7E
 	if (T.r[0] == 0x007E)
 	{
-		blk(0x4C62, 156);
-		T.r[0] = (uint16_t)((sext8(peekb(0x0327)) & 0x0018) >> 3);
-		pokeb(0x031D, rb((uint16_t)(0xFCD0 + T.r[0])));
-		if ((int16_t)peek(0x01B4) < 0)
+		tick(0x4C62, 12);                              // BNE
+		T.r[0] = sext8(peekb(0x0327));
+		tick(0x4C66, 24);
+		T.r[0] &= 0x0018;
+		tick(0x4C6A, 18);
+		for (uint16_t pc = 0x4C6C; pc <= 0x4C70; pc = (uint16_t)(pc + 2))
 		{
-			blk(0x4C7C, 96);
-			T.r[3] = 0x0008;
-			T.r[0] = sext8(rb((uint16_t)(0xFCD0 + T.r[0])));
-			T.r[3] ^= T.r[0];
-			pokeb(0x031D, (uint8_t)T.r[3]);
+			T.r[0] = asr(T.r[0], 1);
+			tick(pc, 12);
 		}
-		blk(0x4CA8, 45 + 12);
-		pokeb(0x0325, 0x7F);
-		goto direction;
+		pokeb(0x031D, rb((uint16_t)(0xFCD0 + T.r[0])));
+		tick(0x4C76, 42);
+		b = (int16_t)peek(0x01B4) < 0;
+		tick(0x4C7A, 24);                              // TST @#0x01B4
+		if (!b)
+		{
+			tick(0x4CA8, 12);                          // BGE
+			goto at_4CA8;
+		}
+		tick(0x4C7C, 12);
+		T.r[3] = 0x0008;
+		tick(0x4C80, 18);
+		T.r[0] = sext8(rb((uint16_t)(0xFCD0 + T.r[0])));
+		tick(0x4C84, 27);
+		T.r[3] ^= T.r[0];
+		tick(0x4C86, 12);
+		pokeb(0x031D, (uint8_t)T.r[3]);
+		tick(0x4C8A, 27);
+		tick(0x4CA8, 12);                              // BR
+		goto at_4CA8;
 	}
-	blk(0x4C8C, 63);
-	T.r[3] = (uint16_t)(sext8(peekb(0x0326)) - T.r[0]);
+	tick(0x4C8C, 12);                                  // BNE
+	T.r[3] = sext8(peekb(0x0326));
+	tick(0x4C90, 24);
+	T.r[3] = (uint16_t)(T.r[3] - T.r[0]);
+	tick(0x4C92, 12);
 	pokeb(0x0326, (uint8_t)T.r[3]);
+	tick(0x4C96, 27);
 	for (;;)
 	{
-		blk(0x4C96, 36);
 		T.r[3] = sext8(peekb(0x0326));
+		tick(0x4C9A, 24);
 		if ((int16_t)T.r[3] > 0)
 		{
-			blk(0x4D98, 12);
-			goto direction;
+			tick(0x4D98, 12);                          // BGT to the BNE at 0x4D98
+			tick(0x4DBE, 12);
+			goto at_4DBE;
 		}
-		blk(0x4C9C, 84);
+		tick(0x4C9C, 12);
 		T.r[2] = sext8(peekb(peek(0x02F8)));
+		tick(0x4CA0, 33);
 		poke(0x02F8, (uint16_t)(peek(0x02F8) + 1));
+		tick(0x4CA4, 27);
+		tick(0x4CA6, 12);                              // TST R2
 		if (T.r[2] & 0x8000)
 		{
-			blk(0x4CA8, 45 + 12);
-			pokeb(0x0325, 0x7F);
-			goto direction;
+			tick(0x4CA8, 12);                          // BGE
+			goto at_4CA8;
 		}
-		blk(0x4CB0, 84);
+		tick(0x4CB0, 12);
 		pokeb(0x031D, peekb(peek(0x02F8)));
-		if ((int16_t)peek(0x01B4) < 0)
+		tick(0x4CB6, 48);
+		b = (int16_t)peek(0x01B4) < 0;
+		tick(0x4CBA, 24);                              // TST @#0x01B4
+		if (b)
 		{
-			blk(0x4CBC, 81);
+			tick(0x4CBC, 12);                          // BGE
 			T.r[4] = 0x0008;
+			tick(0x4CC0, 18);
 			T.r[0] = sext8(peekb(0x031D));
+			tick(0x4CC4, 24);
 			T.r[4] ^= T.r[0];
+			tick(0x4CC6, 12);
 			pokeb(0x031D, (uint8_t)T.r[4]);
+			tick(0x4CCA, 27);
 		}
-		blk(0x4CCA, 90);
+		else
+			tick(0x4CCA, 12);
 		poke(0x02F8, (uint16_t)(peek(0x02F8) + 1));
-		T.r[0] = (uint16_t)(T.r[2] + T.r[3]);
+		tick(0x4CCE, 27);
+		T.r[0] = T.r[2];
+		tick(0x4CD0, 12);
+		T.r[0] = (uint16_t)(T.r[0] + T.r[3]);
+		tick(0x4CD2, 12);
 		pokeb(0x0326, (uint8_t)T.r[0]);
+		tick(0x4CD6, 27);
+		tick(0x4C96, 12);                              // BR
 	}
-slope:
-	// in the air over a slope (type 0-4)
-	blk(0x4CD8, 150);
+at_4CA8:
+	pokeb(0x0325, 0x7F);
+	tick(0x4CAE, 33);
+	tick(0x4D7E, 12);                                  // BR
+	tick(0x4DBE, 12);                                  // BR
+	goto at_4DBE;
+
+at_4CD8:                                               // the landing
 	pokeb(0x0325, 0xFF);
+	tick(0x4CDE, 33);
 	pokeb(0x0324, 0);
+	tick(0x4CE2, 27);
 	T.r[2] = sext8(peekb(0x01F8));
+	tick(0x4CE6, 24);
 	T.r[0] = sext8(peekb(0x031D));
+	tick(0x4CEA, 24);
 	T.r[2] = (uint16_t)(T.r[2] - T.r[0]);
-	call(0x4A0A, {});                                  // fold_direction
-	blk(0x4CF0, 30);
+	tick(0x4CEC, 12);
+	jsr(0x4CF0, 0x4A0A);                               // fold_direction
+	tick(0x4CF4, 18);                                  // CMP R2,#4
 	if ((int16_t)T.r[2] > 4)
 	{
-		blk(0x4CF6, 108);
+		tick(0x4CF6, 12);                              // BLE
 		poke(0x01B4, (uint16_t)-peek(0x01B4));
+		tick(0x4CFA, 27);
 		T.r[3] = 0x0008;
+		tick(0x4CFE, 18);
 		T.r[0] = sext8(peekb(0x031D));
+		tick(0x4D02, 24);
 		T.r[3] ^= T.r[0];
+		tick(0x4D04, 12);
 		pokeb(0x031D, (uint8_t)T.r[3]);
+		tick(0x4D08, 27);
 	}
-	blk(0x4D08, 42);
-	if ((int16_t)peek(0x01C8) > 3)
+	else
+		tick(0x4D08, 12);
+	b = (int16_t)peek(0x01C8) > 3;
+	tick(0x4D0E, 30);                                  // CMP @#0x01C8,#3
+	if (b)
 	{
-		blk(0x4D10, 39);
+		tick(0x4D10, 12);                              // BLE
 		pokeb(0x0321, peekb(0x01CB));
+		tick(0x4D16, 39);
 	}
-	blk(0x4D16, 42);
-	if (peekb(0x01EA) == 2)
+	else
+		tick(0x4D16, 12);
+	b = peekb(0x01EA) == 2;
+	tick(0x4D1C, 30);                                  // CMPB @#0x01EA,#2
+	if (b)
 	{
-		blk(0x4D80, 36);
+		tick(0x4D80, 12);                              // BEQ
 		T.r[1] = peek(0x01B4);
+		tick(0x4D84, 24);
 		if (T.r[1] & 0x8000)
 		{
-			blk(0x4D86, 12);
+			tick(0x4D86, 12);                          // BGE
 			T.r[1] = (uint16_t)-T.r[1];
+			tick(0x4D88, 12);
 		}
-		blk(0x4D88, 30);
+		else
+			tick(0x4D88, 12);
+		tick(0x4D8C, 18);                              // CMP R1,#0x80
 		if ((int16_t)T.r[1] < 0x0080)
 		{
-			blk(0x4D8E, 51);
+			tick(0x4D8E, 12);                          // BGE
 			pokeb(0x031D, peekb(0x01F8));
+			tick(0x4D94, 39);
+			tick(0x4D9A, 12);                          // BR
 		}
 		else
 		{
-			blk(0x4D96, 24);                           // TST R2; BNE
-			if (T.r[2]) goto direction;
+			tick(0x4D96, 12);
+			tick(0x4D98, 12);                          // TST R2
+			if (T.r[2])
+			{
+				tick(0x4DBE, 12);                      // BNE
+				goto at_4DBE;
+			}
+			tick(0x4D9A, 12);
 		}
-		blk(0x4D9A, 63);
 		pokeb(0x01EA, 1);
-		call(0xE238, {});                              // reset_skater_state
-		blk(0x4DA4, 60);
+		tick(0x4DA0, 33);
+		jsr(0x4DA4, 0xE238);                           // reset_skater_state
 		push(0x0058);
-		call(0x8E78, {});                              // queue_sound
-		blk(0x4DAC, 102);
+		tick(0x4DA8, 30);
+		jsr(0x4DAC, 0x8E78);                           // queue_sound
 		T.r[0] = 0x3C00;
-		set_bank_b(0x3C00);
-		call(0x7E44, {});
-		blk(0x4DBC, 18);
+		tick(0x4DB0, 18);
+		poke(0x01D4, T.r[0]);
+		tick(0x4DB4, 27);
+		poke(0x1402, T.r[0]);
+		tick(0x4DB8, 27);
+		jsr(0x4DBC, 0x7E44);
 		T.r[6] = (uint16_t)(T.r[6] + 2);
-		goto direction;
+		tick(0x4DBE, 18);                              // TST (SP)+
+		goto at_4DBE;
 	}
-	blk(0x4D1E, 42);
-	if ((int16_t)peek(0x01C8) >= 8) goto direction;
-	blk(0x4D26, 78);
+	tick(0x4D1E, 12);
+	b = (int16_t)peek(0x01C8) >= 8;
+	tick(0x4D24, 30);                                  // CMP @#0x01C8,#8
+	if (b)
+	{
+		tick(0x4DBE, 12);                              // BGE
+		goto at_4DBE;
+	}
+	tick(0x4D26, 12);
 	T.r[0] = sext8(peekb(0x01F8));
+	tick(0x4D2A, 24);
 	push(T.r[0]);
-	T.r[0] = call(0xA2BE, {});                         // direction_bit
-	blk(0x4D30, 42);
+	tick(0x4D2C, 24);
+	jsr(0x4D30, 0xA2BE);
 	T.r[6] = (uint16_t)(T.r[6] + 2);
+	tick(0x4D32, 18);                                  // TST (SP)+
+	tick(0x4D34, 12);                                  // TST R0
 	if (T.r[0])
 	{
-		blk(0x4D36, 126);
+		tick(0x4D36, 12);                              // BEQ
 		T.r[0] = sext8(peekb(0x01F8));
+		tick(0x4D3A, 24);
 		push(T.r[0]);
+		tick(0x4D3C, 24);
 		T.r[0] = sext8(peekb(0x0321));
+		tick(0x4D40, 24);
 		push(T.r[0]);
-		call(0xA45A, {});
-		blk(0x4D46, 24 + 12);
+		tick(0x4D42, 24);
+		jsr(0x4D46, 0xA45A);
 		T.r[6] = (uint16_t)(T.r[6] + 4);
-		goto direction;
+		tick(0x4D48, 24);                              // CMP (SP)+,(SP)+
+		tick(0x4DBE, 12);                              // BR
+		goto at_4DBE;
 	}
-	blk(0x4D4A, 150);
+	tick(0x4D4A, 12);
 	T.r[0] = sext8(peekb(0x0331));
+	tick(0x4D4E, 24);
 	T.r[3] = sext8(peekb(0x0322));
-	T.r[4] = rb((uint16_t)(0x7CC0 + T.r[0]));
+	tick(0x4D52, 24);
+	T.r[4] = 0;
+	tick(0x4D54, 12);
+	T.r[4] = peekb((uint16_t)(0x7CC0 + T.r[0]));
+	tick(0x4D58, 27);
 	T.r[3] = (uint16_t)(T.r[3] + T.r[4]);
+	tick(0x4D5A, 12);
 	pokeb(0x0322, (uint8_t)T.r[3]);
+	tick(0x4D5E, 27);
 	T.r[0] = sext8((uint8_t)T.r[3]);
+	tick(0x4D60, 12);
 	if (T.r[0] & 0x8000)
 	{
-		blk(0x4D66, 84);
-		T.r[3] = T.r[0] & 0x007F;
-		pokeb(0x0322, (uint8_t)T.r[3]);
+		tick(0x4D66, 12);                              // BLT
+		T.r[3] = T.r[0];
+		tick(0x4D68, 12);
+		T.r[3] &= 0x007F;
+		tick(0x4D6C, 18);
+		pokeb(0x0322, 0);
+		tick(0x4D70, 27);
+		pokeb(0x0322, (uint8_t)(peekb(0x0322) | T.r[3]));
+		tick(0x4D74, 27);
 	}
 	else
 	{
-		blk(0x4D62, 24);
+		tick(0x4D62, 12);
 		T.r[1] = 0;
+		tick(0x4D64, 12);
+		tick(0x4D74, 12);                              // BR
 	}
-	blk(0x4D74, 63 + 12);
-	T.r[0] = (uint16_t)(sext8(peekb(0x031D)) + T.r[1]);
+	T.r[0] = sext8(peekb(0x031D));
+	tick(0x4D78, 24);
+	T.r[0] = (uint16_t)(T.r[0] + T.r[1]);
+	tick(0x4D7A, 12);
 	pokeb(0x031D, (uint8_t)T.r[0]);
-direction:
-	blk(0x4DBE, 108);
-	T.r[0] = sext8(peekb(0x031D)) & 0x000F;
-	pokeb(0x031D, (uint8_t)T.r[0]);
-	goto kick;
-landing:
-	blk(0x4DD0, 36);
-	if (peekb(0x01EB))
+	tick(0x4D7E, 27);
+	tick(0x4DBE, 12);                                  // BR
+
+at_4DBE:
+	T.r[0] = sext8(peekb(0x031D));
+	tick(0x4DC2, 24);
+	T.r[0] &= 0x000F;
+	tick(0x4DC6, 18);
+	pokeb(0x031D, 0);
+	tick(0x4DCA, 27);
+	pokeb(0x031D, (uint8_t)(peekb(0x031D) | T.r[0]));
+	tick(0x4DCE, 27);
+	tick(0x4E34, 12);                                  // BR
+	goto at_4E34;
+
+at_4DD0:                                               // sliding
+	b = peekb(0x01EB) != 0;
+	tick(0x4DD4, 24);                                  // TSTB @#0x01EB
+	if (b)
 	{
-		blk(0x4DD6, 30);
-		call(0xE238, {});                              // reset_skater_state
+		tick(0x4DD6, 12);
+		jsr(0x4DDA, 0xE238);                           // reset_skater_state
 	}
-	blk(0x4DDA, 36);
-	if ((int8_t)peekb(0x0325) > 0)
+	else
+		tick(0x4DDA, 12);                              // BEQ
+	b = (int8_t)peekb(0x0325) > 0;
+	tick(0x4DDE, 24);                                  // TSTB @#0x0325
+	if (b)
 	{
-		blk(0x4DE0, 33);
+		tick(0x4DE0, 12);                              // BLE
 		pokeb(0x0325, 0x7E);
+		tick(0x4DE6, 33);
 	}
-	blk(0x4DE6, 87);
+	else
+		tick(0x4DE6, 12);
 	pokeb(0x01F8, peekb(0x031A));
-	if (peekb(0x01F8) == peekb(0x031B))
+	tick(0x4DEC, 39);
+	b = peekb(0x01F8) == peekb(0x031B);
+	tick(0x4DF2, 36);                                  // CMPB @#0x01F8,@#0x031B
+	if (b)
 	{
-		blk(0x4DF4, 48);
-		if (peekb(0x0329) != peekb(0x0328))
+		tick(0x4DF4, 12);                              // BNE
+		b = peekb(0x0329) == peekb(0x0328);
+		tick(0x4DFA, 36);                              // CMPB @#0x0329,@#0x0328
+		if (!b)
 		{
-			blk(0x4DFC, 75);
-			T.r[0] = (uint16_t)(sext8(peekb(0x031C)) - 1);
+			tick(0x4DFC, 12);                          // BEQ
+			T.r[0] = sext8(peekb(0x031C));
+			tick(0x4E00, 24);
+			T.r[0]--;
+			tick(0x4E02, 12);
 			pokeb(0x031C, (uint8_t)T.r[0]);
+			tick(0x4E06, 27);
 			if (!(uint8_t)T.r[0])
 			{
-				blk(0x4E08, 93);
+				tick(0x4E08, 12);                      // BNE
 				pokeb(0x031B, 0x3F);
+				tick(0x4E0E, 33);
 				pokeb(0x031E, 0);
+				tick(0x4E12, 27);
 				pokeb(0x0328, 0xFE);
+				tick(0x4E18, 33);
 			}
+			else
+				tick(0x4E18, 12);
 		}
+		else
+			tick(0x4E18, 12);
 	}
-	blk(0x4E18, 36);
-	if (peekb(0x031B) & 0x80)
+	else
+		tick(0x4E18, 12);
+	b = (peekb(0x031B) & 0x80) != 0;
+	tick(0x4E1C, 24);                                  // TSTB @#0x031B
+	if (b)
 	{
-		blk(0x4E1E, 60);
+		tick(0x4E1E, 12);                              // BGE
 		pokeb(0x031E, 0);
+		tick(0x4E22, 27);
 		pokeb(0x0328, 0xFE);
+		tick(0x4E28, 33);
 	}
-	blk(0x4E28, 36);
-	if (peekb(0x01EA))
+	else
+		tick(0x4E28, 12);
+	b = peekb(0x01EA) != 0;
+	tick(0x4E2C, 24);                                  // TSTB @#0x01EA
+	if (b)
 	{
-		blk(0x4E2E, 39);
+		tick(0x4E2E, 12);                              // BEQ
 		pokeb(0x031D, peekb(0x01F8));
+		tick(0x4E34, 39);
 	}
-kick:
-	blk(0x4E34, 42);
-	if (peekb(0x01EB) == 5)
+	else
+		tick(0x4E34, 12);
+
+at_4E34:
+	b = peekb(0x01EB) == 5;
+	tick(0x4E3A, 30);                                  // CMPB @#0x01EB,#5
+	if (b)
 	{
-		blk(0x4E3C, 36);
+		tick(0x4E3C, 12);                              // BNE
 		T.r[1] = peek(0x02E8);
+		tick(0x4E40, 24);
 		if (T.r[1] & 0x8000)
 		{
-			blk(0x4E4E, 30);
-			if (!((int16_t)T.r[1] < (int16_t)0xFF80))
+			tick(0x4E4E, 12);                          // BLT
+			tick(0x4E52, 18);                          // CMP R1,#-0x80
+			if ((int16_t)T.r[1] >= -0x0080)
 			{
-				blk(0x4E54, 18);
+				tick(0x4E54, 12);                      // BLT
 				T.r[1] = (uint16_t)(T.r[1] - 0x0100);
-			}
-		}
-		else
-		{
-			blk(0x4E42, 30);
-			if (!((int16_t)T.r[1] > 0x0080))
-			{
-				blk(0x4E48, 30);
-				T.r[1] = (uint16_t)(T.r[1] + 0x0100);
-			}
-		}
-		blk(0x4E58, 129);
-		poke(0x01B4, T.r[1]);
-		T.r[0] = 0x1C00;
-		set_bank_b(0x1C00);
-		call(0x5B46, {});                              // rolling_sound
-		blk(0x4E6C, 30);
-		call(0x9FB4, {});                              // skater_take_off
-		blk(0x4E70, 228);
-		T.r[0] = (uint16_t)(sext8(peekb(0x01EB)) + 1);
-		pokeb(0x01EB, (uint8_t)T.r[0]);
-		T.r[0] = 0x2C00;
-		set_bank_b(0x2C00);
-		T.r[0] = sext8(peekb(0x025F));
-		poke(0x05B2, peekb((uint16_t)(0x7C70 + T.r[0])));
-	}
-	blk(0x4E94, 36);
-	if (!peekb(0x01EA))
-	{
-		blk(0x4E9A, 18);
-		goto falling;                                  // JMP 0x50E0
-	}
-	blk(0x4E9E, 30);
-	call(0x9B82, {});                                  // skater_motion_params
-	blk(0x4EA2, 36);
-	if (peekb(0x031F))
-	{
-		blk(0x4EA8, 18);
-		goto velocity;                                 // JMP 0x502A
-	}
-	blk(0x4EAC, 36);
-	if (!peekb(0x0EA0))
-	{
-		blk(0x4EB2, 39);
-		poke(0x01B4, (uint16_t)(peek(0x01B4) + peek(0x02EE)));
-	}
-	// the push of the kick phases
-	blk(0x4EB8, 90);
-	T.r[2] = 0;
-	T.r[3] = peek(0x01B4);
-	T.r[0] = sext8(peekb(0x01EB));
-	{
-		bool phase_ab = T.r[0] == 0x000A;
-		if (!phase_ab)
-		{
-			blk(0x4EC8, 30);
-			phase_ab = T.r[0] == 0x000B;
-		}
-		bool done = false;
-		if (phase_ab)
-		{
-			blk(0x4ECE, 36);
-			if (!peekb(0x031E))
-			{
-				blk(0x4ED4, 24);
-				if ((int16_t)T.r[3] > 0)
-				{
-					blk(0x4ED8, 30);
-					T.r[2] = 0xFFF0;
-				}
-				else
-				{
-					blk(0x4EEE, 30);
-					T.r[2] = 0x0010;
-				}
-				done = true;
-			}
-		}
-		if (!done)
-		{
-			blk(0x4EDE, 24);
-			bool push_back = false;
-			if (T.r[3] & 0x8000)
-			{
-				blk(0x4EE2, 30);
-				if (T.r[0] == 1)
-				{
-					blk(0x4EE8, 36);
-					push_back = peekb(0x07B2) != 0;
-				}
-			}
-			if (push_back)
-			{
-				blk(0x4EEE, 30);
-				T.r[2] = 0x0010;
+				tick(0x4E58, 18);
 			}
 			else
-			{
-				blk(0x4EF4, 30);
-				if (T.r[0] == 2)
-				{
-					blk(0x4EFA, 153);
-					T.r[3] = (uint16_t)(T.r[0] + 1);
-					pokeb(0x01EB, (uint8_t)T.r[3]);
-					T.r[0] = 0x1C00;
-					set_bank_b(0x1C00);
-					call(0x5B46, {});                  // rolling_sound
-					blk(0x4F12, 132);
-					T.r[0] = 0x2C00;
-					set_bank_b(0x2C00);
-					push(0x0052);
-					call(0x8E78, {});                  // queue_sound
-					blk(0x4F26, 36);
-					if (!((int16_t)peek(0x01B4) > 0))
-					{
-						blk(0x4F2C, 33);
-						poke(0x01B4, 0x0180);
-					}
-					blk(0x4F32, 18);
-					T.r[6] = (uint16_t)(T.r[6] + 2);
-				}
-				blk(0x4F34, 42);
-				if (peekb(0x01EB) == 3)
-				{
-					blk(0x4F3C, 60);
-					T.r[2] = (uint16_t)(peek(0x02FC) - peek(0x01B4));
-					if (T.r[2] & 0x8000)
-					{
-						blk(0x4F46, 24);
-						T.r[2] = 0;
-					}
-					else
-					{
-						blk(0x4F4A, 30);
-						if ((int16_t)T.r[2] > 0x0050)
-						{
-							blk(0x4F50, 18);
-							T.r[2] = 0x0050;
-						}
-					}
-				}
-			}
-		}
-	}
-	// friction
-	blk(0x4F54, 36);
-	if (peek(0x01B4))
-	{
-		blk(0x4F5A, 48);
-		T.r[1] = 0;
-		if ((int16_t)peek(0x01B4) < 0)
-		{
-			blk(0x4F68, 48);
-			T.r[0] = (uint16_t)-peek(0x01B4);
-			T.r[4] = T.r[0];
+				tick(0x4E58, 12);
 		}
 		else
 		{
-			blk(0x4F62, 36);
-			T.r[4] = peek(0x01B4);
-		}
-		blk(0x4F70, 165);
-		T.r[3] = sext8(peekb(0x025C));
-		T.r[5] = sext8(peekb(0x0327)) & 0x0007;
-		T.r[0] = (uint16_t)(((T.r[5] << 2) + T.r[3]) << 1);
-		bool table = false;
-		if ((int16_t)T.r[4] > (int16_t)tbl((uint16_t)(0x7BE8 + T.r[0])))
-		{
-			blk(0x4F8C, 72);
-			T.r[4] = peek(0x02EE);
-			T.r[0] = peek(0x01B4);
-			T.r[4] ^= T.r[0];
-			if (!(T.r[4] & 0x8000))
+			tick(0x4E42, 12);
+			tick(0x4E46, 18);                          // CMP R1,#0x80
+			if ((int16_t)T.r[1] <= 0x0080)
 			{
-				table = true;
-				blk(0x4F98, 36);
-				T.r[0] = peek(0x02EE);
-				if (T.r[0] & 0x8000)
-				{
-					blk(0x4F9E, 12);
-					T.r[0] = (uint16_t)-T.r[0];
-				}
-				blk(0x4FA0, 54);
-				T.r[4] = T.r[0];
-				bool zero = false;
-				if (peekb(0x0F59) == 3)
-				{
-					blk(0x4FBC, 75);
-					T.r[0] = (uint16_t)(T.r[3] << 1);
-					if ((int16_t)peek(0x01B4) >= (int16_t)tbl((uint16_t)(0x7C68 + T.r[0])))
-						zero = true;
-					else
-					{
-						blk(0x4FC8, 63);
-						T.r[0] = tbl((uint16_t)(0x7C38 + (T.r[5] << 1)));
-					}
-				}
-				else
-				{
-					blk(0x4FAA, 42);
-					if (peek(0x01C4) & 0x000F)
-						zero = true;
-					else
-					{
-						blk(0x4FB2, 63);
-						T.r[0] = tbl((uint16_t)(0x7C28 + (T.r[5] << 1)));
-					}
-				}
-				if (zero)
-				{
-					blk(0x4FD2, 12);
-					T.r[0] = 0;
-				}
-				blk(0x4FD4, 36);
-				T.r[4] = (uint16_t)(T.r[4] - T.r[0]);
-				T.r[1] = T.r[4];
-				if (T.r[1] & 0x8000)
-				{
-					blk(0x4FDA, 24);
-					T.r[1] = 0;
-				}
+				tick(0x4E48, 12);                      // BGT
+				T.r[1] = (uint16_t)(T.r[1] + 0x0100);
+				tick(0x4E4C, 18);
+				tick(0x4E58, 12);                      // BR
 			}
+			else
+				tick(0x4E58, 12);
 		}
-		if (!table)
-		{
-			blk(0x4FDE, 42);
-			if (!(peek(0x01C4) & 0x000F))
-			{
-				blk(0x4FE6, 39);
-				T.r[1] = rb((uint16_t)(0x7C64 + T.r[3]));
-			}
-		}
-		blk(0x4FEC, 36);
-		if ((int16_t)peek(0x01B4) > 0)
-		{
-			blk(0x4FF2, 12);
-			T.r[1] = (uint16_t)-T.r[1];
-		}
-		blk(0x4FF4, 12);
-		T.r[2] = (uint16_t)(T.r[2] + T.r[1]);
+		poke(0x01B4, T.r[1]);
+		tick(0x4E5C, 27);
+		T.r[0] = 0x1C00;
+		tick(0x4E60, 18);
+		poke(0x01D4, T.r[0]);
+		tick(0x4E64, 27);
+		poke(0x1402, T.r[0]);
+		tick(0x4E68, 27);
+		jsr(0x4E6C, 0x5B46);                           // rolling_sound
+		jsr(0x4E70, 0x9FB4);
+		T.r[0] = sext8(peekb(0x01EB));
+		tick(0x4E74, 24);
+		T.r[0]++;
+		tick(0x4E76, 12);
+		pokeb(0x01EB, (uint8_t)T.r[0]);
+		tick(0x4E7A, 27);
+		T.r[0] = 0x2C00;
+		tick(0x4E7E, 18);
+		poke(0x01D4, T.r[0]);
+		tick(0x4E82, 27);
+		poke(0x1402, T.r[0]);
+		tick(0x4E86, 27);
+		T.r[0] = sext8(peekb(0x025F));
+		tick(0x4E8A, 24);
+		pokeb(0x05B2, peekb((uint16_t)(0x7C70 + T.r[0])));
+		tick(0x4E90, 42);
+		pokeb(0x05B3, 0);
+		tick(0x4E94, 27);
 	}
-	// the speed limit of the slope
-	blk(0x4FF6, 42);
-	if (peekb(0x0327) & 7)
+	else
+		tick(0x4E94, 12);
+	b = peekb(0x01EA) != 0;
+	tick(0x4E98, 24);                                  // TSTB @#0x01EA
+	if (!b)
 	{
-		blk(0x5004, 12);
+		tick(0x4E9A, 12);                              // BNE
+		tick(0x50E0, 18);                              // JMP
+		goto at_50E0;
+	}
+	tick(0x4E9E, 12);
+	jsr(0x4EA2, 0x9B82);
+	b = peekb(0x031F) != 0;
+	tick(0x4EA6, 24);                                  // TSTB @#0x031F
+	if (b)
+	{
+		tick(0x4EA8, 12);                              // BEQ
+		tick(0x502A, 18);                              // JMP
+		goto at_502A;
+	}
+	tick(0x4EAC, 12);
+	// the speed along the ground
+	b = peekb(0x0EA0) != 0;
+	tick(0x4EB0, 24);                                  // TSTB @#0x0EA0
+	if (!b)
+	{
+		tick(0x4EB2, 12);                              // BNE
+		poke(0x01B4, (uint16_t)(peek(0x01B4) + peek(0x02EE)));
+		tick(0x4EB8, 39);
+	}
+	else
+		tick(0x4EB8, 12);
+	T.r[2] = 0;
+	tick(0x4EBA, 12);
+	T.r[3] = peek(0x01B4);
+	tick(0x4EBE, 24);
+	T.r[0] = sext8(peekb(0x01EB));
+	tick(0x4EC2, 24);
+	tick(0x4EC6, 18);                                  // CMP R0,#10
+	if (T.r[0] == 0x000A)
+		tick(0x4ECE, 12);                              // BEQ
+	else
+	{
+		tick(0x4EC8, 12);
+		tick(0x4ECC, 18);                              // CMP R0,#11
+		if (T.r[0] != 0x000B)
+		{
+			tick(0x4EDE, 12);                          // BNE
+			goto at_4EDE;
+		}
+		tick(0x4ECE, 12);
+	}
+	b = peekb(0x031E) != 0;
+	tick(0x4ED2, 24);                                  // TSTB @#0x031E
+	if (b)
+	{
+		tick(0x4EDE, 12);                              // BNE
+		goto at_4EDE;
+	}
+	tick(0x4ED4, 12);
+	tick(0x4ED6, 12);                                  // TST R3
+	if ((int16_t)T.r[3] <= 0)
+	{
+		tick(0x4EEE, 12);                              // BLE
+		goto at_4EEE;
+	}
+	tick(0x4ED8, 12);
+	T.r[2] = 0xFFF0;
+	tick(0x4EDC, 18);
+	tick(0x4F54, 12);                                  // BR
+	goto at_4F54;
+at_4EDE:
+	tick(0x4EE0, 12);                                  // TST R3
+	if (T.r[3] & 0x8000)
+	{
+		tick(0x4EE2, 12);                              // BGE
+		tick(0x4EE6, 18);                              // CMP R0,#1
+		if (T.r[0] == 1)
+		{
+			tick(0x4EE8, 12);                          // BNE
+			b = peekb(0x07B2) != 0;
+			tick(0x4EEC, 24);                          // TSTB @#0x07B2
+			if (b)
+			{
+				tick(0x4EEE, 12);                      // BEQ
+				goto at_4EEE;
+			}
+			tick(0x4EF4, 12);
+		}
+		else
+			tick(0x4EF4, 12);
+	}
+	else
+		tick(0x4EF4, 12);
+	tick(0x4EF8, 18);                                  // CMP R0,#2
+	if (T.r[0] == 2)
+	{
+		tick(0x4EFA, 12);                              // BNE
+		T.r[3] = T.r[0];
+		tick(0x4EFC, 12);
+		T.r[3]++;
+		tick(0x4EFE, 12);
+		pokeb(0x01EB, (uint8_t)T.r[3]);
+		tick(0x4F02, 27);
+		T.r[0] = 0x1C00;
+		tick(0x4F06, 18);
+		poke(0x01D4, T.r[0]);
+		tick(0x4F0A, 27);
+		poke(0x1402, T.r[0]);
+		tick(0x4F0E, 27);
+		jsr(0x4F12, 0x5B46);                           // rolling_sound
+		T.r[0] = 0x2C00;
+		tick(0x4F16, 18);
+		poke(0x01D4, T.r[0]);
+		tick(0x4F1A, 27);
+		poke(0x1402, T.r[0]);
+		tick(0x4F1E, 27);
+		push(0x0052);
+		tick(0x4F22, 30);
+		jsr(0x4F26, 0x8E78);                           // queue_sound
+		b = (int16_t)peek(0x01B4) > 0;
+		tick(0x4F2A, 24);                              // TST @#0x01B4
+		if (!b)
+		{
+			tick(0x4F2C, 12);                          // BGT
+			poke(0x01B4, 0x0180);
+			tick(0x4F32, 33);
+		}
+		else
+			tick(0x4F32, 12);
+		T.r[6] = (uint16_t)(T.r[6] + 2);
+		tick(0x4F34, 18);                              // TST (SP)+
+	}
+	else
+		tick(0x4F34, 12);
+	b = peekb(0x01EB) == 3;
+	tick(0x4F3A, 30);                                  // CMPB @#0x01EB,#3
+	if (b)
+	{
+		tick(0x4F3C, 12);                              // BNE
+		T.r[2] = peek(0x02FC);
+		tick(0x4F40, 24);
+		T.r[2] = (uint16_t)(T.r[2] - peek(0x01B4));
+		tick(0x4F44, 24);
+		if (T.r[2] & 0x8000)
+		{
+			tick(0x4F46, 12);                          // BPL
+			T.r[2] = 0;
+			tick(0x4F48, 12);
+			tick(0x4F54, 12);                          // BR
+		}
+		else
+		{
+			tick(0x4F4A, 12);
+			tick(0x4F4E, 18);                          // CMP R2,#0x50
+			if ((int16_t)T.r[2] > 0x0050)
+			{
+				tick(0x4F50, 12);                      // BLE
+				T.r[2] = 0x0050;
+				tick(0x4F54, 18);
+			}
+			else
+				tick(0x4F54, 12);
+		}
+	}
+	else
+		tick(0x4F54, 12);
+	goto at_4F54;
+at_4EEE:
+	T.r[2] = 0x0010;
+	tick(0x4EF2, 18);
+	tick(0x4F54, 12);                                  // BR
+at_4F54:
+	b = peek(0x01B4) != 0;
+	tick(0x4F58, 24);                                  // TST @#0x01B4
+	if (!b)
+	{
+		tick(0x4FF6, 12);                              // BEQ
+		goto at_4FF6;
+	}
+	tick(0x4F5A, 12);
+	T.r[1] = 0;
+	tick(0x4F5C, 12);
+	b = (int16_t)peek(0x01B4) < 0;
+	tick(0x4F60, 24);                                  // TST @#0x01B4
+	if (b)
+	{
+		tick(0x4F68, 12);                              // BLT
+		T.r[0] = peek(0x01B4);
+		tick(0x4F6C, 24);
+		T.r[0] = (uint16_t)-T.r[0];
+		tick(0x4F6E, 12);
+		T.r[4] = T.r[0];
+		tick(0x4F70, 12);
+	}
+	else
+	{
+		tick(0x4F62, 12);
+		T.r[4] = peek(0x01B4);
+		tick(0x4F66, 24);
+		tick(0x4F70, 12);                              // BR
+	}
+	T.r[3] = sext8(peekb(0x025C));
+	tick(0x4F74, 24);
+	T.r[5] = sext8(peekb(0x0327));
+	tick(0x4F78, 24);
+	T.r[5] &= 0x0007;
+	tick(0x4F7C, 18);
+	T.r[0] = T.r[5];
+	tick(0x4F7E, 12);
+	T.r[0] = (uint16_t)(T.r[0] << 1);
+	tick(0x4F80, 12);
+	T.r[0] = (uint16_t)(T.r[0] << 1);
+	tick(0x4F82, 12);
+	T.r[0] = (uint16_t)(T.r[0] + T.r[3]);
+	tick(0x4F84, 12);
+	T.r[0] = (uint16_t)(T.r[0] << 1);
+	tick(0x4F86, 12);
+	b = (int16_t)T.r[4] <= (int16_t)peek((uint16_t)(0x7BE8 + T.r[0]));
+	tick(0x4F8A, 27);                                  // CMP R4,0x7BE8(R0)
+	if (b)
+	{
+		tick(0x4FDE, 12);                              // BLE
+		goto at_4FDE;
+	}
+	tick(0x4F8C, 12);
+	T.r[4] = peek(0x02EE);
+	tick(0x4F90, 24);
+	T.r[0] = peek(0x01B4);
+	tick(0x4F94, 24);
+	T.r[4] ^= T.r[0];
+	tick(0x4F96, 12);
+	if (T.r[4] & 0x8000)
+	{
+		tick(0x4FDE, 12);                              // BLT
+		goto at_4FDE;
+	}
+	tick(0x4F98, 12);
+	T.r[0] = peek(0x02EE);
+	tick(0x4F9C, 24);
+	if (T.r[0] & 0x8000)
+	{
+		tick(0x4F9E, 12);                              // BGE
+		T.r[0] = (uint16_t)-T.r[0];
+		tick(0x4FA0, 12);
+	}
+	else
+		tick(0x4FA0, 12);
+	T.r[4] = T.r[0];
+	tick(0x4FA2, 12);
+	b = peekb(0x0F59) == 3;
+	tick(0x4FA8, 30);                                  // CMPB @#0x0F59,#3
+	if (b)
+	{
+		tick(0x4FBC, 12);                              // BEQ
+		T.r[0] = T.r[3];
+		tick(0x4FBE, 12);
+		T.r[0] = (uint16_t)(T.r[0] << 1);
+		tick(0x4FC0, 12);
+		b = (int16_t)peek(0x01B4) >= (int16_t)peek((uint16_t)(0x7C68 + T.r[0]));
+		tick(0x4FC6, 39);                              // CMP @#0x01B4,0x7C68(R0)
+		if (b)
+		{
+			tick(0x4FD2, 12);                          // BGE
+			T.r[0] = 0;
+			tick(0x4FD4, 12);
+		}
+		else
+		{
+			tick(0x4FC8, 12);
+			T.r[0] = T.r[5];
+			tick(0x4FCA, 12);
+			T.r[0] = (uint16_t)(T.r[0] << 1);
+			tick(0x4FCC, 12);
+			T.r[0] = peek((uint16_t)(0x7C38 + T.r[0]));
+			tick(0x4FD0, 27);
+			tick(0x4FD4, 12);                          // BR
+		}
+	}
+	else
+	{
+		tick(0x4FAA, 12);
+		b = (peek(0x01C4) & 0x000F) != 0;
+		tick(0x4FB0, 30);                              // BIT #15,@#0x01C4
+		if (b)
+		{
+			tick(0x4FD2, 12);                          // BNE
+			T.r[0] = 0;
+			tick(0x4FD4, 12);
+		}
+		else
+		{
+			tick(0x4FB2, 12);
+			T.r[0] = T.r[5];
+			tick(0x4FB4, 12);
+			T.r[0] = (uint16_t)(T.r[0] << 1);
+			tick(0x4FB6, 12);
+			T.r[0] = peek((uint16_t)(0x7C28 + T.r[0]));
+			tick(0x4FBA, 27);
+			tick(0x4FD4, 12);                          // BR
+		}
+	}
+	T.r[4] = (uint16_t)(T.r[4] - T.r[0]);
+	tick(0x4FD6, 12);
+	T.r[1] = T.r[4];
+	tick(0x4FD8, 12);
+	if (T.r[1] & 0x8000)
+	{
+		tick(0x4FDA, 12);                              // BGE
 		T.r[1] = 0;
+		tick(0x4FDC, 12);
+		tick(0x4FEC, 12);                              // BR
+	}
+	else
+		tick(0x4FEC, 12);
+	goto at_4FEC;
+at_4FDE:
+	b = (peek(0x01C4) & 0x000F) != 0;
+	tick(0x4FE4, 30);                                  // BIT #15,@#0x01C4
+	if (!b)
+	{
+		tick(0x4FE6, 12);                              // BNE
+		T.r[1] = 0;
+		tick(0x4FE8, 12);
+		T.r[1] = peekb((uint16_t)(0x7C64 + T.r[3]));
+		tick(0x4FEC, 27);
+	}
+	else
+		tick(0x4FEC, 12);
+at_4FEC:
+	b = (int16_t)peek(0x01B4) > 0;
+	tick(0x4FF0, 24);                                  // TST @#0x01B4
+	if (b)
+	{
+		tick(0x4FF2, 12);                              // BLE
+		T.r[1] = (uint16_t)-T.r[1];
+		tick(0x4FF4, 12);
+	}
+	else
+		tick(0x4FF4, 12);
+	T.r[2] = (uint16_t)(T.r[2] + T.r[1]);
+	tick(0x4FF6, 12);
+at_4FF6:
+	b = (peekb(0x0327) & 7) != 0;
+	tick(0x4FFC, 30);                                  // BITB #7,@#0x0327
+	if (b)
+	{
+		tick(0x5004, 12);                              // BNE
+		T.r[1] = 0;
+		tick(0x5006, 12);
 	}
 	else
 	{
-		blk(0x4FFE, 30);
+		tick(0x4FFE, 12);
 		T.r[1] = 0x0080;
+		tick(0x5002, 18);
+		tick(0x5006, 12);                              // BR
 	}
-	blk(0x5006, 36);
-	if ((int16_t)peek(0x01B4) < 0)
+	b = (int16_t)peek(0x01B4) < 0;
+	tick(0x500A, 24);                                  // TST @#0x01B4
+	if (b)
 	{
-		blk(0x5018, 87);
+		tick(0x5018, 12);                              // BLT
 		poke(0x01B4, (uint16_t)(peek(0x01B4) + T.r[2]));
-		T.r[3] = (uint16_t)-T.r[1];
-		if (!((int16_t)peek(0x01B4) <= (int16_t)T.r[3]))
+		tick(0x501C, 27);
+		T.r[3] = T.r[1];
+		tick(0x501E, 12);
+		T.r[3] = (uint16_t)-T.r[3];
+		tick(0x5020, 12);
+		b = (int16_t)peek(0x01B4) <= (int16_t)T.r[3];
+		tick(0x5024, 24);                              // CMP @#0x01B4,R3
+		if (b)
 		{
-			blk(0x5026, 27);
-			poke(0x01B4, 0);
+			tick(0x502A, 12);                          // BLE
+			goto at_502A;
 		}
+		tick(0x5026, 12);
 	}
 	else
 	{
-		blk(0x500C, 63);
+		tick(0x500C, 12);
 		poke(0x01B4, (uint16_t)(peek(0x01B4) + T.r[2]));
-		if (!((int16_t)peek(0x01B4) >= (int16_t)T.r[1]))
+		tick(0x5010, 27);
+		b = (int16_t)peek(0x01B4) >= (int16_t)T.r[1];
+		tick(0x5014, 24);                              // CMP @#0x01B4,R1
+		if (b)
 		{
-			blk(0x5016, 12 + 27);
-			poke(0x01B4, 0);
+			tick(0x502A, 12);                          // BGE
+			goto at_502A;
 		}
+		tick(0x5016, 12);
+		tick(0x5026, 12);                              // BR
 	}
-velocity:
-	blk(0x502A, 30);
-	call(0x91A6, {});                                  // skater_velocity
-	blk(0x502E, 54);
+	poke(0x01B4, 0);
+	tick(0x502A, 27);
+at_502A:                                               // the vertical speed
+	jsr(0x502E, 0x91A6);
 	T.r[3] = sext8(peekb(0x0327));
+	tick(0x5032, 24);
+	tick(0x5036, 18);                                  // BIT #7,R3
 	if (T.r[3] & 7)
 	{
-		blk(0x50B8, 102);
+		tick(0x50B8, 12);                              // BNE
 		push(peek(0x01B4));
+		tick(0x50BC, 36);
 		push(peek(0x02E6));
-		call(0x80FA, {});                              // mul32
-		blk(0x50C4, 102);
+		tick(0x50C0, 36);
+		jsr(0x50C4, 0x80FA);                           // mul32
 		pokeb(0x07F8, peekb(0x0205));
+		tick(0x50CA, 39);
 		poke(0x05B0, peek(0x0206));
+		tick(0x50D0, 39);
 		T.r[6] = (uint16_t)(T.r[6] + 4);
+		tick(0x50D2, 24);                              // CMP (SP)+,(SP)+
 	}
 	else
 	{
-		blk(0x5038, 36);
-		if (!peekb(0x0EA0))
+		tick(0x5038, 12);
+		b = peekb(0x0EA0) != 0;
+		tick(0x503C, 24);                              // TSTB @#0x0EA0
+		if (b)
+			tick(0x50D2, 12);                          // BNE
+		else
 		{
-			blk(0x503E, 222);
+			tick(0x503E, 12);
 			pokeb(0x07F0, 0);
+			tick(0x5042, 27);
 			pokeb(0x07F4, 0);
+			tick(0x5046, 27);
 			poke(0x04F0, (uint16_t)(peek(0x04F0) + 8));
+			tick(0x504C, 33);
 			poke(0x0570, (uint16_t)(peek(0x0570) + 8));
+			tick(0x5052, 33);
 			poke(0x04F0, peek(0x04F0) & ~0x000F);
+			tick(0x5058, 33);
 			poke(0x0570, peek(0x0570) & ~0x000F);
-			bool level = !peek(0x01B4);
-			if (!level)
+			tick(0x505E, 33);
+			b = peek(0x01B4) != 0;
+			tick(0x5062, 24);                          // TST @#0x01B4
+			bool flat = !b;
+			if (b)
 			{
-				blk(0x5064, 78);
-				T.r[0] = asr(T.r[3], 3);
-				level = T.r[0] == 0x000F;
+				tick(0x5064, 12);                      // BEQ
+				T.r[0] = T.r[3];
+				tick(0x5066, 12);
+				for (uint16_t pc = 0x5068; pc <= 0x506C; pc = (uint16_t)(pc + 2))
+				{
+					T.r[0] = asr(T.r[0], 1);
+					tick(pc, 12);
+				}
+				tick(0x5070, 18);                      // CMP R0,#15
+				flat = T.r[0] == 0x000F;
+				tick(flat ? 0x50B2 : 0x5072, 12);      // BEQ
 			}
-			if (level)
+			else
+				tick(0x50B2, 12);
+			if (flat)
 			{
-				blk(0x50B2, 39);
 				poke(0x05B0, 0);
+				tick(0x50B6, 27);
+				tick(0x50D2, 12);                      // BR
 			}
 			else
 			{
-				blk(0x5072, 243);
 				pokeb(0x07F8, 0);
-				T.r[0] = (uint16_t)(asr(T.r[3], 3) << 1);
-				T.r[1] = (uint16_t)(rw((uint16_t)(0xFCB0 + T.r[0])) - peek(0x06B0));
-				T.r[0] = rb((uint16_t)(0x7CD0 + peekb(0x0F59)));
+				tick(0x5076, 27);
+				T.r[0] = T.r[3];
+				tick(0x5078, 12);
+				for (uint16_t pc = 0x507A; pc <= 0x507E; pc = (uint16_t)(pc + 2))
+				{
+					T.r[0] = asr(T.r[0], 1);
+					tick(pc, 12);
+				}
+				T.r[0] = (uint16_t)(T.r[0] << 1);
+				tick(0x5080, 12);
+				T.r[1] = rw((uint16_t)(0xFCB0 + T.r[0]));
+				tick(0x5084, 27);
+				T.r[1] = (uint16_t)(T.r[1] - peek(0x06B0));
+				tick(0x5088, 24);
+				T.r[0] = 0;
+				tick(0x508A, 12);
+				T.r[0] = peekb(0x0F59);
+				tick(0x508E, 24);
+				T.r[0] = sext8(peekb((uint16_t)(0x7CD0 + T.r[0])));
+				tick(0x5092, 27);
+				T.r[0] &= 0x00FF;
+				tick(0x5096, 18);
+				tick(0x5098, 12);                      // TST R1
 				if (T.r[1] & 0x8000)
 				{
-					blk(0x50A0, 48);
-					T.r[3] = (uint16_t)-T.r[0];
-					if (!((int16_t)T.r[1] >= (int16_t)T.r[3]))
+					tick(0x50A0, 12);                  // BLT
+					T.r[3] = T.r[0];
+					tick(0x50A2, 12);
+					T.r[3] = (uint16_t)-T.r[3];
+					tick(0x50A4, 12);
+					tick(0x50A6, 12);                  // CMP R1,R3
+					if ((int16_t)T.r[1] >= (int16_t)T.r[3])
+						tick(0x50AC, 12);              // BGE
+					else
 					{
-						blk(0x50A8, 12 + 12);
+						tick(0x50A8, 12);
 						T.r[0] = (uint16_t)-T.r[0];
+						tick(0x50AA, 12);
 						T.r[1] = T.r[0];
+						tick(0x50AC, 12);
 					}
 				}
 				else
 				{
-					blk(0x509A, 24);
-					if (!((int16_t)T.r[1] <= (int16_t)T.r[0]))
+					tick(0x509A, 12);
+					tick(0x509C, 12);                  // CMP R1,R0
+					if ((int16_t)T.r[1] <= (int16_t)T.r[0])
+						tick(0x50AC, 12);              // BLE
+					else
 					{
-						blk(0x509E, 12 + 12);
+						tick(0x509E, 12);
+						tick(0x50AA, 12);              // BR
 						T.r[1] = T.r[0];
+						tick(0x50AC, 12);
 					}
 				}
-				blk(0x50AC, 39);
 				poke(0x05B0, T.r[1]);
+				tick(0x50B0, 27);
+				tick(0x50D2, 12);                      // BR
 			}
 		}
 	}
-	blk(0x50D2, 90);
 	poke(0x05B2, peek(0x05B0));
+	tick(0x50D8, 39);
 	pokeb(0x07F9, peekb(0x07F8));
-	goto sprites;
-falling:
-	blk(0x50E0, 81);
+	tick(0x50DE, 39);
+	tick(0x50FC, 12);                                  // BR
+	goto at_50FC;
+at_50E0:                                               // in the air: gravity
 	poke(0x05B2, (uint16_t)(peek(0x05B2) - peek(0x02EE)));
-	if ((int16_t)peek(0x05B2) < (int16_t)0xFE00)
+	tick(0x50E6, 39);
+	b = (int16_t)peek(0x05B2) >= (int16_t)0xFE00;
+	tick(0x50EC, 30);                                  // CMP @#0x05B2,#-0x200
+	if (!b)
 	{
-		blk(0x50EE, 42);
-		if (peekb(0x0F59) != 3)
+		tick(0x50EE, 12);                              // BGE
+		b = peekb(0x0F59) == 3;
+		tick(0x50F4, 30);                              // CMPB @#0x0F59,#3
+		if (!b)
 		{
-			blk(0x50F6, 33);
+			tick(0x50F6, 12);                          // BEQ
 			poke(0x05B2, 0xFE00);
+			tick(0x50FC, 33);
 		}
+		else
+			tick(0x50FC, 12);
 	}
-sprites:
-	blk(0x50FC, 42);
-	if (peekb(0x032F) == 1)
+	else
+		tick(0x50FC, 12);
+at_50FC:                                               // the sprite priority bits
+	b = peekb(0x032F) == 1;
+	tick(0x5102, 30);                                  // CMPB @#0x032F,#1
+	if (b)
 	{
-		blk(0x510A, 18);
+		tick(0x510A, 12);                              // BEQ
 		T.r[2] = 0x0040;
+		tick(0x510E, 18);
 	}
 	else
 	{
-		blk(0x5104, 30);
+		tick(0x5104, 12);
 		T.r[2] = 0x00C0;
+		tick(0x5108, 18);
+		tick(0x510E, 12);                              // BR
 	}
-	blk(0x510E, 513);
-	uint8_t last = 0;
-	for (uint16_t a = 0x0470; a <= 0x0473; a++)
+	uint16_t pc = 0x510E;
+	for (uint16_t a = 0x0470; a < 0x0474; a++)
 	{
-		T.r[0] = ((a & 1) ? sext8(peekb(a)) : peek(a)) & 0x003F;
-		last = (uint8_t)(T.r[0] | (uint8_t)T.r[2]);
-		pokeb(a, last);
+		if (a & 1)
+			T.r[0] = sext8(peekb(a));                  // MOVB
+		else
+			T.r[0] = peek(a);                          // MOV
+		tick((uint16_t)(pc + 4), 24);
+		T.r[0] &= 0x003F;
+		tick((uint16_t)(pc + 8), 18);
+		pokeb(a, 0);
+		fl::clr();
+		tick((uint16_t)(pc + 12), 27);
+		if (a & 1)
+			pokeb(a, (uint8_t)(peekb(a) | T.r[0]));    // BISB R0
+		else
+			poke(a, (uint16_t)(peek(a) | T.r[0]));     // BIS R0
+		tick((uint16_t)(pc + 16), 27);
+		const uint8_t v = (uint8_t)(peekb(a) | T.r[2]);
+		pokeb(a, v);
+		f_nzv(nzb(v));
+		pc = (uint16_t)(pc + 20);
+		tick(pc, 27);
 	}
-	f_nzvc(nzb(last));
+	rts();
 }
 
 // A7:45B0  enter_high_score(int first, long score): put score into the table of 15 entries
