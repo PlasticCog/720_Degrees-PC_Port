@@ -23,9 +23,9 @@ using namespace t11rt;
 uint16_t sext8(uint8_t v) { return (uint16_t)(int16_t)(int8_t)v; }
 
 // Cycles: the routines charge the original's exact cost on the path they take (per straight-
-// line part, tools/insn_cycles.py; loops per pass with charge() at the pass's address).  The
-// table charge is the part all paths share: the register-save helper's epilogue for the C
-// routines, otherwise nothing.
+// line part, tools/insn_cycles.py; loops per pass with charge() at the pass's address); the
+// register-save helper's epilogue is charged by CFrame at the end.  Nothing is left to the
+// table charge.
 // Every charge is also a point where interrupts may come in (at the address of the routine
 // running, kept in g_pc), so an interrupt falls between the same parts of the routine as in
 // the original (before the part it falls in) instead of after the whole routine.
@@ -45,8 +45,13 @@ struct At {
 // time after the whole part.  An interrupt made pending by the last part is taken first.
 void charge(uint16_t pc, int n)
 {
+	if (g_atomic)                                      // difference tester: charge, count the step
+	{
+		tick(pc, n);
+		return;
+	}
 	if (T.check_irqs) tick(pc, 0);
-	while (T.icount <= n && !g_atomic)
+	while (T.icount <= n)
 	{
 		const int k = T.icount > 0 ? T.icount : 0;
 		n -= k;
@@ -55,6 +60,14 @@ void charge(uint16_t pc, int n)
 	T.icount -= n;
 }
 void cy(int n) { charge(g_pc, n); }
+// An instruction that reads or writes the board (I/O registers) or changes the priority: charged
+// after its access, as the original's instruction is, so that the board sees the access in the
+// same time slice and an interrupt it lets in is taken right after it.
+template <class F> void io(int n, F access)
+{
+	access();
+	tick(g_pc, n);
+}
 // JSR R1,@#F144 / F152 / F162 and the helper's prologue; the epilogues after the body's RTS
 constexpr int IN144 = 30 + 129, IN152 = 30 + 153, IN162 = 30 + 177;
 constexpr int OUT144 = 12 + 18 * 3 + 21, OUT152 = 12 + 18 * 4 + 21, OUT162 = 18 * 5 + 21;
@@ -113,21 +126,24 @@ uint16_t jsr(uint16_t addr, uint16_t ret)
 struct CFrame {
 	uint16_t sp, regs[6];
 	int unwinding;                                      // not when abandoned (Unwound)
+	int out = 0;                                        // the helper's epilogue, charged at the end
 	CFrame() : sp(T.r[6]), unwinding(std::uncaught_exceptions())
 	{
 		for (int i = 1; i < 6; i++) regs[i] = T.r[i];
 	}
-	~CFrame()
+	~CFrame() noexcept(false)
 	{
 		if (std::uncaught_exceptions() > unwinding) return;
 		T.r[6] = sp;
 		for (int i = 1; i < 6; i++) T.r[i] = regs[i];
+		if (out) cy(out);                               // an interrupt point, as in the original
 	}
 	CFrame(const CFrame &) = delete;
 	CFrame &operator=(const CFrame &) = delete;
 	// JSR R1,@#F138/F144/F152/F162: R1 and R2..R(1+n) saved, then the helper's return address
 	void save_regs(int n, uint16_t helper_ret)
 	{
+		out = helper_ret == 0xF150 ? OUT144 : helper_ret == 0xF160 ? OUT152 : OUT162;
 		push(T.r[1]);
 		for (int r = 2; r < 2 + n; r++) push(T.r[r]);
 		push(helper_ret);
@@ -398,6 +414,7 @@ void update_chains_b()
 void build_sprite_pieces()
 {
 	At here(0xB1EA);
+	cy(24 + 24 + 12 + 27 + 27);                         // F:B1EA-B1F6
 	const uint16_t list = sext8(peekb(0x0993));
 	push(list);                                         // the list is kept on the stack
 	const uint16_t sp = T.r[6];
@@ -533,6 +550,7 @@ void build_sprite_pieces()
 		link = T.r[5];
 		charge(0xB1FA, cycles);
 	}
+	cy(12 + 18 + 18 + 21);                              // BGE, JMP F:B374, TST (SP)+, RTS
 	fl::tst(pop());
 }
 
@@ -544,11 +562,14 @@ void build_sprite_pieces()
 void move_objects()
 {
 	At here(0xB378);
-	T.r[6] = (uint16_t)(T.r[6] - 4);                    // CMP -(SP),-(SP)
+	cy(30 + 24 + 12);                                   // CMP -(SP),-(SP); MOVB @#0x0994,R5; BGE
+	T.r[6] = (uint16_t)(T.r[6] - 4);
 	const uint16_t at_rate = T.r[6], at_scratch = (uint16_t)(T.r[6] + 2), at_byte = (uint16_t)(T.r[6] - 2);
 	const uint8_t top = peekb(0x0994);
 	T.r[5] = sext8(top);
-	if (!(top & 0x80))
+	if (top & 0x80)
+		cy(18);                                         // JMP F:B4B2
+	else
 		for (;;)
 		{
 			int cycles = 27 + 12;                       // B384 TSTB, BNE
@@ -656,6 +677,7 @@ void move_objects()
 			}
 			charge(0xB384, cycles + 18);                  // JMP B384
 		}
+	cy(24 + 21);
 	fl::cmp(rw(at_rate), rw(at_scratch));                // CMP (SP)+,(SP)+
 	T.r[6] = (uint16_t)(T.r[6] + 4);
 }
@@ -738,15 +760,20 @@ uint16_t queue_piece_count(const Args &a)
 {
 	At here(0xB602);
 	CFrame frame;
+	cy(IN162 + 24 + 24 + 27 + 27 + 18 + 27 + 27 + 18);  // up to MOV #0xE0,R3
 	frame.save_regs(SAVE_R2_R5, F162_RET);
 	const uint16_t saved_a = peek(0x01D2), saved_b = peek(0x01D4);
 	set_bank_a(0);
 	set_bank_b(0x0400);
-	mtps(0xE0);
+	io(24, [] { mtps(0xE0); });                         // interrupts off
+	cy(18);
 	uint16_t r0 = 0x0400;
-	for (uint16_t i = 4; i; i--)
+	for (uint16_t i = 4;;)
+	{
+		cy(27 + 12);                                    // TSTB 0x989(R2); BNE
 		if (!peekb((uint16_t)(0x0989 + i)))
 		{
+			cy(27 + 30 + 27 + 45 + 36 + 27 + 12);       // F:B632-B64E
 			r0 = a.u(1);
 			pokeb((uint16_t)(0x0989 + i), (uint8_t)r0);
 			pokeb((uint16_t)(0x098D + i), peekb((uint16_t)(0x5C96 + a.u(0))));
@@ -754,7 +781,12 @@ uint16_t queue_piece_count(const Args &a)
 			pokeb(0x0992, (uint8_t)(peekb(0x0992) + 1));
 			break;
 		}
-	mtps(0);
+		cy(18);                                         // SOB
+		if (!--i) break;
+	}
+	cy(12);
+	io(30, [] { mtps(0); });                            // and on again
+	cy(27 + 27 + 39 + 39 + 21);                         // F:B658-B66C
 	restore_banks(saved_a, saved_b);
 	return r0;
 }
@@ -766,19 +798,25 @@ uint16_t clear_objects_and_text(const Args &)
 {
 	At here(0xBA2E);
 	CFrame frame;
+	cy(24 + 18);
 	push(T.r[1]);
 	T.r[1] = 0x00E0;
-	mtps(0xE0);
+	io(24, [] { mtps(0xE0); });                         // interrupts off
+	cy(30);
 	jsr(0x8068, 0xBA3A);
+	cy(30);
 	jsr(0x8D3E, 0xBA3E);
+	cy(18);
 	for (T.r[0] = 0x0370; T.r[0] != 0x0995;)
 	{
 		pokeb(T.r[0]++, 0);
 		charge(T.r[0] != 0x0995 ? 0xBA42 : 0xBA4A, 21 + 18 + 12);     // CLRB (R0)+, CMP, BNE
 	}
+	cy(33 + 33);
 	poke(0x3BFE, 0x03F8);
 	poke(0x0988, 0xFFFF);
-	mtps(0);
+	io(30, [] { mtps(0); });                            // and on again
+	cy(18 + 21);
 	return 0x0995;
 }
 
@@ -790,6 +828,7 @@ uint16_t restart_object_animation(const Args &a)
 {
 	At here(0xC98E);
 	CFrame frame;
+	cy(IN152 + 369);                                    // F:C992-C9CA
 	frame.save_regs(SAVE_R2_R4, F152_RET);
 	const uint16_t saved_a = peek(0x01D2), saved_b = peek(0x01D4);
 	set_bank_a(0);
@@ -801,20 +840,24 @@ uint16_t restart_object_animation(const Args &a)
 	bool c = false;
 	if (peekb(0x0E6A) != slot)
 	{
+		cy(12 + 12 + 18 + 27 + 33 + 12);                // F:C9CC-C9DC
 		const uint16_t p = (uint16_t)(0x03B0 + 2 * slot), v = peek(p);
 		poke(p, (uint16_t)(v + 2));
 		c = carry(v, 2);
 		const uint16_t f = peek(peek(p));
 		if ((int16_t)f < 0)
 		{
+			cy(21 + 27);
 			poke(p, f);
 			poke(p, peek(p) & 0x7FFF);
 		}
+		cy(36 + 27 + 30 + 30);                          // F:C9E4-C9F2
 		pokeb((uint16_t)(0x0490 + slot), peekb((uint16_t)(0x0490 + slot)) | 0x18);
 		const uint8_t rate = (uint8_t)a.u(0);
 		pokeb((uint16_t)(0x0790 + slot), rate);
 		pokeb((uint16_t)(0x0770 + slot), rate);
 	}
+	cy(27 + 27 + 39 + 39 + 21);                         // F:C9F6-CA0A
 	restore_banks(saved_a, saved_b);
 	set_c(c);
 	return slot;
@@ -929,10 +972,16 @@ uint16_t map_object_position(const Args &a)
 {
 	At here(0xBF5E);
 	CFrame frame;
+	cy(IN144 + 24 + 12 + 27 + 18 + 24 + 24 + 12 + 18 + 12 + 12);   // F:BF62-BF80
 	frame.save_regs(SAVE_R2_R3, F144_RET);
 	const uint16_t cell = peek((uint16_t)(0x0AF8 + 2 * peek(0x09AA))) & 0x01FF;
 	uint16_t row = sext8(peekb(0x0E9B));
-	if ((cell & 0x000F) > peek(0x099C)) row++;
+	if ((cell & 0x000F) > peek(0x099C))
+	{
+		cy(12);
+		row++;
+	}
+	cy(369);                                            // F:BF84-BFBA
 	const uint16_t ri = (uint16_t)((((uint16_t)(asr(cell, 4) + row)) & 3) << 1);
 	const uint16_t def2 = (uint16_t)(peek(0x09B6) << 1);
 	poke(a.u(1), (uint16_t)(peek((uint16_t)(0xFDB2 + ri)) + peek((uint16_t)(0x4AC0 + def2))));
@@ -1019,15 +1068,22 @@ uint16_t release_map_definition(const Args &)
 {
 	At here(0xBF18);
 	CFrame frame;
+	cy(24 + 18 + 27 + 27 + 18 + 27 + 27 + 30);          // F:BF18-BF32
 	push(T.r[1]);
 	T.r[0] = 0x1000;
 	set_bank_a(0x1000);
 	T.r[0] = 0x1400;
 	set_bank_b(0x1400);
 	jsr(0xBE10, 0xBF36);
+	cy(24 + 27 + 18 + 12);                              // F:BF36-BF42
 	const uint16_t def = peek(0x09B6);
 	const uint16_t group = peekb((uint16_t)(0x4560 + def)) & 0x0F;
-	if (group) pokeb((uint16_t)(0x0E6D + group), 0);
+	if (group)
+	{
+		cy(30);
+		pokeb((uint16_t)(0x0E6D + group), 0);
+	}
+	cy(12 * 4 + 18 + 45 + 18 + 21);                     // F:BF48-BF5C
 	const uint16_t i = asr(def, 3);
 	pokeb((uint16_t)(0x0CF6 + i), (uint8_t)(peekb((uint16_t)(0x0CF6 + i)) & ~peekb((uint16_t)(0xFC74 + (def & 7)))));
 	set_c((def >> 2) & 1);                              // the last ASR
@@ -1546,6 +1602,7 @@ uint16_t init_map_objects(const Args &)
 {
 	At here(0xCFD6);
 	CFrame frame;
+	cy(IN144 + 24 + 24 + 18 + 12 + 18 + 12);            // F:CFDA-CFE6, the first CMP / BLOS
 	frame.save_regs(SAVE_R2_R3, F144_RET);
 	uint16_t *R = T.r;
 	R[2] = peek(0x01D2);
@@ -1555,6 +1612,7 @@ uint16_t init_map_objects(const Args &)
 		pokeb(R[0]++, 0);
 		charge(R[0] <= 0x0E9A ? 0xCFE8 : 0xCFF0, 21 + 18 + 12);       // CLRB (R0)+, CMP, BLOS
 	}
+	cy(27 + 33 + 33 + 33 + 27 + 27 + 18 + 27 + 27 + 18);   // F:CFF0-D01A
 	pokeb(0x0E93, 0);
 	poke(0x09AE, 0xFFFF);
 	poke(0x09B0, 0x003F);
@@ -1563,16 +1621,20 @@ uint16_t init_map_objects(const Args &)
 	poke(0x1400, 0);
 	R[0] = 0x0400;
 	set_bank_b(0x0400);
-	for (R[1] = 0x6696; peek(R[1]) != 0xFFFF;)
+	for (R[1] = 0x6696;;)
 	{
+		charge(0xD01E, 24 + 12);                        // CMP (R1),#-1; BEQ
+		if (peek(R[1]) == 0xFFFF) break;
+		cy(30 + 39 + 30 + 30);                          // F:D024-D02E
 		push(peek(R[1]));
 		push(peek((uint16_t)(R[1] + 2)));
 		push(1);
 		jsr(0xCE24, 0xD032);
+		cy(18 + 18 + 12);                               // F:D032-D03A
 		R[1] = (uint16_t)(R[1] + 4);
 		R[6] = (uint16_t)(R[6] + 6);
-		charge(0xD01E, 24 + 12 + 30 + 39 + 30 + 30 + 18 + 18 + 12);   // D01E-D03A without F:CE24
 	}
+	cy(27 + 27 + 39 + 39 + 21);                         // F:D03C-D050
 	restore_banks(R[2], R[3]);
 	set_c(false);
 	return R[0];
@@ -2724,17 +2786,25 @@ void update_objects()
 struct Irq32v {
 	Irq32v()
 	{
+		cy(24 * 6 + 18);                                // registers saved, SUB #6,SP
 		for (int i = 0; i <= 5; i++) push(T.r[i]);
 		T.r[6] = (uint16_t)(T.r[6] - 6);
-		poke(0x15C0, 0);                                // acknowledge
+		io(27, [] { poke(0x15C0, 0); });                // acknowledge
 		pokeb(0x0191, (uint8_t)(peekb(0x0191) + 1));
 	}
 	int unwinding = std::uncaught_exceptions();
-	~Irq32v()
+	// ADD #6,SP and the registers back, one instruction at a time (interrupts are on: one
+	// coming in finds the stack as in the original); the RTI is the table charge
+	~Irq32v() noexcept(false)
 	{
 		if (std::uncaught_exceptions() > unwinding) return;
 		T.r[6] = (uint16_t)(T.r[6] + 6);
-		for (int i = 5; i >= 0; i--) T.r[i] = pop();
+		tick(g_pc, 18);
+		for (int i = 5; i >= 0; i--)
+		{
+			T.r[i] = pop();
+			tick(g_pc, 18);
+		}
 	}
 	Irq32v(const Irq32v &) = delete;
 	Irq32v &operator=(const Irq32v &) = delete;
@@ -2745,16 +2815,17 @@ struct Irq32v {
 		{
 			cy(30);
 			jsr(0x8096, ret_8096);
-			cy(to_exit + 150);                          // JMP / BR to the exit; registers back, RTI
+			cy(to_exit);                                // JMP / BR to the exit
 			return false;
 		}
-		cy(216);                                        // up to and with JSR F:8068
+		cy(27 + 42 + 42 + 33 + 12);                     // up to CLR R0
 		pokeb(0x0FED, (uint8_t)(peekb(0x0FED) + 1));
 		ww((uint16_t)(T.r[6] + 4), peek(0x01D2));
 		ww((uint16_t)(T.r[6] + 2), peek(0x01D4));
 		ww(T.r[6], peek(0x01D0));
 		T.r[0] = 0;
-		mtps(0);
+		io(30, [] { mtps(0); });                        // interrupts let in
+		cy(30);
 		jsr(0x8068, ret_8068);
 		hw_banks(0, 0x0400);
 		return true;
@@ -2768,8 +2839,7 @@ struct Irq32v {
 		poke(0x01D4, rw((uint16_t)(T.r[6] + 2)));
 		poke(0x1402, peek(0x01D4));
 		jsr(0x8096, ret);
-		cy(27 + 150);                                   // DECB 0x0FED; registers back, RTI
-		pokeb(0x0FED, (uint8_t)(peekb(0x0FED) - 1));
+		io(27, [] { pokeb(0x0FED, (uint8_t)(peekb(0x0FED) - 1)); });   // DECB: not busy any more
 	}
 };
 
@@ -2780,7 +2850,7 @@ void irq_32v_sprites()
 {
 	At here(0xB8FC);
 	Irq32v irq;
-	cy(252);                                            // F:B8FC-B918
+	cy(27 + 24 + 12);                                   // INCB @#0x0191; TSTB @#0x0FED; BEQ
 	if (!irq.enter(0xB91E, 0xB93E, 12)) return;
 	cy(102);
 	const uint8_t quarter = peekb(0x0191);
@@ -2829,7 +2899,7 @@ void irq_32v_game()
 {
 	At here(0xB66E);
 	Irq32v irq;
-	cy(252);                                            // F:B66E-B68A
+	cy(27 + 24 + 12);                                   // INCB @#0x0191; TSTB @#0x0FED; BEQ
 	if (!irq.enter(0xB690, 0xB6B2, 18)) return;
 	cy(102);
 	const uint8_t quarter = peekb(0x0191);
@@ -3375,41 +3445,129 @@ uint16_t print_number_large(const Args &a)
 	return print_number(a, 0x8000);
 }
 
+// F:BBEC (registers): the view rectangle 0x0996-0x099C is copied to 0x0224-0x022A (x / y
+// first) and the next eight map slots 0x09AC (wrapping from 0x09B0 to 0x0E98) are looked at:
+// those with a type (0x09B8) get F:BCB8 with 0x09AA = the slot.  Banks 0x1000 / 0x1400.
+void check_some_map_slots()
+{
+	At here(0xBBEC);
+	cy(18 + 27 + 27 + 18 + 27 + 27 + 39 + 39 + 39 + 39 + 30);   // F:BBEC-BC1C
+	T.r[0] = 0x1000;
+	set_bank_a(0x1000);
+	T.r[0] = 0x1400;
+	set_bank_b(0x1400);
+	poke(0x0224, peek(0x099A));
+	poke(0x0226, peek(0x099C));
+	poke(0x0228, peek(0x0996));
+	poke(0x022A, peek(0x0998));
+	push(0x0008);
+	do
+	{
+		charge(0xBC20, 27 + 36 + 12);                   // INC; CMP; BLE
+		poke(0x09AC, (uint16_t)(peek(0x09AC) + 1));
+		if ((int16_t)peek(0x09AC) > (int16_t)peek(0x09B0))
+		{
+			cy(27 + 39);
+			poke(0x09AC, 0);
+			pokeb(0x09AC, peekb(0x0E98));
+		}
+		cy(39 + 24 + 27 + 12);                          // F:BC36-BC44
+		poke(0x09AA, peek(0x09AC));
+		T.r[0] = peek(0x09AA);
+		if (peekb((uint16_t)(0x09B8 + T.r[0])))
+		{
+			cy(30);
+			jsr(0xBCB8, 0xBC4A);
+		}
+		cy(21 + 12);                                    // DEC (SP); BNE
+		poke(T.r[6], (uint16_t)(peek(T.r[6]) - 1));
+	} while (peek(T.r[6]));
+	cy(18 + 21);
+	fl::tst(pop());
+}
+
+// F:CA0C (registers): a map object in mode 3 is animated: unless the skater's object
+// (0x022C) has bit 0 of 0x04B0 set, a record (0x09B6, bank A) with bit 4 of its first byte
+// looks for the object of this slot (F:CDD0 find_slot_with(0x09AA, 0x0AF8[0x09AA])) and
+// restarts its animation 5 (F:C98E).
+void animate_map_object()
+{
+	At here(0xCA0C);
+	cy(24 + 33 + 12);
+	T.r[0] = peek(0x022C);
+	uint8_t bits = peekb((uint16_t)(0x04B0 + T.r[0])) & 0x01;
+	fl::movb(bits);
+	if (bits)
+	{
+		cy(21);
+		return;
+	}
+	cy(24 + 33 + 12);
+	T.r[0] = peek(0x09B6);
+	bits = peekb((uint16_t)(0x4000 + T.r[0])) & 0x10;
+	fl::movb(bits);
+	if (!bits)
+	{
+		cy(21);
+		return;
+	}
+	cy(24 + 12 + 39 + 36 + 30);                         // F:CA24-CA32
+	T.r[0] = (uint16_t)(peek(0x09AA) << 1);
+	push(peek((uint16_t)(0x0AF8 + T.r[0])));
+	push(peek(0x09AA));
+	jsr(0xCDD0, 0xCA36);
+	cy(18 + 12);
+	if (T.r[0] != 0xFFFF)
+	{
+		cy(21 + 30 + 30);
+		poke(T.r[6], T.r[0]);
+		push(0x0005);
+		jsr(0xC98E, 0xCA46);
+		cy(18);
+		T.r[6] = (uint16_t)(T.r[6] + 2);
+	}
+	cy(24 + 21);
+	const uint16_t a = pop(), b = pop();
+	fl::cmp(a, b);                                      // CMP (SP)+,(SP)+
+}
+
 }
 
 LOGIC_TABLE(fmid,
 	asm_routine("F", 0xB03C, "apply_queued_piece_counts", apply_queued_piece_counts, 0),
 	asm_routine("F", 0xB092, "update_chains_a", update_chains_a, 0),
 	asm_routine("F", 0xB120, "update_chains_b", update_chains_b, 0),
-	asm_routine("F", 0xB1EA, "build_sprite_pieces", build_sprite_pieces, 183),
-	asm_routine("F", 0xB378, "move_objects", move_objects, 111),
-	c_routine("F", 0xB4B6, "show_object", show_object, 0, OUT152),
-	c_routine("F", 0xB602, "queue_piece_count", queue_piece_count, 0, 990),
-	c_routine("F", 0xBA2E, "clear_objects_and_text", clear_objects_and_text, 0, 279),
-	c_routine("F", 0xC98E, "restart_object_animation", restart_object_animation, 0, 1047),
-	c_routine("F", 0xBE10, "locate_map_object", locate_map_object, 0, OUT144),
-	c_routine("F", 0xBE7C, "map_object_state", map_object_state, 0, OUT144),
-	c_routine("F", 0xBF5E, "map_object_position", map_object_position, 0, 798),
+	asm_routine("F", 0xB1EA, "build_sprite_pieces", build_sprite_pieces, 0),
+	asm_routine("F", 0xB378, "move_objects", move_objects, 0),
+	c_routine("F", 0xB4B6, "show_object", show_object, 0, 0),
+	c_routine("F", 0xB602, "queue_piece_count", queue_piece_count, 0, 0),
+	c_routine("F", 0xBA2E, "clear_objects_and_text", clear_objects_and_text, 0, 0),
+	c_routine("F", 0xC98E, "restart_object_animation", restart_object_animation, 0, 0),
+	c_routine("F", 0xBE10, "locate_map_object", locate_map_object, 0, 0),
+	c_routine("F", 0xBE7C, "map_object_state", map_object_state, 0, 0),
+	c_routine("F", 0xBF5E, "map_object_position", map_object_position, 0, 0),
 	asm_routine("F", 0xBD78, "map_object_enters", map_object_enters, 0),
-	c_routine("F", 0xBA96, "print_number_small", print_number_small, 0, OUT162),
-	c_routine("F", 0xBA9A, "print_number_large", print_number_large, 0, OUT162),
-	c_routine("F", 0xBF18, "release_map_definition", release_map_definition, 0, 429),
-	c_routine("F", 0xC114, "turn_map_object", turn_map_object, 0, OUT162),
+	c_routine("F", 0xBA96, "print_number_small", print_number_small, 0, 0),
+	c_routine("F", 0xBA9A, "print_number_large", print_number_large, 0, 0),
+	c_routine("F", 0xBF18, "release_map_definition", release_map_definition, 0, 0),
+	c_routine("F", 0xC114, "turn_map_object", turn_map_object, 0, 0),
 	c_routine("F", 0xCF5E, "remove_map_object", remove_map_object, 0, 0),
-	c_routine("F", 0xCE24, "add_map_object", add_map_object, 0, OUT162),
-	c_routine("F", 0xCFD6, "init_map_objects", init_map_objects, 0, 813),
-	c_routine("F", 0xC3E6, "map_object_leaves", map_object_leaves, 0, OUT162),
+	c_routine("F", 0xCE24, "add_map_object", add_map_object, 0, 0),
+	c_routine("F", 0xCFD6, "init_map_objects", init_map_objects, 0, 0),
+	c_routine("F", 0xC3E6, "map_object_leaves", map_object_leaves, 0, 0),
 	asm_routine("F", 0xBCB8, "check_map_object_view", check_map_object_view, 0),
-	c_routine("F", 0xBFBC, "move_map_object", move_map_object, 0, OUT162),
-	c_routine("F", 0xC4E4, "create_map_object", create_map_object, 0, OUT162),
-	irq_routine("F", 0xB8FC, "irq_32v_sprites", irq_32v_sprites, 0),
-	irq_routine("F", 0xB66E, "irq_32v_game", irq_32v_game, 0),
+	c_routine("F", 0xBFBC, "move_map_object", move_map_object, 0, 0),
+	c_routine("F", 0xC4E4, "create_map_object", create_map_object, 0, 0),
+	irq_routine("F", 0xB8FC, "irq_32v_sprites", irq_32v_sprites, 24),          // RTI
+	irq_routine("F", 0xB66E, "irq_32v_game", irq_32v_game, 24),                // RTI
 	asm_routine("F", 0xC850, "try_map_object_move", try_map_object_move, 0),
 	c_routine("F", 0xC868, "try_next_map_definition", try_next_map_definition, 0, 0),
 	asm_routine("F", 0xCA4C, "update_map_object_slot", update_map_object_slot, 0),
 	asm_routine("F", 0xBC52, "check_map_objects_in_view", check_map_objects_in_view, 0),
 	asm_routine("F", 0xC8AA, "tick_map_object_timers", tick_map_object_timers, 0),
 	asm_routine("F", 0xCB24, "update_objects", update_objects, 0),
+	asm_routine("F", 0xBBEC, "check_some_map_slots", check_some_map_slots, 0),
+	asm_routine("F", 0xCA0C, "animate_map_object", animate_map_object, 0),
 )
 
 }
