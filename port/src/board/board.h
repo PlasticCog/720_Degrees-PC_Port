@@ -141,6 +141,9 @@ public:
 	struct Debug {
 		bool hide_pf = false, hide_mo = false, hide_alpha = false;
 		bool capture_tiles = false;            // record the playfield tile code under every pixel
+		// the cheats "no water" / "no bushes": those tiles (terrain events 18 / 11) are drawn as
+		// the commonest plain floor tile of the playfield
+		bool ground_water = false, ground_bushes = false;
 	} debug;
 	// playfield tile code (bank-resolved, 0..8191) under each pixel of the last frame
 	const uint16_t *debug_tile_codes() const { return m_dbg_tiles.data(); }
@@ -196,6 +199,8 @@ private:
 	std::array<uint16_t, 0xc00> m_alpha{};
 	std::array<uint16_t, 0x400> m_mo{};
 	std::array<uint16_t, 0x1000> m_pft{}, m_pfb{};
+	int m_ground = -1;                         // the floor tile word drawn for water / bushes
+	void choose_ground();
 	std::array<uint8_t, 0x1000> m_sram{};
 	std::array<uint8_t, 0x200> m_eeprom{};
 	bool m_slap_armed = false;

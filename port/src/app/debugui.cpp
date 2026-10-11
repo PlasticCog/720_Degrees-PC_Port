@@ -17,6 +17,7 @@
 #include "audioout.h"
 #include "board.h"
 #include "leveldata.h"
+#include "logic.h"
 #include "nativemachine.h"
 #include "soundchips.h"
 #include "sprites.h"
@@ -150,6 +151,8 @@ void DebugUI::after_frame(NativeMachine &m)
 {
 	m_frame++;
 	if (m_freeze_timer) ww(m, G_TIMER, m_timer_value);
+	m.board.debug.ground_water = logic::g_cheat_no_water;
+	m.board.debug.ground_bushes = logic::g_cheat_no_bushes;
 	for (auto &w : m_watches)
 		if (w.freeze)
 		{
@@ -584,6 +587,10 @@ void DebugUI::tab_cheats(NativeMachine &m)
 	ImGui::SetNextItemWidth(120);
 	if (ImGui::SliderInt("Equipment level", &equip, 0, 3)) m.board.main_ram()[SK_EQUIP] = (uint8_t)equip;
 	ImGui::TextDisabled("Equipment (bought in the shops) selects the jump and speed table entries.");
+	ImGui::Checkbox("No water", &logic::g_cheat_no_water);
+	ImGui::SameLine();
+	ImGui::Checkbox("No bushes / thorns", &logic::g_cheat_no_bushes);
+	ImGui::TextDisabled("Water (SPLASH!) and bushes (OUCH!) become plain ground you can skate over, drawn as the floor around them.");
 }
 
 void DebugUI::tab_sound(NativeMachine &m)

@@ -1669,6 +1669,13 @@ void sort_sprite_list()
 	rts();
 }
 
+// the attribute byte of a tile with the cheats: no water (event 18), no bushes (event 11)
+uint8_t without_hazards(uint8_t v)
+{
+	if ((v == 0x12 && g_cheat_no_water) || (v == 0x0B && g_cheat_no_bushes)) return 0;
+	return v;
+}
+
 // F:944C (assembly): the probed cells 1-3 (0x0302-0x0306) become tile numbers (low 10 bits
 // plus the tile bank base 0x01D6, or 0x01D8 for bit 10); 0x032A / 0x032B = the attribute byte
 // (0x6000) of cell 2; then each cell holds its terrain code: the byte at 0x4000 + tile, or
@@ -1734,7 +1741,7 @@ void cell_terrain_codes()
 	fl::mov(T.r[0]);
 	tick(0x949C, 27);
 	{
-		const uint8_t v = peekb((uint16_t)(0x6000 + T.r[0]));
+		const uint8_t v = without_hazards(peekb((uint16_t)(0x6000 + T.r[0])));
 		fl::movb(v);
 		pokeb(0x032A, v);
 	}
@@ -1743,7 +1750,7 @@ void cell_terrain_codes()
 	fl::mov(T.r[0]);
 	tick(0x94A6, 24);
 	{
-		const uint8_t v = peekb((uint16_t)(0x6000 + T.r[0]));
+		const uint8_t v = without_hazards(peekb((uint16_t)(0x6000 + T.r[0])));
 		fl::movb(v);
 		pokeb(0x032B, v);
 	}

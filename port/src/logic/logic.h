@@ -169,6 +169,10 @@ extern bool g_difftest;                                // compare every call wit
 // optional fixes of bugs in the original (debug menu, Extras; off = the original behaviour)
 extern bool g_fix_subpixel_carry;                      // A7:4098 loses the fraction carry (SWAB)
 extern bool g_fix_hazard_bonus;                        // B3:7CB0 looks up a bonus and drops it
+// cheats (debug menu): the water (terrain event 18) and the bushes (event 11) are not seen, so
+// those tiles are plain ground (their terrain byte is flat at the skater's own height)
+extern bool g_cheat_no_water;
+extern bool g_cheat_no_bushes;
 // run some rewritten routines as the translation again (for hunting differences): a comma-
 // separated list of SEG:ADDR, routine names or table names (routines_<table>.cpp), or "all"
 void use_translation(const std::string &spec);

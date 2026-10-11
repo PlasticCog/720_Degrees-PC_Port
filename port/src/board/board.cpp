@@ -469,6 +469,7 @@ void Board::begin_line(int line)
 	{
 		m_last_rendered = -1;
 		if (m_pending_yscroll >= 0) { m_pf_scrolly = m_pending_yscroll; m_pending_yscroll = -1; }
+		choose_ground();
 	}
 	if ((line % 64) == 0)
 	{
@@ -521,6 +522,45 @@ void Board::update_partial(int line)
 		render_line(++m_last_rendered);
 }
 
+// the terrain byte (bank 0x0800) and the event / replacement byte (bank 0x0C00) of a tile
+static uint8_t tile_table(const RomSet &roms, uint16_t bankreg, int code)
+{
+	const size_t off = 0x10000 + (size_t)bank_entry_from_data(bankreg) * 0x2000 + (code & 0x1fff);
+	return off < roms.main.size() ? roms.main[off] : 0;
+}
+
+// with the cheats on: the commonest plain floor tile on the screen (no event, flat, a real height
+// level), colour included, to draw in place of the water / bush tiles; the last choice stays
+// unless another tile is clearly commoner, so that it does not flicker while scrolling
+void Board::choose_ground()
+{
+	if (!debug.ground_water && !debug.ground_bushes)
+	{
+		m_ground = -1;
+		return;
+	}
+	static std::array<uint16_t, 0x4000> count;
+	count.fill(0);
+	int best = -1, best_n = 0;
+	for (int ty = 0; ty <= SCREEN_H / 8; ty++)
+		for (int tx = 0; tx <= SCREEN_W / 8; tx++)
+		{
+			const int index = (((ty * 8 + m_pf_scrolly) & 511) >> 3) * 128 + (((tx * 8 + m_pf_scrollx) & 1023) >> 3);
+			const uint16_t data = index < 4096 ? m_pft[index] : m_pfb[index & 4095];
+			const int code = ((m_pf_tile_bank[(data >> 10) & 1] << 10) | (data & 0x3ff)) & 8191;
+			const uint8_t terrain = tile_table(m_roms, 0x0800, code);
+			if (tile_table(m_roms, 0x0C00, code) != 0 || (terrain & 0x87) != 0 || (terrain >> 3) == 15) continue;
+			const int key = data & 0x3fff;
+			if (++count[key] > best_n)
+			{
+				best_n = count[key];
+				best = key;
+			}
+		}
+	if (best < 0) return;                      // none on screen: keep the last one
+	if (m_ground < 0 || count[m_ground] * 5 < best_n * 4) m_ground = best;
+}
+
 void Board::render_line(int y)
 {
 	uint16_t *dst = &m_frame[y * SCREEN_W];
@@ -532,8 +572,17 @@ void Board::render_line(int y)
 	{
 		const int tx = (x + m_pf_scrollx) & 1023;
 		const int index = (ty >> 3) * 128 + (tx >> 3);
-		const uint16_t data = index < 4096 ? m_pft[index] : m_pfb[index & 4095];
-		const int code = ((m_pf_tile_bank[(data >> 10) & 1] << 10) | (data & 0x3ff)) & 8191;
+		uint16_t data = index < 4096 ? m_pft[index] : m_pfb[index & 4095];
+		int code = ((m_pf_tile_bank[(data >> 10) & 1] << 10) | (data & 0x3ff)) & 8191;
+		if (m_ground >= 0)
+		{
+			const uint8_t event = tile_table(m_roms, 0x0C00, code);
+			if ((event == 0x12 && debug.ground_water) || (event == 0x0B && debug.ground_bushes))
+			{
+				data = (uint16_t)((data & 0xc000) | m_ground);
+				code = ((m_pf_tile_bank[(data >> 10) & 1] << 10) | (data & 0x3ff)) & 8191;
+			}
+		}
 		const int color = (data >> 11) & 7;
 		dst[x] = (uint16_t)(128 + color * 16 + m_gfx.tiles[code * 64 + (ty & 7) * 8 + (tx & 7)]);
 		pri[x] = (~data >> 14) & 3;

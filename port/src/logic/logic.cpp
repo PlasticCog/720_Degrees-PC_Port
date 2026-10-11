@@ -38,6 +38,8 @@ bool g_enabled = true;
 bool g_difftest = false;
 bool g_fix_subpixel_carry = false;
 bool g_fix_hazard_bonus = false;
+bool g_cheat_no_water = false;
+bool g_cheat_no_bushes = false;
 
 namespace {
 

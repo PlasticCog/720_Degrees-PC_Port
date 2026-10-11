@@ -2,6 +2,7 @@
 //   render720 --roms DIR --frames N [--out DIR] [--png-every K] [--script FILE] [--random SEED] [--wav FILE]
 //             [--ram-dump FILE] [--pal-dump FILE] [--hide-pf] [--hide-alpha] [--poke FRAME:ADDR:VALUE]
 //             [--extras NAME,NAME...] [--dev-input FROM:TO:BITS]   (extras.h; BITS 1 freeze, 4 step)
+//             [--cheat no-water,no-bushes]
 #include "nativemachine.h"
 #include "soundchips.h"
 #include "inputscript.h"
@@ -64,6 +65,12 @@ int main(int argc, char **argv)
 		else if (a == "--hide-alpha") hide_alpha = true;   // screenshots without the text layer
 		else if (a == "--difftest") logic::g_difftest = true;   // compare rewritten routines with the originals
 		else if (a == "--no-rewrite") logic::g_enabled = false; // run only the translated original
+		else if (a == "--cheat")                           // no-water, no-bushes (the debug menu's cheats)
+		{
+			const std::string c = next();
+			logic::g_cheat_no_water |= c.find("no-water") != std::string::npos;
+			logic::g_cheat_no_bushes |= c.find("no-bushes") != std::string::npos;
+		}
 		else if (a == "--translated") logic::use_translation(next());   // these rewritten routines run translated
 		else if (a == "--poke")                            // FRAME:ADDR:VALUE (hex addr/value), main RAM word
 		{
@@ -115,6 +122,8 @@ int main(int argc, char **argv)
 	FILE *pdump = pal_dump.empty() ? nullptr : fopen(pal_dump.c_str(), "wb");
 	m.board.debug.hide_pf = hide_pf;
 	m.board.debug.hide_alpha = hide_alpha;
+	m.board.debug.ground_water = logic::g_cheat_no_water;
+	m.board.debug.ground_bushes = logic::g_cheat_no_bushes;
 	if (stats_every || slog)
 		m.board.on_sound_command = [&](uint8_t c) {
 			sound_cmds++;
