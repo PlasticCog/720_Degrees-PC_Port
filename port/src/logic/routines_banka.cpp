@@ -272,30 +272,55 @@ void update_map_slots()
 		T.r[3] = (uint16_t)(T.r[3] - 0x0050);
 		T.r[1] = (uint16_t)(T.r[1] - 0x0050);
 	}
+	// one pass of the loop at 0x4902 costs 111 (test of the slot number) + 39 (in use?)
+	// + 39 (next slot) cycles, an occupied slot 114 + 30 + 24 more plus the range tests
+	// and the JSR to the callee
 	for (;;)
 	{
 		T.r[0] = peek(0x09AA);
 		const uint16_t last = peekb(0x0E98);
 		if ((int16_t)T.r[0] < (int16_t)last) break;
+		int pass = 111 + 39 + 39;
 		if (peekb((uint16_t)(0x09B8 + T.r[0])))
 		{
+			pass += 114 + 30 + 24;
 			poke(local, 0);
 			T.r[0] = peek((uint16_t)(0x0AF8 + (T.r[0] << 1)));
 			T.r[5] = T.r[0] & 0x000F;
-			if ((int16_t)T.r[5] >= (int16_t)T.r[4] && (int16_t)T.r[5] <= (int16_t)T.r[2])
+			if ((int16_t)T.r[5] >= (int16_t)T.r[4])
 			{
-				T.r[5] = T.r[0] & 0x01F0;
-				if ((int16_t)T.r[5] >= (int16_t)T.r[3] && (int16_t)T.r[5] < (int16_t)T.r[1])
-					poke(local, (uint16_t)(peek(local) + 1));
+				pass += 24;
+				if ((int16_t)T.r[5] <= (int16_t)T.r[2])
+				{
+					pass += 54;
+					T.r[5] = T.r[0] & 0x01F0;
+					if ((int16_t)T.r[5] >= (int16_t)T.r[3])
+					{
+						pass += 24;
+						if ((int16_t)T.r[5] < (int16_t)T.r[1])
+						{
+							pass += 21;
+							poke(local, (uint16_t)(peek(local) + 1));
+						}
+					}
+				}
 			}
 			if (!peek(local))
 			{
-				if ((int16_t)T.r[0] < 0) call(0xC3E6, {});
+				if ((int16_t)T.r[0] < 0)
+				{
+					pass += 30 + 12;
+					call(0xC3E6, {});
+				}
 			}
 			else if ((int16_t)T.r[0] >= 0)
+			{
+				pass += 30;
 				call(0xC4E4, {});
+			}
 		}
 		poke(0x09AA, (uint16_t)(peek(0x09AA) - 1));
+		tick(0x4902, pass);
 	}
 	T.r[6] = (uint16_t)(T.r[6] + 2);
 	fl::tst(peek(local));
@@ -617,6 +642,7 @@ uint16_t message_box(const Args &a)
 				p = (uint16_t)(p + 2);
 			}
 			p = (uint16_t)(p - back + 0x0080);
+			tick(0x4D84, 120 + 39 * cols);             // one row of the loop at 0x4D84
 		}
 		if (peekb(0x036C) == 1 && !peekb(0x0F59))
 		{
@@ -646,10 +672,12 @@ uint16_t message_box(const Args &a)
 		};
 		line(r0 | 0x0110, r0 | 0x0111, r0 | 0x0112);
 		p = (uint16_t)(p - back + 0x0080);
+		const int16_t inner = (int16_t)(cols - 2);
 		for (int16_t n = (int16_t)(rows - 2); n > 0; n--)
 		{
 			line(r0 | 0x0113, r0 | 0x0087, r0 | 0x0114);
 			p = (uint16_t)(p - back + 0x0080);
+			tick(0x4E6A, 198 + (inner > 0 ? 54 * inner : 0));   // one row of the loop at 0x4E6A
 		}
 		line(r0 | 0x0115, r0 | 0x0116, r0 | 0x0117);
 	}
@@ -918,11 +946,15 @@ uint16_t insert_high_score(const Args &a)
 			place = i;
 			break;
 		}
+		tick(0x4410, 477);                             // one pass, F:80D0 sub32 included
 	}
 	if ((int16_t)place < 0) return place;
 	for (uint16_t j = (uint16_t)(first + 14); (int16_t)j >= (int16_t)(uint16_t)(place + 1); j = (uint16_t)(j - 1))
+	{
 		for (int k = 0; k < 8; k += 2)
 			poke((uint16_t)(0x0370 + (j << 3) + k), peek((uint16_t)(0x0368 + (j << 3) + k)));
+		tick(0x4454, 324);                             // one entry moved by the loop at 0x4454
+	}
 	poke((uint16_t)(0x0370 + (place << 3)), hi);
 	poke((uint16_t)(0x0372 + (place << 3)), lo);
 	return place;
