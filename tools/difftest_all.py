@@ -46,6 +46,15 @@ def scenarios(selftest_script):
     for e in EVENTS:
         ev += ['--poke', e]
     s.append(('events', 6000, ev))
+    # the trick moves 0x40-0x57 (A5:54CE and its helpers), which the game only starts on ramp
+    # jumps, forced one after the other; 0x0EA0 makes a landing set the direction from the
+    # velocity (A7:4A66)
+    tr = ['--random', '3']
+    for i in range(24):
+        tr += ['--poke', '%d:01EB:%04X' % (1100 + 20 * i, 0x40 + i)]
+    for f in (1700, 1800, 1900):
+        tr += ['--poke', '%d:0EA0:0001' % f]
+    s.append(('tricks', 3000, tr))
     s.append(('selftest', 6000, ['--random', '9', '--script', selftest_script]))
     s.append(('hiscore', 6000, ['--random', '3', '--poke', '2500:023E:9999', '--poke', '2500:0240:0009']))
     return s
