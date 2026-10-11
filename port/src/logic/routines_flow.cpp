@@ -90,6 +90,44 @@ void bank_a(uint16_t pc, uint16_t v) { select_bank(pc, 0x01D2, 0x1400, v); }
 void bank_b(uint16_t pc, uint16_t v) { select_bank(pc, 0x01D4, 0x1402, v); }
 
 
+// MOV Ra,R0; ASL R0; MOV 0x0908(R0),R4; MOV 0x3806(R4),R0; BIC #0x07FE,R0; MOV Rb,R5; ASL R5;
+// BIS 0x0888(R5),R0; MOV R0,0x3806(R4) at pc: the last sprite of object Ra links to the first
+// one of object Rb
+void relink(uint16_t pc, int a, int b)
+{
+	T.r[0] = T.r[a];
+	fl::mov(T.r[0]);
+	tick((uint16_t)(pc + 2), 12);
+	T.r[0] = fl::asl(T.r[0]);
+	tick((uint16_t)(pc + 4), 12);
+	T.r[4] = peek((uint16_t)(0x0908 + T.r[0]));
+	fl::mov(T.r[4]);
+	tick((uint16_t)(pc + 8), 27);
+	T.r[0] = peek((uint16_t)(0x3806 + T.r[4]));
+	fl::mov(T.r[0]);
+	tick((uint16_t)(pc + 0x0C), 27);
+	T.r[0] = fl::logic((uint16_t)(T.r[0] & ~0x07FE));
+	tick((uint16_t)(pc + 0x10), 18);
+	T.r[5] = T.r[b];
+	fl::mov(T.r[5]);
+	tick((uint16_t)(pc + 0x12), 12);
+	T.r[5] = fl::asl(T.r[5]);
+	tick((uint16_t)(pc + 0x14), 12);
+	T.r[0] = fl::logic((uint16_t)(T.r[0] | peek((uint16_t)(0x0888 + T.r[5]))));
+	tick((uint16_t)(pc + 0x18), 27);
+	poke((uint16_t)(0x3806 + T.r[4]), T.r[0]);
+	fl::mov(T.r[0]);
+	tick((uint16_t)(pc + 0x1C), 30);
+}
+// MOVB Rr,k(Rx) (30 cycles) and the step to next
+void store_b(int r, uint16_t a, uint16_t next)
+{
+	pokeb(a, (uint8_t)T.r[r]);
+	fl::movb((uint8_t)T.r[r]);
+	tick(next, 30);
+}
+
+
 // MOV #8,Rr; MOVB @#a,R0; XOR R0,Rr; MOVB Rr,@#a at pc: the direction byte a turned round
 void turn_round(uint16_t pc, int r, uint16_t a)
 {
@@ -853,58 +891,88 @@ uint16_t skater_jump(const Args &)
 // requests whose object has no bit 6 are done (0x0992 counts the pending ones).
 void process_sprite_requests()
 {
-	Clock k;
-	k.at(0xAFF0);
-	const uint8_t n = peekb(0x0992);
-	fl::tstb(n);
-	k.add(24, 12);
-	if (n)
+	const uint8_t pending = peekb(0x0992);
+	fl::tstb(pending);
+	tick(0xAFF4, 24);
+	if (!pending)
 	{
-		T.r[2] = 4; k.add(18);
-		do
-		{
-			k.at(0xAFFA);
-			const uint8_t o = peekb((uint16_t)(0x0989 + T.r[2]));
-			T.r[1] = sext8(o);
-			fl::movb(o);
-			k.add(27, 12);
-			if (o)
-			{
-				k.at(0xB000); pokeb((uint16_t)(0x04D0 + T.r[1]), peekb((uint16_t)(0x098D + T.r[2]))); k.add(45);
-				T.r[3] = 0x0490; k.add(18);
-				T.r[3] = fl::add(T.r[3], T.r[1]); k.add(12);
-				k.at(0xB00C);
-				const uint8_t f = peekb(T.r[3]);
-				k.add(24, 12);
-				if (f & 0x02)
-				{
-					push(0); k.add(24);
-					push(T.r[1]); k.add(24);
-					k.call(0xACE6, 0xB01A);            // unlink_sprites
-					poke((uint16_t)(T.r[6] + 0), 0);   // CLR (SP)... the slot of the first argument
-					k.add(21);
-					push(T.r[1]); k.add(24);
-					k.call(0xAE02, 0xB022);            // link_sprites
-					T.r[6] = fl::add(T.r[6], 6); k.add(18);
-				}
-				k.at(0xB026);
-				const uint8_t g = (uint8_t)(peekb(T.r[3]) & ~0x20);
-				pokeb(T.r[3], g);
-				k.add(27);
-				k.at(0xB02A);
-				f_nzv(nzb(g & 0x40));
-				k.add(24, 12);
-				if (!(g & 0x40))
-				{
-					k.at(0xB030); pokeb(0x0992, fl::decb(peekb(0x0992))); k.add(27);
-					k.at(0xB034); pokeb((uint16_t)(0x0989 + T.r[2]), 0); k.add(30);
-					fl::clr();
-				}
-			}
-			k.add(18);
-		} while (--T.r[2]);
+		tick(0xB03A, 12);                              // BEQ
+		rts();
+		return;
 	}
-	k.leave();
+	tick(0xAFF6, 12);
+	T.r[2] = 0x0004;
+	fl::mov(T.r[2]);
+	tick(0xAFFA, 18);
+	for (;;)
+	{
+		T.r[1] = sext8(peekb((uint16_t)(0x0989 + T.r[2])));   // the object of request R2
+		fl::movb((uint8_t)T.r[1]);
+		tick(0xAFFE, 27);
+		if (!T.r[1])
+			tick(0xB038, 12);                          // BEQ
+		else
+		{
+			tick(0xB000, 12);
+			{
+				const uint8_t v = peekb((uint16_t)(0x098D + T.r[2]));   // the new size
+				fl::movb(v);
+				pokeb((uint16_t)(0x04D0 + T.r[1]), v);
+			}
+			tick(0xB006, 45);
+			T.r[3] = 0x0490;
+			fl::mov(T.r[3]);
+			tick(0xB00A, 18);
+			T.r[3] = fl::add(T.r[3], T.r[1]);
+			tick(0xB00C, 12);
+			fl::logicb((uint8_t)(peekb(T.r[3]) & 0x02));
+			tick(0xB010, 24);
+			if (!(peekb(T.r[3]) & 0x02))
+				tick(0xB026, 12);                      // BEQ
+			else
+			{
+				tick(0xB012, 12);                      // linked: unlinked and linked again
+				push(0);
+				fl::clr();
+				tick(0xB014, 24);
+				push(T.r[1]);
+				fl::mov(T.r[1]);
+				tick(0xB016, 24);
+				jsr(0xB01A, 0xACE6);                   // unlink_sprites
+				poke(T.r[6], 0);
+				fl::clr();
+				tick(0xB01C, 21);
+				push(T.r[1]);
+				fl::mov(T.r[1]);
+				tick(0xB01E, 24);
+				jsr(0xB022, 0xAE02);                   // link_sprites
+				T.r[6] = fl::add(T.r[6], 0x0006);
+				tick(0xB026, 18);
+			}
+			pokeb(T.r[3], fl::logicb((uint8_t)(peekb(T.r[3]) & ~0x20)));
+			tick(0xB02A, 27);
+			fl::logicb((uint8_t)(peekb(T.r[3]) & 0x40));
+			tick(0xB02E, 24);
+			if (peekb(T.r[3]) & 0x40)
+				tick(0xB038, 12);                      // BNE
+			else
+			{
+				tick(0xB030, 12);                      // done
+				pokeb(0x0992, fl::decb(peekb(0x0992)));
+				tick(0xB034, 27);
+				pokeb((uint16_t)(0x0989 + T.r[2]), 0);
+				fl::clr();
+				tick(0xB038, 30);
+			}
+		}
+		if (--T.r[2] == 0)
+		{
+			tick(0xB03A, 18);                          // SOB
+			break;
+		}
+		tick(0xAFFA, 18);
+	}
+	rts();
 }
 
 // F:A974  queue_message(int bit, int a, int b): with interrupts masked, the entry count
@@ -1510,124 +1578,216 @@ uint16_t unlink_sprites(const Args &)
 // slot 1 on, chained; the last one ends with 0x03F9), set the list's bits (0xFD7C, 0xFD7E) in
 // 0x0490, clear bit 2 of 0x04B0, and insert obj into list before the first object it is in
 // front of (F:AD70), else at the end.  R1-R5 preserved (F162).
-uint16_t link_sprites(const Args &a)
+uint16_t link_sprites(const Args &)
 {
-	Clock k;
-	k.save(0xAE02, 5);
-	T.r[4] = a.u(0); k.add(27);
-	T.r[0] = T.r[4] & 0x001F; k.add(12, 18);
-	T.r[1] = a.u(1); k.add(27);
-	k.at(0xAE14); T.r[2] = sext8(peekb((uint16_t)(0x0490 + T.r[0]))); k.add(27);
-	k.at(0xAE18); T.r[2] = (uint16_t)((T.r[2] | peekb((uint16_t)(0xFD7C + T.r[1]))) & 0x00FF); k.add(27, 18);
-	k.at(0xAE20); pokeb((uint16_t)(0x0490 + T.r[0]), peekb((uint16_t)(0xFD7E + T.r[1]))); k.add(45);
-	k.at(0xAE26); pokeb((uint16_t)(0x0490 + T.r[0]), (uint8_t)(peekb((uint16_t)(0x0490 + T.r[0])) | (uint8_t)T.r[2])); k.add(30);
-	k.at(0xAE2A); pokeb((uint16_t)(0x04B0 + T.r[0]), (uint8_t)(peekb((uint16_t)(0x04B0 + T.r[0])) & ~0x04)); k.add(36);
-	T.r[1] = 0; k.add(12);
-	T.r[2] = 8; k.add(18);
-	T.r[3] = 0; k.add(12);
-	k.at(0xAE38); T.r[3] = peekb((uint16_t)(0x04D0 + T.r[0])); k.add(27, 12, 12);
-	if ((int16_t)T.r[3] > 0)
-		do
+	c_save(4, 0xAE06);
+	T.r[4] = peek((uint16_t)(T.r[6] + 0x0E));          // the object
+	fl::mov(T.r[4]);
+	tick(0xAE0A, 27);
+	T.r[0] = T.r[4];
+	fl::mov(T.r[0]);
+	tick(0xAE0C, 12);
+	T.r[0] = fl::logic((uint16_t)(T.r[0] & 0x001F));
+	tick(0xAE10, 18);
+	T.r[1] = peek((uint16_t)(T.r[6] + 0x10));          // the list
+	fl::mov(T.r[1]);
+	tick(0xAE14, 27);
+	T.r[2] = sext8(peekb((uint16_t)(0x0490 + T.r[0])));   // its bits for the list
+	fl::movb((uint8_t)T.r[2]);
+	tick(0xAE18, 27);
+	T.r[2] = (uint16_t)((T.r[2] & 0xFF00) | fl::logicb((uint8_t)(T.r[2] | peekb((uint16_t)(0xFD7C + T.r[1])))));
+	tick(0xAE1C, 27);
+	T.r[2] = fl::logic((uint16_t)(T.r[2] & 0x00FF));
+	tick(0xAE20, 18);
+	{
+		const uint8_t v = peekb((uint16_t)(0xFD7E + T.r[1]));
+		fl::movb(v);
+		pokeb((uint16_t)(0x0490 + T.r[0]), v);
+	}
+	tick(0xAE26, 45);
+	{
+		const uint16_t a = (uint16_t)(0x0490 + T.r[0]);
+		pokeb(a, fl::logicb((uint8_t)(peekb(a) | (uint8_t)T.r[2])));
+	}
+	tick(0xAE2A, 30);
+	{
+		const uint16_t a = (uint16_t)(0x04B0 + T.r[0]);
+		pokeb(a, fl::logicb((uint8_t)(peekb(a) & ~0x04)));
+	}
+	tick(0xAE30, 36);
+	T.r[1] = 0;                                        // the sprite slots: the first one
+	fl::clr();
+	tick(0xAE32, 12);
+	T.r[2] = 0x0008;
+	fl::mov(T.r[2]);
+	tick(0xAE36, 18);
+	T.r[3] = 0;
+	fl::clr();
+	tick(0xAE38, 12);
+	T.r[3] = (uint16_t)(T.r[3] | fl::logicb(peekb((uint16_t)(0x04D0 + T.r[0]))));   // its size
+	tick(0xAE3C, 27);
+	fl::tst(T.r[3]);
+	tick(0xAE3E, 12);
+	if ((int16_t)T.r[3] <= 0)
+		tick(0xAE6C, 12);                              // BLE
+	else
+	{
+		tick(0xAE40, 12);
+		for (;;)
 		{
-			for (;;)
+			for (;;)                                   // the next free slot
 			{
-				k.at(0xAE40);
-				const bool used = peek((uint16_t)(0x3806 + T.r[2])) != 0;
-				k.add(27, 12);
-				if (!used) break;
-				T.r[2] = (uint16_t)(T.r[2] + 8);
-				k.add(18, 12);
+				const uint16_t w = peek((uint16_t)(0x3806 + T.r[2]));
+				fl::tst(w);
+				tick(0xAE44, 27);
+				if (!w)
+				{
+					tick(0xAE4C, 12);                  // BEQ
+					break;
+				}
+				tick(0xAE46, 12);
+				T.r[2] = fl::add(T.r[2], 0x0008);
+				tick(0xAE4A, 18);
+				tick(0xAE40, 12);                      // BR
 			}
-			k.add(12, 12);
-			if (!T.r[1])
+			fl::tst(T.r[1]);
+			tick(0xAE4E, 12);
+			if (T.r[1])
 			{
-				T.r[1] = T.r[2];
-				k.add(12, 12);
+				tick(0xAE54, 12);                      // BNE: chained to the one before
+				poke((uint16_t)(0x3806 + T.r[0]), T.r[2]);
+				fl::mov(T.r[2]);
+				tick(0xAE58, 30);
 			}
 			else
 			{
-				k.at(0xAE54); poke((uint16_t)(0x3806 + T.r[0]), T.r[2]); k.add(30);
+				tick(0xAE50, 12);
+				T.r[1] = T.r[2];
+				fl::mov(T.r[1]);
+				tick(0xAE52, 12);
+				tick(0xAE58, 12);                      // BR
 			}
-			k.at(0xAE58); poke((uint16_t)(0x3800 + T.r[2]), 0); k.add(30);
-			k.at(0xAE5C); poke((uint16_t)(0x3C00 + T.r[2]), 0); k.add(30);
-			k.at(0xAE60); poke((uint16_t)(0x3802 + T.r[2]), 0); k.add(30);
+			static const uint16_t cleared[3] = {0x3800, 0x3C00, 0x3802};
+			for (int i = 0; i < 3; i++)
+			{
+				poke((uint16_t)(cleared[i] + T.r[2]), 0);
+				fl::clr();
+				tick((uint16_t)(0xAE5C + 4 * i), 30);
+			}
 			T.r[0] = T.r[2];
-			T.r[2] = (uint16_t)(T.r[2] + 8);
-			k.add(12, 18, 18);
-		} while (--T.r[3]);
-	T.r[3] = (uint16_t)(T.r[4] << 1); k.add(12, 12);
-	k.at(0xAE70); poke((uint16_t)(0x0888 + T.r[3]), T.r[1]); k.add(30);
-	T.r[2] = T.r[0]; k.add(12);
-	k.at(0xAE76); poke((uint16_t)(0x0908 + T.r[3]), T.r[2]); k.add(30);
-	k.at(0xAE7A); poke((uint16_t)(0x3806 + T.r[0]), 0x03F9); k.add(36);
-	T.r[2] = T.r[4]; k.add(12);
-	T.r[3] = 0xFFFF; k.add(18);
-	T.r[1] = a.u(1); k.add(27);
-	k.at(0xAE8A); T.r[1] = sext8(peekb((uint16_t)(0x0988 + T.r[1]))); k.add(27);
-	const uint16_t list = a.u(1);
-	// make the link field of the last sprite of object a point to the first one of object b
-	auto chain = [&k](uint16_t a_obj, uint16_t b_obj, uint16_t pc) {
-		T.r[0] = (uint16_t)(a_obj << 1); k.add(12, 12);
-		k.at((uint16_t)(pc + 4)); T.r[4] = peek((uint16_t)(0x0908 + T.r[0])); k.add(27);
-		k.at((uint16_t)(pc + 8)); T.r[0] = peek((uint16_t)(0x3806 + T.r[4])) & ~0x07FE; k.add(27, 18);
-		T.r[5] = (uint16_t)(b_obj << 1); k.add(12, 12);
-		k.at((uint16_t)(pc + 0x14)); T.r[0] |= peek((uint16_t)(0x0888 + T.r[5])); k.add(27);
-		k.at((uint16_t)(pc + 0x18)); poke((uint16_t)(0x3806 + T.r[4]), T.r[0]); k.add(30);
-	};
+			fl::mov(T.r[0]);
+			tick(0xAE66, 12);
+			T.r[2] = fl::add(T.r[2], 0x0008);
+			tick(0xAE6A, 18);
+			if (--T.r[3] == 0)
+			{
+				tick(0xAE6C, 18);                      // SOB
+				break;
+			}
+			tick(0xAE40, 18);
+		}
+	}
+	T.r[3] = T.r[4];
+	fl::mov(T.r[3]);
+	tick(0xAE6E, 12);
+	T.r[3] = fl::asl(T.r[3]);
+	tick(0xAE70, 12);
+	poke((uint16_t)(0x0888 + T.r[3]), T.r[1]);         // the first and the last slot
+	fl::mov(T.r[1]);
+	tick(0xAE74, 30);
+	T.r[2] = T.r[0];
+	fl::mov(T.r[2]);
+	tick(0xAE76, 12);
+	poke((uint16_t)(0x0908 + T.r[3]), T.r[2]);
+	fl::mov(T.r[2]);
+	tick(0xAE7A, 30);
+	poke((uint16_t)(0x3806 + T.r[0]), 0x03F9);
+	fl::mov(0x03F9);
+	tick(0xAE80, 36);
+	T.r[2] = T.r[4];
+	fl::mov(T.r[2]);
+	tick(0xAE82, 12);
+	T.r[3] = 0xFFFF;                                   // the one before: none yet
+	fl::mov(T.r[3]);
+	tick(0xAE86, 18);
+	T.r[1] = peek((uint16_t)(T.r[6] + 0x10));
+	fl::mov(T.r[1]);
+	tick(0xAE8A, 27);
+	T.r[1] = sext8(peekb((uint16_t)(0x0988 + T.r[1])));   // the head of the list
+	fl::movb((uint8_t)T.r[1]);
+	tick(0xAE8E, 27);
 	for (;;)
 	{
-		k.add(12);
-		if (T.r[1] & 0x8000)
+		if ((int16_t)T.r[1] < 0)
 		{
-			// at the end of the list
-			k.add(12, 12);
-			if (!(T.r[3] & 0x8000))
+			tick(0xAEFA, 12);                          // BLT: at the end of the list
+			break;
+		}
+		tick(0xAE90, 12);
+		T.r[0] = T.r[2];
+		fl::mov(T.r[0]);
+		tick(0xAE92, 12);
+		jsr(0xAE96, 0xAD70);                           // sprite_in_front
+		const bool front = (T.r[0] & 1) != 0;
+		T.r[0] = fl::ror(T.r[0]);
+		tick(0xAE98, 12);
+		if (front)
+		{
+			tick(0xAE9A, 12);                          // in before R1
+			fl::tst(T.r[3]);
+			tick(0xAE9C, 12);
+			if ((int16_t)T.r[3] >= 0)
 			{
-				k.at(0xAEFE); pokeb((uint16_t)(0x0808 + T.r[3]), (uint8_t)T.r[2]); k.add(30);
-				chain(T.r[3], T.r[2], 0xAF02);
-				k.add(12);
+				tick(0xAE9E, 12);
+				store_b(2, (uint16_t)(0x0808 + T.r[3]), 0xAEA2);
+				relink(0xAEA2, 3, 2);
+				tick(0xAEC8, 12);                      // BR
 			}
 			else
 			{
-				T.r[0] = list; k.add(27);
-				k.at(0xAF24); pokeb((uint16_t)(0x0988 + T.r[0]), (uint8_t)T.r[2]); k.add(30);
+				tick(0xAEC0, 12);                      // BLT: the new head
+				T.r[0] = peek((uint16_t)(T.r[6] + 0x10));
+				fl::mov(T.r[0]);
+				tick(0xAEC4, 27);
+				store_b(2, (uint16_t)(0x0988 + T.r[0]), 0xAEC8);
 			}
-			k.at(0xAF28); pokeb((uint16_t)(0x0848 + T.r[2]), (uint8_t)T.r[3]); k.add(30);
-			k.at(0xAF2C); pokeb((uint16_t)(0x0808 + T.r[2]), (uint8_t)T.r[1]); k.add(30);
-			break;
+			store_b(2, (uint16_t)(0x0848 + T.r[1]), 0xAECC);
+			store_b(1, (uint16_t)(0x0808 + T.r[2]), 0xAED0);
+			relink(0xAED0, 2, 1);
+			store_b(3, (uint16_t)(0x0848 + T.r[2]), 0xAEF0);
+			c_restore(4);
+			return T.r[0];
 		}
-		T.r[0] = T.r[2]; k.add(12);
-		k.call(0xAD70, 0xAE96);                        // sprite_in_front
-		T.r[0] = ror(T.r[0]);
-		k.add(12, 12);
-		if (fC())
-		{
-			// before R1
-			k.add(12, 12);
-			if (!(T.r[3] & 0x8000))
-			{
-				k.at(0xAE9E); pokeb((uint16_t)(0x0808 + T.r[3]), (uint8_t)T.r[2]); k.add(30);
-				chain(T.r[3], T.r[2], 0xAEA2);
-				k.add(12);
-			}
-			else
-			{
-				T.r[0] = list; k.add(27);
-				k.at(0xAEC4); pokeb((uint16_t)(0x0988 + T.r[0]), (uint8_t)T.r[2]); k.add(30);
-			}
-			k.at(0xAEC8); pokeb((uint16_t)(0x0848 + T.r[1]), (uint8_t)T.r[2]); k.add(30);
-			k.at(0xAECC); pokeb((uint16_t)(0x0808 + T.r[2]), (uint8_t)T.r[1]); k.add(30);
-			chain(T.r[2], T.r[1], 0xAED0);
-			k.at(0xAEEC); pokeb((uint16_t)(0x0848 + T.r[2]), (uint8_t)T.r[3]); k.add(30);
-			break;
-		}
-		T.r[3] = T.r[1]; k.add(12);
-		k.at(0xAEF4); T.r[1] = sext8(peekb((uint16_t)(0x0808 + T.r[1]))); k.add(27, 12);
+		tick(0xAEF2, 12);                              // BCC: on along the list
+		T.r[3] = T.r[1];
+		fl::mov(T.r[3]);
+		tick(0xAEF4, 12);
+		T.r[1] = sext8(peekb((uint16_t)(0x0808 + T.r[1])));
+		fl::movb((uint8_t)T.r[1]);
+		tick(0xAEF8, 27);
+		tick(0xAE8E, 12);                              // BR
 	}
-	const uint16_t r0 = T.r[0];
-	k.restore(5);
-	k.leave();
-	return r0;
+	fl::tst(T.r[3]);                                   // the last one
+	tick(0xAEFC, 12);
+	if ((int16_t)T.r[3] >= 0)
+	{
+		tick(0xAEFE, 12);
+		store_b(2, (uint16_t)(0x0808 + T.r[3]), 0xAF02);
+		relink(0xAF02, 3, 2);
+		tick(0xAF28, 12);                              // BR
+	}
+	else
+	{
+		tick(0xAF20, 12);                              // BLT: the only one
+		T.r[0] = peek((uint16_t)(T.r[6] + 0x10));
+		fl::mov(T.r[0]);
+		tick(0xAF24, 27);
+		store_b(2, (uint16_t)(0x0988 + T.r[0]), 0xAF28);
+	}
+	store_b(3, (uint16_t)(0x0848 + T.r[2]), 0xAF2C);
+	store_b(1, (uint16_t)(0x0808 + T.r[2]), 0xAF30);
+	c_restore(4);
+	return T.r[0];
 }
 
 // F:AF32 (assembly): one bubble pass over the draw list 0x0993: an object that F:AD70 does
@@ -1635,80 +1795,158 @@ uint16_t link_sprites(const Args &a)
 // A word on the stack holds the doubled index of the object moving back.
 void sort_sprite_list()
 {
-	Clock k;
-	T.r[6] = (uint16_t)(T.r[6] - 2);                    // TST -(SP): the local word
-	k.add(21);
-	k.at(0xAF34); T.r[0] = sext8(peekb(0x0993)); k.add(24);
-	k.at(0xAF38); T.r[3] = sext8(peekb((uint16_t)(0x0988 + T.r[0]))); k.add(27, 12);
-	if (!(T.r[3] & 0x8000))
+	T.r[6] = (uint16_t)(T.r[6] - 2);                   // a local word
+	fl::tst(peek(T.r[6]));
+	tick(0xAF34, 21);
+	T.r[0] = sext8(peekb(0x0993));                     // the list
+	fl::movb((uint8_t)T.r[0]);
+	tick(0xAF38, 24);
+	T.r[3] = sext8(peekb((uint16_t)(0x0988 + T.r[0])));
+	fl::movb((uint8_t)T.r[3]);
+	tick(0xAF3C, 27);
+	if ((int16_t)T.r[3] < 0)
+		tick(0xAFEC, 12);                              // BLT: empty
+	else
 	{
-		k.at(0xAF3E); T.r[1] = sext8(peekb((uint16_t)(0x0808 + T.r[3]))); k.add(27);
+		tick(0xAF3E, 12);
+		T.r[1] = sext8(peekb((uint16_t)(0x0808 + T.r[3])));
+		fl::movb((uint8_t)T.r[1]);
+		tick(0xAF42, 27);
 		for (;;)
 		{
-			k.add(12);
-			if (T.r[1] & 0x8000) break;
-			T.r[0] = T.r[3]; k.add(12);
-			k.call(0xAD70, 0xAF4A);                    // sprite_in_front
-			T.r[0] = ror(T.r[0]);
-			k.add(12, 12);
-			if (!fC())
+			if ((int16_t)T.r[1] < 0)
 			{
-				// R1 moves in front of R3
-				k.at(0xAF4E); T.r[2] = sext8(peekb((uint16_t)(0x0848 + T.r[3]))); k.add(27, 12);
-				if (!(T.r[2] & 0x8000))
-				{
-					k.at(0xAF54); pokeb((uint16_t)(0x0808 + T.r[2]), (uint8_t)T.r[1]); k.add(30);
-					T.r[0] = (uint16_t)(T.r[2] << 1); k.add(12, 12);
-					k.at(0xAF5C); T.r[4] = peek((uint16_t)(0x0908 + T.r[0])); k.add(27);
-					k.at(0xAF60); T.r[0] = peek((uint16_t)(0x3806 + T.r[4])) & ~0x07FE; k.add(27, 18);
-					T.r[5] = (uint16_t)(T.r[1] << 1); k.add(12, 12);
-					k.at(0xAF6C); T.r[0] |= peek((uint16_t)(0x0888 + T.r[5])); k.add(27);
-					k.at(0xAF70); poke((uint16_t)(0x3806 + T.r[4]), T.r[0]); k.add(30, 12);
-				}
-				else
-				{
-					k.at(0xAF76); T.r[0] = sext8(peekb(0x0993)); k.add(24);
-					k.at(0xAF7A); pokeb((uint16_t)(0x0988 + T.r[0]), (uint8_t)T.r[1]); k.add(30);
-				}
-				k.at(0xAF7E); pokeb((uint16_t)(0x0848 + T.r[1]), (uint8_t)T.r[2]); k.add(30);
-				k.at(0xAF82); T.r[2] = sext8(peekb((uint16_t)(0x0808 + T.r[1]))); k.add(27);
-				poke(T.r[6], T.r[3]); k.add(21);
-				poke(T.r[6], (uint16_t)(T.r[3] << 1)); k.add(21);
-				T.r[4] = peek(T.r[6]); k.add(18);
-				k.at(0xAF8C); T.r[0] = peek((uint16_t)(0x0908 + T.r[4])); k.add(27);
-				T.r[5] = (uint16_t)(0x3806 + T.r[0]); k.add(18, 12, 12, 12);
-				if (!(T.r[2] & 0x8000))
-				{
-					k.at(0xAF9A); pokeb((uint16_t)(0x0848 + T.r[2]), (uint8_t)T.r[3]); k.add(30);
-					k.at(0xAF9E); T.r[0] = peek(T.r[5]) & ~0x07FE; k.add(18, 18);
-					T.r[4] = (uint16_t)(T.r[2] << 1); k.add(12, 12);
-					k.at(0xAFA8); T.r[0] |= peek((uint16_t)(0x0888 + T.r[4])); k.add(27);
-					k.at(0xAFAC); poke(T.r[5], T.r[0]); k.add(21, 12);
-				}
-				else
-				{
-					k.at(0xAFB0); T.r[4] = (uint16_t)((peek(T.r[5]) & ~0x07FE) | 0x03F8); k.add(18, 18, 18);
-					k.at(0xAFBA); poke(T.r[5], T.r[4]); k.add(21);
-				}
-				k.at(0xAFBC); pokeb((uint16_t)(0x0808 + T.r[3]), (uint8_t)T.r[2]); k.add(30);
-				k.at(0xAFC0); pokeb((uint16_t)(0x0808 + T.r[1]), (uint8_t)T.r[3]); k.add(30);
-				T.r[5] = (uint16_t)(T.r[1] << 1); k.add(12, 12);
-				k.at(0xAFC8); T.r[4] = peek((uint16_t)(0x0908 + T.r[5])); k.add(27);
-				k.at(0xAFCC); T.r[5] = peek((uint16_t)(0x3806 + T.r[4])) & ~0x07FE; k.add(27, 18);
-				T.r[0] = peek(T.r[6]); k.add(18);
-				k.at(0xAFD6); T.r[5] |= peek((uint16_t)(0x0888 + T.r[0])); k.add(27);
-				k.at(0xAFDA); poke((uint16_t)(0x3806 + T.r[4]), T.r[5]); k.add(30);
-				k.at(0xAFDE); pokeb((uint16_t)(0x0848 + T.r[3]), (uint8_t)T.r[1]); k.add(30);
-				T.r[1] = T.r[3]; k.add(12);
+				tick(0xAFEC, 12);                      // BLT: at the end
+				break;
 			}
-			T.r[3] = T.r[1]; k.add(12);
-			k.at(0xAFE6); T.r[1] = sext8(peekb((uint16_t)(0x0808 + T.r[1]))); k.add(27, 12);
+			tick(0xAF44, 12);
+			T.r[0] = T.r[3];
+			fl::mov(T.r[0]);
+			tick(0xAF46, 12);
+			jsr(0xAF4A, 0xAD70);                       // sprite_in_front
+			const bool front = (T.r[0] & 1) != 0;
+			T.r[0] = fl::ror(T.r[0]);
+			tick(0xAF4C, 12);
+			if (front)
+				tick(0xAFE4, 12);                      // BCS: in order
+			else
+			{
+				// R1 goes in before R3
+				tick(0xAF4E, 12);
+				T.r[2] = sext8(peekb((uint16_t)(0x0848 + T.r[3])));
+				fl::movb((uint8_t)T.r[2]);
+				tick(0xAF52, 27);
+				if ((int16_t)T.r[2] >= 0)
+				{
+					tick(0xAF54, 12);
+					store_b(1, (uint16_t)(0x0808 + T.r[2]), 0xAF58);
+					relink(0xAF58, 2, 1);
+					tick(0xAF7E, 12);                  // BR
+				}
+				else
+				{
+					tick(0xAF76, 12);                  // BLT: the new head
+					T.r[0] = sext8(peekb(0x0993));
+					fl::movb((uint8_t)T.r[0]);
+					tick(0xAF7A, 24);
+					store_b(1, (uint16_t)(0x0988 + T.r[0]), 0xAF7E);
+				}
+				store_b(2, (uint16_t)(0x0848 + T.r[1]), 0xAF82);
+				T.r[2] = sext8(peekb((uint16_t)(0x0808 + T.r[1])));
+				fl::movb((uint8_t)T.r[2]);
+				tick(0xAF86, 27);
+				poke(T.r[6], T.r[3]);
+				fl::mov(T.r[3]);
+				tick(0xAF88, 21);
+				poke(T.r[6], fl::asl(peek(T.r[6])));
+				tick(0xAF8A, 21);
+				T.r[4] = peek(T.r[6]);
+				fl::mov(T.r[4]);
+				tick(0xAF8C, 18);
+				T.r[0] = peek((uint16_t)(0x0908 + T.r[4]));
+				fl::mov(T.r[0]);
+				tick(0xAF90, 27);
+				T.r[5] = 0x3806;
+				fl::mov(T.r[5]);
+				tick(0xAF94, 18);
+				T.r[5] = fl::add(T.r[5], T.r[0]);
+				tick(0xAF96, 12);
+				fl::tst(T.r[2]);
+				tick(0xAF98, 12);
+				if ((int16_t)T.r[2] >= 0)
+				{
+					tick(0xAF9A, 12);                  // R3 links to the one after R1
+					store_b(3, (uint16_t)(0x0848 + T.r[2]), 0xAF9E);
+					T.r[0] = peek(T.r[5]);
+					fl::mov(T.r[0]);
+					tick(0xAFA0, 18);
+					T.r[0] = fl::logic((uint16_t)(T.r[0] & ~0x07FE));
+					tick(0xAFA4, 18);
+					T.r[4] = T.r[2];
+					fl::mov(T.r[4]);
+					tick(0xAFA6, 12);
+					T.r[4] = fl::asl(T.r[4]);
+					tick(0xAFA8, 12);
+					T.r[0] = fl::logic((uint16_t)(T.r[0] | peek((uint16_t)(0x0888 + T.r[4]))));
+					tick(0xAFAC, 27);
+					poke(T.r[5], T.r[0]);
+					fl::mov(T.r[0]);
+					tick(0xAFAE, 21);
+					tick(0xAFBC, 12);                  // BR
+				}
+				else
+				{
+					tick(0xAFB0, 12);                  // BLT: or ends the chain
+					T.r[4] = peek(T.r[5]);
+					fl::mov(T.r[4]);
+					tick(0xAFB2, 18);
+					T.r[4] = fl::logic((uint16_t)(T.r[4] & ~0x07FE));
+					tick(0xAFB6, 18);
+					T.r[4] = fl::logic((uint16_t)(T.r[4] | 0x03F8));
+					tick(0xAFBA, 18);
+					poke(T.r[5], T.r[4]);
+					fl::mov(T.r[4]);
+					tick(0xAFBC, 21);
+				}
+				store_b(2, (uint16_t)(0x0808 + T.r[3]), 0xAFC0);
+				store_b(3, (uint16_t)(0x0808 + T.r[1]), 0xAFC4);
+				T.r[5] = T.r[1];                       // R1's sprites link to R3's
+				fl::mov(T.r[5]);
+				tick(0xAFC6, 12);
+				T.r[5] = fl::asl(T.r[5]);
+				tick(0xAFC8, 12);
+				T.r[4] = peek((uint16_t)(0x0908 + T.r[5]));
+				fl::mov(T.r[4]);
+				tick(0xAFCC, 27);
+				T.r[5] = peek((uint16_t)(0x3806 + T.r[4]));
+				fl::mov(T.r[5]);
+				tick(0xAFD0, 27);
+				T.r[5] = fl::logic((uint16_t)(T.r[5] & ~0x07FE));
+				tick(0xAFD4, 18);
+				T.r[0] = peek(T.r[6]);
+				fl::mov(T.r[0]);
+				tick(0xAFD6, 18);
+				T.r[5] = fl::logic((uint16_t)(T.r[5] | peek((uint16_t)(0x0888 + T.r[0]))));
+				tick(0xAFDA, 27);
+				poke((uint16_t)(0x3806 + T.r[4]), T.r[5]);
+				fl::mov(T.r[5]);
+				tick(0xAFDE, 30);
+				store_b(1, (uint16_t)(0x0848 + T.r[3]), 0xAFE2);
+				T.r[1] = T.r[3];
+				fl::mov(T.r[1]);
+				tick(0xAFE4, 12);
+			}
+			T.r[3] = T.r[1];                           // on along the list
+			fl::mov(T.r[3]);
+			tick(0xAFE6, 12);
+			T.r[1] = sext8(peekb((uint16_t)(0x0808 + T.r[1])));
+			fl::movb((uint8_t)T.r[1]);
+			tick(0xAFEA, 27);
+			tick(0xAF42, 12);                          // BR
 		}
 	}
-	fl::tst(peek(T.r[6]));
-	T.r[6] = (uint16_t)(T.r[6] + 2);
-	k.add(18);
-	k.leave();
+	drop(0xAFEC);
+	rts();
 }
 
 // F:944C (assembly): the probed cells 1-3 (0x0302-0x0306) become tile numbers (low 10 bits
