@@ -10,7 +10,7 @@
 //   5 / 6 ............... insert coin                P ............ pause
 //   1 / 2 ............... start a one / two player game (Jump, Kick and the gamepad start one)
 //   Tab ................. debug menu                 F4 ........... controls
-//   F1 help   F2 service mode   F3 reset   F11 / Alt+Enter fullscreen   Esc release mouse / quit
+//   F1 help   F2 service mode   F3 reset   F / F11 / Alt+Enter fullscreen   Esc release mouse / quit
 // Xbox controller: left stick or d-pad points, right stick or LB/RB rotate, A or RT jump,
 //   X or B kick, View = coin, Menu = pause.
 // Mouse (click the game to capture): moving rotates, left button jumps, right button kicks.
@@ -122,7 +122,7 @@ void draw_help(const Input &input)
 	}
 	ImGui::Separator();
 	ImGui::TextUnformatted("Tab debug menu    F4 controls    F2 service mode    F3 reset");
-	ImGui::TextUnformatted("F11 / Alt+Enter fullscreen    Esc release mouse / quit");
+	ImGui::TextUnformatted("F / F11 / Alt+Enter fullscreen    Esc release mouse / quit");
 	ImGui::TextUnformatted("Mouse: click the game to capture it; move to rotate, buttons jump / kick");
 	ImGui::End();
 }
@@ -287,6 +287,9 @@ int main(int argc, char **argv)
 				case SDLK_F2: test_switch = !test_switch; break;
 				case SDLK_F3: save_eeprom(machine->board); start_machine(); break;
 				case SDLK_F11: toggle_fullscreen(); break;
+				case SDLK_F:                                  // unless F is one of the game's controls (F4)
+					if (!(e.key.mod & (SDL_KMOD_ALT | SDL_KMOD_GUI)) && !input.key_bound(e.key.scancode)) toggle_fullscreen();
+					break;
 				case SDLK_RETURN: if (e.key.mod & SDL_KMOD_ALT) toggle_fullscreen(); break;
 				default: break;
 				}

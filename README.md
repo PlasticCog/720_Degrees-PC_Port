@@ -95,7 +95,8 @@ saved in `controls.cfg` in the game's settings folder (`%APPDATA%\Atari\720Degre
 | Start a one / two player game | 1 / 2 | any button: one player | any button: one player |
 | Pause | P | Menu | |
 | Debug menu / controls / help | Tab / F4 / F1 | | |
-| Service mode / reset / fullscreen | F2 / F3 / F11 or Alt+Enter | | |
+| Service mode / reset | F2 / F3 | | |
+| Fullscreen / windowed | F, F11 or Alt+Enter | | |
 
 Any controller SDL recognises works; the button names follow the Xbox layout. Controllers can be
 connected and removed while the game runs.

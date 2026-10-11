@@ -67,6 +67,8 @@ public:
 	bool handle_event(const SDL_Event &e);
 	// was this key/button event the (edge-triggered) action?
 	bool is_action(const SDL_Event &e, Action a) const;
+	// is this key bound to any action?
+	bool key_bound(SDL_Scancode sc) const;
 	// poll the current state; 'keys_allowed' is false while the UI has keyboard focus
 	InputFrame poll(bool keys_allowed, bool mouse_captured, double mouse_dx);
 

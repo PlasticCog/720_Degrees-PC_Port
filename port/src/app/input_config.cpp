@@ -248,6 +248,14 @@ InputFrame Input::poll(bool keys_allowed, bool mouse_captured, double mouse_dx)
 	return f;
 }
 
+bool Input::key_bound(SDL_Scancode sc) const
+{
+	for (const Binding &b : cfg.bind)
+		for (SDL_Scancode k : b.keys)
+			if (k == sc) return true;
+	return false;
+}
+
 bool Input::is_action(const SDL_Event &e, Action a) const
 {
 	const Binding &b = cfg.bind[(int)a];
