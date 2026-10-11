@@ -97,6 +97,16 @@ Press **Tab** in the game. The menu has these tabs:
 * **Sound.** Send any sound command to the sound CPU, replay the commands heard so far, watch the
   level of each sound chip and mute chips.
 * **Memory.** Edit main RAM, keep watches (optionally frozen) and search RAM for values.
+* **Extras.** Content the original has but never uses, and fixes for its bugs, all off by default
+  and saved: the developers' hidden freeze / frame-step inputs (F7 / F8), the hidden points shown
+  as the unused point flags, the two cut pedestrians walking the town, objects labelled with the
+  unused hex-digit sprites, the messages hidden in the ROM chips; fixes for the lost sub-pixel
+  movement, the roller skater who never appears, the dropped bonus for jumping over hazards and a
+  lopsided movement direction.
+* **Tricks.** How the original game works: its programming tricks (isometric movement, masking,
+  ramps, spins, sprites, interrupts), hidden content and bugs. It shows
+  [docs/programming-tricks.md](docs/programming-tricks.md), built into the game, with a search box
+  and a larger pop-out window.
 
 ## Level editor
 

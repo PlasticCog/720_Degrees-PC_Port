@@ -1,11 +1,16 @@
 // Debug menu (TAB): overlays (sprites, terrain height map), game objects and skater state,
 // physics tuning (jump power, gravity, kick and top speed), cheats, sound test, memory
-// viewer / search and emulation control (pause, frame step, speed, layers).
+// viewer / search, emulation control (pause, frame step, speed, layers), "Extras": unused
+// content brought back and bug fixes (extras.h, saved in extras.cfg), and "Tricks": the
+// document docs/programming-tricks.md (built into the program) about how the game works.
 //
 // RAM and ROM locations used here were found with ref720 --watch and render720 --ram-dump
 // (see port/src/app/debugui.cpp for the list).
 #pragma once
 #include <SDL3/SDL.h>
+#include "docview.h"
+#include "extras.h"
+#include <memory>
 #include <cstdint>
 #include <deque>
 #include <map>
@@ -13,6 +18,9 @@
 #include <vector>
 
 struct RomSet;
+struct Inputs;
+struct GfxSet;
+namespace sprites { class SpriteSet; }
 class NativeMachine;
 class AudioOut;
 
@@ -27,12 +35,16 @@ struct RunControl {
 class DebugUI {
 public:
 	explicit DebugUI(RomSet &roms);
+	~DebugUI();
 	bool visible = false;
 	void set_overlays(bool sprites, bool height) { m_show_sprites = sprites; m_show_height = height; }
 	int select_tab = -1;                                  // open this tab on the next frame
 
 	void attach(NativeMachine &m);                        // after creating or resetting the machine
 	void after_frame(NativeMachine &m);                   // after every emulated frame
+	// extras: load (and apply) the saved settings; set the inputs the extras drive before a frame
+	void load_extras(const std::string &path);
+	void apply_inputs(Inputs &in);
 	// overlays drawn with SDL onto the game image (before ImGui renders)
 	void draw_sdl_overlays(NativeMachine &m, SDL_Renderer *ren, const SDL_FRect &game);
 	// ImGui windows and ImGui-drawn overlays; call between ImGui::NewFrame and ImGui::Render
@@ -67,6 +79,21 @@ private:
 	float m_chip_db[4] = {-99, -99, -99, -99};          // YM, POKEY 1, POKEY 2, speech
 	bool m_mute[3] = {false, false, false};
 
+	// extras (unused content, bug fixes)
+	Extras m_extras;
+	std::string m_extras_path;
+	bool m_dev_freeze = false;
+	int m_dev_step_frames = 0;
+	std::unique_ptr<GfxSet> m_gfx;                        // hex-digit labels: the decoded sprites
+	std::unique_ptr<sprites::SpriteSet> m_sprites;
+	SDL_Texture *m_digit_tex[16] = {};
+	void save_extras();
+	void draw_hex_labels(NativeMachine &m, SDL_Renderer *ren, const SDL_FRect &game);
+
+	// the programming tricks document
+	DocView m_tricks;
+	bool m_tricks_loaded = false, m_tricks_window = false;
+
 	// memory
 	struct Watch { uint16_t addr; bool word; bool freeze; uint16_t value; std::string name; };
 	std::vector<Watch> m_watches;
@@ -85,6 +112,8 @@ private:
 	void tab_cheats(NativeMachine &m);
 	void tab_sound(NativeMachine &m);
 	void tab_memory(NativeMachine &m);
+	void tab_tricks();
+	void tab_extras(NativeMachine &m);
 	void draw_sprite_overlay(NativeMachine &m, const SDL_FRect &game);
 	void draw_height_probe(NativeMachine &m, const SDL_FRect &game);
 	int terrain_byte(int code, bool secondary) const;

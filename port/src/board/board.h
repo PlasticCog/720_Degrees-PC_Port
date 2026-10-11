@@ -32,6 +32,8 @@ struct GfxSet {
 struct Inputs {
 	bool coin1 = false, coin2 = false, service_coin = false, test = false;
 	bool button1 = false, button2 = false;      // pressed = true
+	bool dev_freeze = false, dev_step = false;  // IN0 bits 0 / 2: not wired on the cabinet; the game
+	                                            // reads them as a developer freeze / frame step
 	uint8_t leta_center = 0, leta_rotate = 0;   // 720 controller counters
 	uint8_t dsw0 = 0x00, dsw1 = 0x55;           // default DIP switches (MAME defaults)
 };

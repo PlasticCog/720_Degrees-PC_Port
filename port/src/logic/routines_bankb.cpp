@@ -1335,7 +1335,15 @@ uint16_t score_landing(const Args &)
 			r0 = half;
 			r1 = (uint16_t)(r1 + peekb((uint16_t)(0x4599 + r0)));
 			if (peekb(0x01EA) == 2) r1 = (uint16_t)(r1 + 2);
-			// the original also looks up 0x45B1 by the air time 0x0FB2 here; the value is unused
+			// the original also looks up 0x45B1 by 0x0FB2 (frames in the air over hazard tiles,
+			// "JUMPING OVER HAZARDS GIVES YOU MORE POINTS") here but never adds it;
+			// g_fix_hazard_bonus adds it and keeps the total inside its 40-entry table row
+			if (g_fix_hazard_bonus)
+			{
+				int idx = (int16_t)(uint16_t)(peek(0x0FB2) + 4) >> 3;
+				if (idx > 15) idx = 15;
+				r1 = (uint16_t)(r1 + peekb((uint16_t)(0x45B1 + idx)));
+			}
 			if (level != 2)
 			{
 				if ((int16_t)r2 < 0) r2 = (uint16_t)-r2;
@@ -1347,6 +1355,7 @@ uint16_t score_landing(const Args &)
 			r0 = (uint16_t)(peekb(0x0FE2) + r1);
 			pokeb(0x0FE2, (uint8_t)r0);
 			if ((uint8_t)r0 > 0x80) pokeb(0x0FE2, 0x80);
+			if (g_fix_hazard_bonus && (int16_t)r1 > 39) r1 = 39;
 			uint16_t bonus = 0;
 			if ((int16_t)r3 < 0)
 			{
