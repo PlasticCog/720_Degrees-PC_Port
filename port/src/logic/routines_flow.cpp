@@ -1365,63 +1365,145 @@ uint16_t skater_phase10(const Args &)
 // F:ACE6  unlink_sprites(int obj, int list): take obj out of list (the previous object's
 // sprites link to the next one's, or end the chain with 0x03F8), clear the list's bits
 // (0xFD7C) in 0x0490 and free the object's sprite slots.  Returns the last slot.
-uint16_t unlink_sprites(const Args &a)
+uint16_t unlink_sprites(const Args &)
 {
-	Clock k;
-	k.save(0xACE6, 5);
-	T.r[3] = a.u(0); k.add(27);
-	k.at(0xACEE); T.r[2] = sext8(peekb((uint16_t)(0x0848 + T.r[3]))); k.add(27);
-	k.at(0xACF2); T.r[1] = sext8(peekb((uint16_t)(0x0808 + T.r[3]))); k.add(27, 12, 12);
-	bool link_next;
-	if (!(T.r[2] & 0x8000))
+	c_save(4, 0xACEA);
+	T.r[3] = peek((uint16_t)(T.r[6] + 0x0E));          // the object
+	fl::mov(T.r[3]);
+	tick(0xACEE, 27);
+	T.r[2] = sext8(peekb((uint16_t)(0x0848 + T.r[3])));   // the previous one
+	fl::movb((uint8_t)T.r[2]);
+	tick(0xACF2, 27);
+	T.r[1] = sext8(peekb((uint16_t)(0x0808 + T.r[3])));   // the next one
+	fl::movb((uint8_t)T.r[1]);
+	tick(0xACF6, 27);
+	fl::tst(T.r[2]);
+	tick(0xACF8, 12);
+	bool link_back = true;                             // the next one gets the previous one
+	if ((int16_t)T.r[2] >= 0)
 	{
-		k.at(0xACFA); pokeb((uint16_t)(0x0808 + T.r[2]), (uint8_t)T.r[1]); k.add(30);
-		T.r[0] = (uint16_t)(T.r[2] << 1); k.add(12, 12);
-		k.at(0xAD02); T.r[0] = peek((uint16_t)(0x0908 + T.r[0])); k.add(27);
-		T.r[4] = (uint16_t)(0x3806 + T.r[0]); k.add(18, 12, 12, 12);
-		if (!(T.r[1] & 0x8000))
+		tick(0xACFA, 12);
+		pokeb((uint16_t)(0x0808 + T.r[2]), (uint8_t)T.r[1]);
+		fl::movb((uint8_t)T.r[1]);
+		tick(0xACFE, 30);
+		T.r[0] = T.r[2];
+		fl::mov(T.r[0]);
+		tick(0xAD00, 12);
+		T.r[0] = fl::asl(T.r[0]);
+		tick(0xAD02, 12);
+		T.r[0] = peek((uint16_t)(0x0908 + T.r[0]));   // its last sprite slot
+		fl::mov(T.r[0]);
+		tick(0xAD06, 27);
+		T.r[4] = 0x3806;
+		fl::mov(T.r[4]);
+		tick(0xAD0A, 18);
+		T.r[4] = fl::add(T.r[4], T.r[0]);
+		tick(0xAD0C, 12);
+		fl::tst(T.r[1]);
+		tick(0xAD0E, 12);
+		if ((int16_t)T.r[1] >= 0)
 		{
-			k.at(0xAD10); T.r[0] = peek(T.r[4]) & ~0x07FE; k.add(18, 18);
-			T.r[5] = (uint16_t)(T.r[1] << 1); k.add(12, 12);
-			k.at(0xAD1A); T.r[0] |= peek((uint16_t)(0x0888 + T.r[5])); k.add(27);
-			k.at(0xAD1E); poke(T.r[4], T.r[0]); k.add(21, 12);
-			link_next = true;
+			tick(0xAD10, 12);                          // links to the next one's sprites
+			T.r[0] = peek(T.r[4]);
+			fl::mov(T.r[0]);
+			tick(0xAD12, 18);
+			T.r[0] = fl::logic((uint16_t)(T.r[0] & ~0x07FE));
+			tick(0xAD16, 18);
+			T.r[5] = T.r[1];
+			fl::mov(T.r[5]);
+			tick(0xAD18, 12);
+			T.r[5] = fl::asl(T.r[5]);
+			tick(0xAD1A, 12);
+			T.r[0] = fl::logic((uint16_t)(T.r[0] | peek((uint16_t)(0x0888 + T.r[5]))));
+			tick(0xAD1E, 27);
+			poke(T.r[4], T.r[0]);
+			fl::mov(T.r[0]);
+			tick(0xAD20, 21);
+			tick(0xAD3C, 12);                          // BR
 		}
 		else
 		{
-			k.at(0xAD22); T.r[0] = (uint16_t)((peek(T.r[4]) & ~0x07FE) | 0x03F8); k.add(18, 18, 18);
-			k.at(0xAD2C); poke(T.r[4], T.r[0]); k.add(21, 12);
-			link_next = false;
+			tick(0xAD22, 12);                          // BLT: or ends the chain
+			T.r[0] = peek(T.r[4]);
+			fl::mov(T.r[0]);
+			tick(0xAD24, 18);
+			T.r[0] = fl::logic((uint16_t)(T.r[0] & ~0x07FE));
+			tick(0xAD28, 18);
+			T.r[0] = fl::logic((uint16_t)(T.r[0] | 0x03F8));
+			tick(0xAD2C, 18);
+			poke(T.r[4], T.r[0]);
+			fl::mov(T.r[0]);
+			tick(0xAD2E, 21);
+			tick(0xAD40, 12);                          // BR
+			link_back = false;
 		}
 	}
 	else
 	{
-		T.r[0] = a.u(1); k.add(27);
-		k.at(0xAD34); pokeb((uint16_t)(0x0988 + T.r[0]), (uint8_t)T.r[1]); k.add(30, 12, 12);
-		link_next = !(T.r[1] & 0x8000);
+		tick(0xAD30, 12);                              // BLT: the first one: the list head
+		T.r[0] = peek((uint16_t)(T.r[6] + 0x10));
+		fl::mov(T.r[0]);
+		tick(0xAD34, 27);
+		pokeb((uint16_t)(0x0988 + T.r[0]), (uint8_t)T.r[1]);
+		fl::movb((uint8_t)T.r[1]);
+		tick(0xAD38, 30);
+		fl::tst(T.r[1]);
+		tick(0xAD3A, 12);
+		link_back = (int16_t)T.r[1] >= 0;
+		tick(link_back ? 0xAD3C : 0xAD40, 12);         // BLT
 	}
-	if (link_next)
+	if (link_back)
 	{
-		k.at(0xAD3C); pokeb((uint16_t)(0x0848 + T.r[1]), (uint8_t)T.r[2]); k.add(30);
+		pokeb((uint16_t)(0x0848 + T.r[1]), (uint8_t)T.r[2]);
+		fl::movb((uint8_t)T.r[2]);
+		tick(0xAD40, 30);
 	}
-	T.r[0] = T.r[3] & 0x001F; k.add(12, 18);
-	T.r[4] = a.u(1); k.add(27);
-	k.at(0xAD4A); pokeb((uint16_t)(0x0490 + T.r[0]), (uint8_t)(peekb((uint16_t)(0x0490 + T.r[0])) & ~peekb((uint16_t)(0xFD7C + T.r[4])))); k.add(45);
-	T.r[3] = (uint16_t)(T.r[3] << 1); k.add(12);
-	k.at(0xAD52); T.r[0] = peek((uint16_t)(0x0888 + T.r[3])); k.add(27);
-	k.at(0xAD56); T.r[1] = peek((uint16_t)(0x0908 + T.r[3])); k.add(27);
+	T.r[0] = T.r[3];                                   // the bits of the list cleared
+	fl::mov(T.r[0]);
+	tick(0xAD42, 12);
+	T.r[0] = fl::logic((uint16_t)(T.r[0] & 0x001F));
+	tick(0xAD46, 18);
+	T.r[4] = peek((uint16_t)(T.r[6] + 0x10));
+	fl::mov(T.r[4]);
+	tick(0xAD4A, 27);
+	{
+		const uint16_t a = (uint16_t)(0x0490 + T.r[0]);
+		pokeb(a, fl::logicb((uint8_t)(peekb(a) & ~peekb((uint16_t)(0xFD7C + T.r[4])))));
+	}
+	tick(0xAD50, 45);
+	T.r[3] = fl::asl(T.r[3]);
+	tick(0xAD52, 12);
+	T.r[0] = peek((uint16_t)(0x0888 + T.r[3]));       // the sprite slots freed
+	fl::mov(T.r[0]);
+	tick(0xAD56, 27);
+	T.r[1] = peek((uint16_t)(0x0908 + T.r[3]));
+	fl::mov(T.r[1]);
+	tick(0xAD5A, 27);
 	for (;;)
 	{
-		k.at(0xAD5A); T.r[2] = peek((uint16_t)(0x3806 + T.r[0])) & 0x07F8; k.add(27, 18);
-		k.at(0xAD62); poke((uint16_t)(0x3806 + T.r[0]), 0); k.add(30, 12, 12);
-		if (T.r[0] == T.r[1]) break;
+		T.r[2] = peek((uint16_t)(0x3806 + T.r[0]));
+		fl::mov(T.r[2]);
+		tick(0xAD5E, 27);
+		T.r[2] = fl::logic((uint16_t)(T.r[2] & ~0xF807));
+		tick(0xAD62, 18);
+		poke((uint16_t)(0x3806 + T.r[0]), 0);
+		fl::clr();
+		tick(0xAD66, 30);
+		fl::cmp(T.r[0], T.r[1]);
+		tick(0xAD68, 12);
+		if (T.r[0] == T.r[1])
+		{
+			tick(0xAD6E, 12);                          // BEQ: the last one
+			break;
+		}
+		tick(0xAD6A, 12);
 		T.r[0] = T.r[2];
-		k.add(12, 12);
+		fl::mov(T.r[0]);
+		tick(0xAD6C, 12);
+		tick(0xAD5A, 12);                              // BR
 	}
-	const uint16_t r0 = T.r[0];
-	k.restore(5);
-	k.leave();
-	return r0;
+	c_restore(4);
+	return T.r[0];
 }
 
 // F:AE02  link_sprites(int obj, int list): give obj its 0x04D0 sprite slots (free slots from
@@ -6119,99 +6201,149 @@ ramp:
 // set by the comparison of two skater objects.
 void sprite_in_front()
 {
-	Clock k;
-	k.save(0xAD70, 4);
-	T.r[0] &= 0x001F; k.add(18);
-	T.r[1] &= 0x001F; k.add(18);
-	int carry = 0;
-	// ADB0: screen order of objects R0 / R1 from their positions and animation frames
-	auto in_order = [&k]() {
-		T.r[0] = (uint16_t)(T.r[0] << 1); k.add(12);
-		k.at(0xADB2); T.r[2] = peek((uint16_t)(0x03F0 + T.r[0])); k.add(27, 12);
-		if (!T.r[2])
-		{
-			T.r[0] = 1; k.add(18);
-			return;
-		}
-		T.r[1] = (uint16_t)(T.r[1] << 1); k.add(12);
-		k.at(0xADBA); T.r[3] = peek((uint16_t)(0x03F0 + T.r[1])); k.add(27, 12);
-		if (!T.r[3])
-		{
-			T.r[0] = 0; k.add(12);
-			return;
-		}
-		k.at(0xADC0); T.r[4] = peek((uint16_t)(0x0630 + T.r[0])); k.add(27);
-		k.at(0xADC4); T.r[4] = (uint16_t)(T.r[4] + peek((uint16_t)(T.r[2] + 8))); k.add(27);
-		k.at(0xADC8); T.r[4] = (uint16_t)(T.r[4] - peek((uint16_t)(0x0630 + T.r[1]))); k.add(27);
-		k.at(0xADCC); T.r[4] = (uint16_t)(T.r[4] - peek((uint16_t)(T.r[3] + 8))); k.add(27, 12);
-		const bool left = (T.r[4] & 0x8000) != 0;
-		const uint16_t pc = left ? 0xADD2 : 0xADE4;
-		k.at(pc); T.r[0] = peek((uint16_t)(0x0670 + T.r[0])); k.add(27);
-		k.at((uint16_t)(pc + 4)); T.r[0] = (uint16_t)(T.r[0] + peek((uint16_t)(T.r[2] + (left ? 0x0C : 0x0A)))); k.add(27);
-		k.at((uint16_t)(pc + 8)); T.r[0] = (uint16_t)(T.r[0] - peek((uint16_t)(0x0670 + T.r[1]))); k.add(27);
-		k.at((uint16_t)(pc + 12)); T.r[0] = (uint16_t)(T.r[0] - peek((uint16_t)(T.r[3] + (left ? 0x0A : 0x0C)))); k.add(27);
-		if (left) k.add(12);                           // BR
-		k.add(12, 12);
-		if (T.r[0] & 0x8000)
-		{
-			T.r[0] = 0; k.add(12);
-		}
-		else
-		{
-			T.r[0] = 1; k.add(18);
-		}
+	c_save(3, 0xAD74);
+	T.r[0] = fl::logic((uint16_t)(T.r[0] & 0x001F));
+	tick(0xAD78, 18);
+	T.r[1] = fl::logic((uint16_t)(T.r[1] & 0x001F));
+	tick(0xAD7C, 18);
+	// MOVB @#0x0EA0,R2 at pc; CMP Rr,R2: the object carrying the skater?
+	auto carrier = [](uint16_t pc, int r) {
+		T.r[2] = sext8(peekb(0x0EA0));
+		fl::movb((uint8_t)T.r[2]);
+		tick((uint16_t)(pc + 4), 24);
+		fl::cmp(T.r[r], T.r[2]);
+		tick((uint16_t)(pc + 6), 12);
+		return T.r[r] == T.r[2];
 	};
-	k.add(18, 12);
-	if (T.r[0] < 4)
+	fl::cmp(T.r[0], 0x0004);
+	tick(0xAD80, 18);
+	if ((int16_t)T.r[0] < 4)
 	{
-		k.add(18, 12);
-		if (T.r[1] < 4)
+		tick(0xAD82, 12);
+		fl::cmp(T.r[1], 0x0004);
+		tick(0xAD86, 18);
+		if ((int16_t)T.r[1] < 4)
 		{
-			// two skater objects keep their order
-			T.r[2] = 0; k.add(12, 12, 12);
-			carry = T.r[0] < T.r[1] ? CF : 0;
-			if (carry)
-			{
-				T.r[2]++; k.add(12);
-			}
-			T.r[0] = T.r[2]; k.add(12);
-		}
-		else
-		{
-			k.at(0xAD94); T.r[2] = sext8(peekb(0x0EA0)); k.add(24, 12, 12);
-			if (T.r[1] == T.r[2])
-			{
-				T.r[0] = 0; k.add(12);
-			}
+			tick(0xAD88, 12);                          // two skater objects keep their order
+			T.r[2] = 0;
+			fl::clr();
+			tick(0xAD8A, 12);
+			fl::cmp(T.r[0], T.r[1]);
+			tick(0xAD8C, 12);
+			if ((int16_t)T.r[0] >= (int16_t)T.r[1])
+				tick(0xAD90, 12);                      // BGE
 			else
 			{
-				T.r[0] = 0; k.add(12, 12);
-				in_order();
+				tick(0xAD8E, 12);
+				T.r[2] = fl::inc(T.r[2]);
+				tick(0xAD90, 12);
 			}
+			T.r[0] = T.r[2];
+			fl::mov(T.r[0]);
+			tick(0xAD92, 12);
+			c_restore(3);
+			return;
 		}
+		tick(0xAD94, 12);                              // BGE
+		if (carrier(0xAD94, 1))
+		{
+			tick(0xADFE, 12);                          // BEQ: the skater is in front
+			goto behind;
+		}
+		tick(0xAD9C, 12);
+		T.r[0] = 0;                                    // the skater for object 0
+		fl::clr();
+		tick(0xAD9E, 12);
+		tick(0xADB0, 12);                              // BR
 	}
 	else
 	{
-		k.add(18, 12);
-		if (T.r[1] >= 4)
-			in_order();
+		tick(0xADA0, 12);                              // BGE
+		fl::cmp(T.r[1], 0x0004);
+		tick(0xADA4, 18);
+		if ((int16_t)T.r[1] >= 4)
+			tick(0xADB0, 12);                          // BGE
 		else
 		{
-			k.at(0xADA6); T.r[2] = sext8(peekb(0x0EA0)); k.add(24, 12, 12);
-			if (T.r[0] == T.r[2])
+			tick(0xADA6, 12);
+			if (carrier(0xADA6, 0))
 			{
-				T.r[0] = 1; k.add(18);
+				tick(0xADF8, 12);                      // BEQ
+				goto in_front;
 			}
-			else
-			{
-				T.r[1] = 0; k.add(12);
-				in_order();
-			}
+			tick(0xADAE, 12);
+			T.r[1] = 0;
+			fl::clr();
+			tick(0xADB0, 12);
 		}
 	}
-	k.restore(4);
-	f_nzvc(nzw(T.r[1]) | carry);
-	k.leave();
+	T.r[0] = fl::asl(T.r[0]);                          // by the positions and the sizes
+	tick(0xADB2, 12);
+	T.r[2] = peek((uint16_t)(0x03F0 + T.r[0]));
+	fl::mov(T.r[2]);
+	tick(0xADB6, 27);
+	if (!T.r[2])
+	{
+		tick(0xADF8, 12);                              // BEQ
+		goto in_front;
+	}
+	tick(0xADB8, 12);
+	T.r[1] = fl::asl(T.r[1]);
+	tick(0xADBA, 12);
+	T.r[3] = peek((uint16_t)(0x03F0 + T.r[1]));
+	fl::mov(T.r[3]);
+	tick(0xADBE, 27);
+	if (!T.r[3])
+	{
+		tick(0xADFE, 12);                              // BEQ
+		goto behind;
+	}
+	tick(0xADC0, 12);
+	T.r[4] = peek((uint16_t)(0x0630 + T.r[0]));
+	fl::mov(T.r[4]);
+	tick(0xADC4, 27);
+	T.r[4] = fl::add(T.r[4], peek((uint16_t)(T.r[2] + 8)));
+	tick(0xADC8, 27);
+	T.r[4] = fl::sub(T.r[4], peek((uint16_t)(0x0630 + T.r[1])));
+	tick(0xADCC, 27);
+	T.r[4] = fl::sub(T.r[4], peek((uint16_t)(T.r[3] + 8)));
+	tick(0xADD0, 27);
+	{
+		const bool up = (T.r[4] & 0x8000) != 0;
+		const uint16_t pc = up ? 0xADD2 : 0xADE4;
+		tick(pc, 12);                                  // BPL
+		const uint16_t mine = up ? 0x0C : 0x0A, other = up ? 0x0A : 0x0C;
+		T.r[0] = peek((uint16_t)(0x0670 + T.r[0]));
+		fl::mov(T.r[0]);
+		tick((uint16_t)(pc + 4), 27);
+		T.r[0] = fl::add(T.r[0], peek((uint16_t)(T.r[2] + mine)));
+		tick((uint16_t)(pc + 8), 27);
+		T.r[0] = fl::sub(T.r[0], peek((uint16_t)(0x0670 + T.r[1])));
+		tick((uint16_t)(pc + 0x0C), 27);
+		T.r[0] = fl::sub(T.r[0], peek((uint16_t)(T.r[3] + other)));
+		tick((uint16_t)(pc + 0x10), 27);
+		if (up)
+			tick(0xADF4, 12);                          // BR
+	}
+	fl::tst(T.r[0]);
+	tick(0xADF6, 12);
+	if ((int16_t)T.r[0] < 0)
+	{
+		tick(0xADFE, 12);                              // BLT
+		goto behind;
+	}
+	tick(0xADF8, 12);
+in_front:
+	T.r[0] = 0x0001;
+	fl::mov(T.r[0]);
+	tick(0xADFC, 18);
+	c_restore(3);
+	return;
+behind:
+	T.r[0] = 0;
+	fl::clr();
+	tick(0xAE00, 12);
+	c_restore(3);
 }
 
 // F:9C5E (assembly; start position R0, column R1, on the stack a height or a mode
