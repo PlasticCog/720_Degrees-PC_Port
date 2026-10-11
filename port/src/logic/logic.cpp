@@ -7,11 +7,14 @@
 #include <cstring>
 #include <map>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
+#ifndef D720_NO_TRANSLATION
 extern const logic::Original t11_originals[];
 extern const int t11_original_count;
 extern const int t11_total_instructions;
+#endif
 
 namespace logic {
 
@@ -95,6 +98,7 @@ const char *table_of(const Routine *r)
 std::string g_translated_spec;                           // see use_translation
 
 std::vector<Slot> g_slots;
+std::unordered_map<uint32_t, int> g_entries;            // entry_key -> slot
 bool g_inited = false;
 int g_testing = 0;              // depth of difference tests in progress
 bool g_original_side = false;   // the original side of a test runs without replacements
@@ -102,8 +106,29 @@ bool g_returned = false;        // the running native routine has returned (T.r[
 
 constexpr uint16_t RETURN_SENTINEL = 0xFFFE;
 
+// a routine's entry: its address and, in the bank windows, the window (0: A at 0x4000, 1: B at
+// 0x6000) and the bank (segment "A5" = window 0, bank 5); the fixed ROM ("F") has window -1
+uint32_t entry_key(int window, int bank, uint16_t addr)
+{
+	return (uint32_t)(window + 1) << 24 | (uint32_t)(bank & 0xff) << 16 | addr;
+}
+uint32_t entry_key(const Routine &r)
+{
+	if (r.seg[0] == 'F') return entry_key(-1, 0, r.addr);
+	return entry_key(r.seg[0] == 'A' ? 0 : 1, atoi(r.seg + 1), r.addr);
+}
+
 void init()
 {
+#ifdef D720_NO_TRANSLATION
+	// no translation linked in: a slot for each rewritten routine
+	g_slots.assign(registry().size(), Slot{});
+	for (size_t i = 0; i < registry().size(); i++)
+	{
+		g_slots[i].r = &registry()[i];
+		g_slots[i].table = table_of(g_slots[i].r);
+	}
+#else
 	g_slots.assign(t11_original_count, Slot{});
 	for (int i = 0; i < t11_original_count; i++)
 	{
@@ -130,11 +155,16 @@ void init()
 			listed |= !strcmp(r.seg, t11_originals[i].seg) && r.addr == t11_originals[i].addr;
 		if (!listed) fprintf(stderr, "logic: %s:%04X (%s) is not listed in routines.txt\n", r.seg, r.addr, r.name);
 	}
+#endif
+	g_entries.clear();
+	for (size_t i = 0; i < g_slots.size(); i++)
+		if (g_slots[i].r) g_entries[entry_key(*g_slots[i].r)] = (int)i;
 	g_inited = true;
 }
 
 // a polling routine whose interrupt returned elsewhere stops; like the translated code, the
-// frame that expects the new PC continues (or the original routine, if the PC is inside it)
+// frame that expects the new PC continues (or the original routine, if the PC is inside it;
+// without the translation only a routine that starts there can)
 void run_native(const Routine &r);
 void run(Slot &s)
 {
@@ -142,7 +172,11 @@ void run(Slot &s)
 	catch (const Unwound &)
 	{
 		if (!s.unwound++) fprintf(stderr, "logic: %s:%04X %s was left at %04X by an interrupt\n", s.r->seg, s.r->addr, s.r->name, T.r[7]);
+#ifdef D720_NO_TRANSLATION
+		if (!in_shadow(T.r[7])) dispatch();
+#else
 		if (!in_shadow(T.r[7])) s.orig->fn();
+#endif
 	}
 }
 
@@ -182,6 +216,7 @@ std::string fmt(const char *f, ...)
 	return buf;
 }
 
+#ifndef D720_NO_TRANSLATION
 // A rewritten routine called by another rewritten routine under test (on the replacement's
 // side) is tested as well, with its own snapshots; the outer test then continues with the
 // original's result of the inner call, as everywhere else.
@@ -364,6 +399,7 @@ void difftest(Slot &s)
 	g_min_sp = std::min<uint16_t>({min_outer, min1, min2});
 	g_testing--;
 }
+#endif
 
 }
 
@@ -374,10 +410,30 @@ bool enter(int index)
 	Slot &s = g_slots[index];
 	if (!s.r || s.translated) return false;
 	s.calls++;
+#ifndef D720_NO_TRANSLATION
 	if (g_difftest)
 		difftest(s);
 	else
+#endif
 		run(s);
+	return true;
+}
+
+bool run_entry(uint16_t pc)
+{
+	if (!g_inited) init();
+	int window = -1, bank = 0;
+	if (pc < 0x8000)
+	{
+		if (pc < 0x4000) return false;
+		window = (pc >> 13) & 1;
+		bank = B->bank_entry(window);
+	}
+	const auto it = g_entries.find(entry_key(window, bank, pc));
+	if (it == g_entries.end()) return false;
+	Slot &s = g_slots[it->second];
+	s.calls++;
+	run(s);
 	return true;
 }
 
@@ -449,11 +505,17 @@ int instructions_rewritten()
 {
 	if (!g_inited) init();
 	int n = 0;
+#ifndef D720_NO_TRANSLATION
 	for (const auto &s : g_slots) if (s.r) n += s.orig->size;
+#endif
 	return n;
 }
 
+#ifdef D720_NO_TRANSLATION
+int instructions_total() { return 0; }                   // not known without the translation
+#else
 int instructions_total() { return t11_total_instructions; }
+#endif
 
 void use_translation(const std::string &spec)
 {

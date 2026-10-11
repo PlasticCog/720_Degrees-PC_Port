@@ -1,6 +1,7 @@
 """Compare whole runs with and without the rewritten routines, frame by frame.
 
     python tools/compare_runs.py [--only selftest,park0] [--frames N] [--images K]
+    python tools/compare_runs.py --exe port/build/render720native.exe --original-exe port/build/render720.exe
 
 The difference tester (tools/difftest_all.py) compares every call of a rewritten routine,
 except calls that wait for an interrupt (the self test screens, button waits).  This tool
@@ -16,6 +17,10 @@ translated original only (--no-rewrite), and compares
     rewrites charge an instruction's cycles after its access and the translation before, so
     a stamp taken during the write differs by that instruction's cycles while the time slices
     come out the same.
+
+With --original-exe the two runs come from different programs: the rewrite from --exe (such
+as render720native, built without the translated main program) and the original from
+--original-exe --no-rewrite.
 
 The rewrites follow the original instruction by instruction, so all of it should match.
 Exit status 1 if anything differs.
@@ -80,6 +85,9 @@ def compare_sound(a, b):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--exe', default=os.path.join(HERE, '..', 'port', 'build', 'render720.exe'))
+    ap.add_argument('--original-exe', default='',
+                    help='run the original with this program (render720 --no-rewrite) and the rewrite with --exe, '
+                         'e.g. --exe port/build/render720native.exe for the build without the translation')
     ap.add_argument('--roms', default=os.path.join(HERE, '..', 'Game'))
     ap.add_argument('--only', default='')
     ap.add_argument('--frames', type=int, default=0, help='override the scenario lengths')
@@ -96,7 +104,8 @@ def main():
         (name, frames, extra), rewrite = job
         base = os.path.join(tmp, '%s_%d' % (name, rewrite))
         os.makedirs(base)
-        cmd = [args.exe, '--roms', args.roms, '--frames', str(args.frames or frames),
+        exe = args.exe if rewrite else (args.original_exe or args.exe)
+        cmd = [exe, '--roms', args.roms, '--frames', str(args.frames or frames),
                '--ram-dump', base + '.bin', '--sound-log', base + '.snd'] + extra
         if args.images:
             cmd += ['--out', base, '--png-every', str(args.images)]

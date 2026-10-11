@@ -160,6 +160,7 @@ include(src/game/files.cmake)
 file(GLOB D720_LOGIC_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/logic/*.cpp)
 add_library(gamecore STATIC
   src/native/t11rt.cpp
+  src/native/t11dispatch.cpp
   ${CORO_SRC}
   ${D720_LOGIC_SOURCES}
   src/native/nativemachine.cpp
@@ -172,6 +173,21 @@ target_link_libraries(gamecore PUBLIC board)
 if(NOT MSVC)
   set_source_files_properties(${T11_GENERATED} src/game/s65_code.cpp PROPERTIES COMPILE_OPTIONS "-O1;-fno-strict-aliasing")
 endif()
+
+# The same without the translated main program: the main CPU runs only the rewritten
+# routines (src/native/dispatch_native.cpp).  The sound CPU program is still the translation.
+add_library(gamecore_native STATIC
+  src/native/t11rt.cpp
+  src/native/dispatch_native.cpp
+  ${CORO_SRC}
+  ${D720_LOGIC_SOURCES}
+  src/native/nativemachine.cpp
+  src/native/s65rt.cpp
+  src/game/s65_code.cpp
+  src/game/s65_tables.cpp)
+target_include_directories(gamecore_native PUBLIC src/native src/game src/logic)
+target_compile_definitions(gamecore_native PUBLIC D720_NO_TRANSLATION)
+target_link_libraries(gamecore_native PUBLIC board)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -233,14 +249,14 @@ configure_file(${D720_GEN_DIR}/tricks_doc.inc.tmp ${D720_GEN_DIR}/tricks_doc.inc
 add_executable(720degrees WIN32 src/app/main.cpp src/app/input_config.cpp src/app/debugui.cpp src/app/docview.cpp
   src/app/extras.cpp ${D720_ICON_RC})
 target_include_directories(720degrees PRIVATE ${D720_GEN_DIR})
-target_link_libraries(720degrees PRIVATE gamecore leveldata imgui SDL3::SDL3)
+target_link_libraries(720degrees PRIVATE gamecore_native leveldata imgui SDL3::SDL3)
 d720_copy_to_output(720degrees)
 
 # ---------------------------------------------------------------------------
 # Level editor
 
 add_executable(editor720 WIN32 src/editor/editor.cpp ${D720_ICON_RC})
-target_link_libraries(editor720 PRIVATE gamecore leveldata imgui SDL3::SDL3)
+target_link_libraries(editor720 PRIVATE gamecore_native leveldata imgui SDL3::SDL3)
 d720_copy_to_output(editor720)
 
 add_executable(verify720 src/tools/verify720.cpp)
@@ -248,6 +264,10 @@ target_link_libraries(verify720 PRIVATE gamecore refcpu)
 add_executable(render720 src/tools/render720.cpp src/app/extras.cpp)
 target_include_directories(render720 PRIVATE src/app)
 target_link_libraries(render720 PRIVATE gamecore leveldata)
+# render720 without the translated main program, to compare whole runs with the original
+add_executable(render720native src/tools/render720.cpp src/app/extras.cpp)
+target_include_directories(render720native PRIVATE src/app)
+target_link_libraries(render720native PRIVATE gamecore_native leveldata)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -260,7 +280,7 @@ target_link_libraries(leveltool PRIVATE leveldata board)
 if(MINGW)
   # Link the MinGW runtime (libgcc, libstdc++, winpthread) statically so the programs run
   # outside MSYS2.  SDL3 is still used through its import library and ships as SDL3.dll.
-  foreach(t 720degrees editor720 ref720 verify720 render720 leveltool coro_test)
+  foreach(t 720degrees editor720 ref720 verify720 render720 render720native leveltool coro_test)
     if(TARGET ${t})
       target_link_options(${t} PRIVATE -static)
     endif()

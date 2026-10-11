@@ -95,6 +95,10 @@ inline void tick(uint16_t pc, int cycles)
 // called by the generated wrappers; false = run the original translation
 bool enter(int index);
 
+// without the translation (the native build's dispatch): run the rewritten routine that starts
+// at pc, in the banks selected now; false if there is none
+bool run_entry(uint16_t pc);
+
 // call a routine of the original program (rewritten or translated) with C arguments;
 // returns R0.  Banked routines need their bank selected first, as in the original.
 uint16_t call(uint16_t addr, std::initializer_list<uint16_t> args);

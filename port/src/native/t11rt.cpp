@@ -146,23 +146,6 @@ bool in_shadow(uint16_t pc)
 	return false;
 }
 
-void dispatch()
-{
-	const uint16_t pc = T.r[7];
-	const T11CodeSeg *seg = nullptr;
-	if (pc >= 0x8000) seg = &t11_seg_fixed;
-	else if (pc >= 0x4000)
-	{
-		const int w = (pc >> 13) & 1;
-		const int e = B->bank_entry(w);
-		seg = (e >= 0 && e < 64) ? t11_seg_bank[w][e] : nullptr;
-	}
-	if (!seg || (pc & 1)) fatal_unknown_pc(pc);
-	const unsigned idx = (unsigned)(pc - seg->base) >> 1;
-	if (idx >= seg->size / 2u || !seg->fn[idx]) fatal_unknown_pc(pc);
-	seg->fn[idx]();
-}
-
 void trap_to(uint16_t vector, uint16_t next)
 {
 	push(T.psw);
@@ -187,7 +170,7 @@ void halt_insn(uint16_t next)
 
 void fatal_unknown_pc(uint16_t pc)
 {
-	fprintf(stderr, "FATAL: translated main program reached untranslated code at PC=%04X (bank A=%d B=%d, SP=%04X)\n",
+	fprintf(stderr, "FATAL: the main program reached code that is neither rewritten nor translated at PC=%04X (bank A=%d B=%d, SP=%04X)\n",
 		pc, B ? B->bank_entry(0) : -1, B ? B->bank_entry(1) : -1, T.r[6]);
 	fflush(stderr);
 	abort();
