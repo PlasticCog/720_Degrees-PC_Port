@@ -56,6 +56,18 @@ def scenarios(selftest_script):
         tr += ['--poke', '%d:0EA0:0001' % f]
     s.append(('tricks', 3000, tr))
     s.append(('selftest', 6000, ['--random', '9', '--script', selftest_script]))
+    # the self test's controller screens (F:FB5E, F:FA00, F:FADE), which random input never
+    # reaches (it does not move the centre sensor): the kick button past the ROM check and the
+    # sound screen, then the controller turned one step every 10 frames (standing still in
+    # between) through the centre and all sectors, about four turns
+    rotary = os.path.join(os.path.dirname(selftest_script), 'rotary.txt')
+    lines = ['0 test 1']
+    for f in (1400, 1600):
+        lines += ['%d b1 1' % f, '%d b1 0' % (f + 4)]
+    lines += ['%d spin 1' % (1700 + 10 * i) for i in range(600)]
+    with open(rotary, 'w') as fh:
+        fh.write('\n'.join(lines) + '\n')
+    s.append(('rotary', 7800, ['--script', rotary]))
     s.append(('hiscore', 6000, ['--random', '3', '--poke', '2500:023E:9999', '--poke', '2500:0240:0009']))
     return s
 
