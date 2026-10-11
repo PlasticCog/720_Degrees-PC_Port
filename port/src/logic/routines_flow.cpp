@@ -89,6 +89,15 @@ void select_bank(uint16_t pc, uint16_t shadow, uint16_t reg, uint16_t v)
 void bank_a(uint16_t pc, uint16_t v) { select_bank(pc, 0x01D2, 0x1400, v); }
 void bank_b(uint16_t pc, uint16_t v) { select_bank(pc, 0x01D4, 0x1402, v); }
 
+// MOVB @#0x0329,@#0x0328 at pc: the code handled becomes the last one
+void keep_code(uint16_t pc)
+{
+	const uint8_t v = peekb(0x0329);
+	fl::movb(v);
+	pokeb(0x0328, v);
+	tick((uint16_t)(pc + 6), 39);
+}
+
 // TST (SP)+ at pc
 void drop(uint16_t pc)
 {
@@ -3543,265 +3552,470 @@ void edge_mode()
 // the skater moves onto it (only up to 0x200 below object 1), state 2.
 void check_wall()
 {
-	Clock k;
-	sel_ab(k, 0x979A, 0x0800, 0x0C00);
-	k.at(0x97B2);
-	const uint16_t pending = peek(0x0222);
-	k.add(24, 12);
-	if (pending)
+	bank_a(0x979A, 0x0800);
+	bank_b(0x97A6, 0x0C00);
 	{
-		fl::tst(pending);
-		k.leave();
-		return;
-	}
-	k.at(0x97BA); poke(0x021C, 0xFFFF); k.add(33);
-	T.r[0] = 7; k.add(18);
-	k.at(0x97C4); T.r[0] &= ~peek(0x0304); k.add(24, 12);
-	if (!T.r[0])
-	{
-		k.at(0x97CA); poke(0x021C, 1); k.add(33, 12);
-	}
-	else
-	{
-		k.at(0x97D2);
-		const bool forward = (int16_t)peek(0x01B4) > 0;
-		k.add(24, 12);
-		T.r[0] = 7; k.add(18);
-		if (forward)
+		const uint16_t handled = peek(0x0222);         // an edge was handled
+		fl::tst(handled);
+		tick(0x97B6, 24);
+		if (handled)
 		{
-			k.at(0x97DC); T.r[0] &= ~peek(0x0306); k.add(24, 12);
-			if (!T.r[0])
-			{
-				k.at(0x97E2); poke(0x021C, 2); k.add(33, 12);
-			}
-		}
-		else
-		{
-			k.at(0x97EE); T.r[0] &= ~peek(0x0302); k.add(24, 12);
-			if (!T.r[0])
-			{
-				k.at(0x97F4); poke(0x021C, 0); k.add(27);
-			}
-		}
-	}
-	k.at(0x97F8); T.r[0] = peek(0x021C); k.add(24, 12);
-	if (T.r[0] & 0x8000)
-	{
-		f_nzvc(NF);
-		k.leave();
-		return;
-	}
-	T.r[0] = (uint16_t)(T.r[0] << 1); k.add(12);
-	k.at(0x9800);
-	const uint8_t code = peekb((uint16_t)(0x0302 + T.r[0]));
-	pokeb(0x0329, code);
-	k.add(42);
-	k.at(0x9806);
-	const bool same = code == peekb(0x0328);
-	k.add(39, 12);
-	if (same)
-	{
-		f_nzvc(ZF);
-		k.leave();
-		return;
-	}
-	k.at(0x980E); T.r[3] = sext8(peekb((uint16_t)(0x0302 + T.r[0]))); k.add(27);
-	T.r[1] = 0; k.add(12, 18, 12);
-	if (T.r[3] == 0x0037)
-	{
-		T.r[2] = 0xFFFF;
-		k.add(18);
-	}
-	else
-	{
-		T.r[1] = 1; k.add(12);
-		push(T.r[3]); k.add(24);
-		k.call(0x9E52, 0x9822);                        // slope_table_value
-		T.r[2] = T.r[0];
-		T.r[6] = (uint16_t)(T.r[6] + 2);
-		k.add(12, 18, 12);
-	}
-	k.add(12, 12);
-	if (!(T.r[2] & 0x8000))
-	{
-		k.at(0x9834); T.r[0] = peek(0x021C); k.add(24);
-		T.r[0] = (uint16_t)(T.r[0] << 1); k.add(12);
-		k.at(0x983A); poke(0x021E, peek((uint16_t)(0x0308 + T.r[0]))); k.add(42);
-		k.at(0x9840); poke(0x0220, peek((uint16_t)(0x030E + T.r[0]))); k.add(42);
-		k.at(0x9846); poke(0x0218, peek((uint16_t)(0x0314 + T.r[0]))); k.add(42);
-		k.at(0x984C); T.r[0] = peek((uint16_t)(0x0314 + T.r[0])); k.add(27);
-		k.call(0x8078, 0x9854);                        // select_video_bank
-		k.at(0x9854);
-		const bool ramp = peekb(0x01EA) != 0;
-		k.add(24, 12);
-		if (ramp)
-		{
-			k.at(0x98F0); T.r[0] = sext8(peekb(0x0327)) & 7; k.add(24, 18, 18, 12);
-			if (T.r[0] >= 5)
-			{
-				k.at(0x98FE); T.r[1] = sext8(peekb(0x0327)) & 0x0038; k.add(24, 18);
-				T.r[0] = T.r[3] & 0x0038; k.add(12, 18, 12, 12);
-				if (T.r[1] == T.r[0])
-				{
-					T.r[0] = 7; k.add(18);
-					k.at(0x9914); T.r[0] &= ~peek(0x0304); k.add(24, 12);
-					if (T.r[0])
-					{
-						f_nzvc(nzw(T.r[0]));
-						k.leave();
-						return;
-					}
-					k.at(0x991C); pokeb(0x0327, (uint8_t)T.r[3]); k.add(27);
-					k.call(0x9FB4, 0x9924);            // skater_take_off
-					k.at(0x9924); pokeb(0x031E, 2); k.add(33);
-					k.at(0x992A); pokeb(0x031C, 2); k.add(33);
-					k.at(0x9930); pokeb(0x0328, peekb(0x0329)); k.add(39);
-					sel_a(k, 0x9936, 0x1800);
-					k.call(0x5264, 0x9946);
-					sel_ab(k, 0x9946, 0x0800, 0x2C00);
-					fl::mov(0x2C00);
-					k.leave();
-					return;
-				}
-			}
-			push(T.r[2]); k.add(24);
-			k.call(0x9EEE, 0x9966);                    // skater_deflect
-			k.add(12);
-			k.at(0x98C6); pokeb(0x0328, peekb(0x0329)); k.add(39, 18);
-			fl::tst(rw(T.r[6]));
-			T.r[6] = (uint16_t)(T.r[6] + 2);
-			k.add(18);
-			k.leave();
+			tick(0x97B8, 12);                          // BEQ not taken
+			rts();
 			return;
 		}
-		k.add(18, 12);
-		if (T.r[3] & 0x40)
+		tick(0x97BA, 12);
+	}
+	// the probed cell ahead: 1 with a corner code, else 2 or 0 by the direction of travel
+	set_w(0x021C, 0xFFFF, 0x97C0);
+	T.r[0] = 0x0007;
+	fl::mov(T.r[0]);
+	tick(0x97C4, 18);
+	T.r[0] = fl::logic((uint16_t)(T.r[0] & ~peek(0x0304)));
+	tick(0x97C8, 24);
+	if (!T.r[0])
+	{
+		tick(0x97CA, 12);
+		set_w(0x021C, 0x0001, 0x97D0);
+		tick(0x97F8, 12);                              // BR
+	}
+	else
+	{
+		tick(0x97D2, 12);                              // BNE
+		const uint16_t speed = peek(0x01B4);
+		fl::tst(speed);
+		tick(0x97D6, 24);
+		if ((int16_t)speed <= 0)
 		{
-			sel_ab(k, 0x9860, 0x1800, 0x1C00);
-			push(T.r[3]); k.add(24);
-			k.call(0x7B3E, 0x987E);                    // B1:7B3E start_object4
-			sel_ab(k, 0x987E, 0x0800, 0x0C00);
-			T.r[3] = 0x8000; k.add(18, 12);
-		}
-		else
-		{
-			k.at(0x989C); T.r[3] = peek(0x06B2); k.add(24);
-			k.at(0x98A0); T.r[3] = (uint16_t)(T.r[3] + peek(0x05B2)); k.add(24);
-			k.at(0x98A4); poke(0x0212, 0xFF00); k.add(33);
-			push(T.r[3]); k.add(24);
-			k.at(0x98AC); T.r[0] = peek(0x021E); k.add(24);
-			k.at(0x98B0); T.r[1] = peek(0x0220); k.add(24);
-			k.call(0x9C5E, 0x98B8);                    // trace_cells
-			T.r[3] = T.r[0]; k.add(12);
-		}
-		k.add(18, 12);
-		if (T.r[3] == 0x8000)
-		{
-			poke(T.r[6], T.r[2]); k.add(21);
-			k.call(0x9E96, 0x98C6);                    // skater_bounce
-			k.at(0x98C6); pokeb(0x0328, peekb(0x0329)); k.add(39, 18);
-		}
-		else
-		{
-			k.at(0x98D0);
-			const bool cell1 = peek(0x021C) == 1;
-			k.add(30, 12);
-			if (cell1)
+			tick(0x97EA, 12);                          // BLE
+			T.r[0] = 0x0007;
+			fl::mov(T.r[0]);
+			tick(0x97EE, 18);
+			T.r[0] = fl::logic((uint16_t)(T.r[0] & ~peek(0x0302)));
+			tick(0x97F2, 24);
+			if (T.r[0])
+				tick(0x97F8, 12);                      // BNE
+			else
 			{
-				k.at(0x98D8); poke(0x0304, T.r[3]); k.add(27);
-				k.at(0x98DC); poke(0x06B0, peek(0x0222)); k.add(39);
-				k.at(0x98E2); pokeb(0x031E, 2); k.add(33);
-				k.at(0x98E8); pokeb(0x031C, 6); k.add(33, 12);
-				k.at(0x98C6); pokeb(0x0328, peekb(0x0329)); k.add(39);
+				tick(0x97F4, 12);
+				clr_w(0x021C, 0x97F8);
 			}
-			k.add(18);
-		}
-		fl::tst(rw(T.r[6]));
-		T.r[6] = (uint16_t)(T.r[6] + 2);
-		k.add(18);
-		k.leave();
-		return;
-	}
-	k.add(18);
-	T.r[1] = ror(T.r[1]);
-	k.add(12, 12);
-	if (fC())
-	{
-		sel_a(k, 0x996C, 0x1800);
-		k.at(0x9978); push(peek(0x0304)); k.add(36);
-		k.call(0x51EE, 0x9980);                        // A5:51EE
-		T.r[2] = T.r[0]; k.add(12);
-		sel_a(k, 0x9982, 0x0800);
-		k.at(0x998E);
-		const bool back = (int16_t)peek(0x01B4) < 0;
-		k.add(24, 12);
-		if (back)
-		{
-			T.r[2] = (uint16_t)-T.r[2];
-			k.add(12);
-		}
-		T.r[6] = (uint16_t)(T.r[6] + 2);
-		k.add(18, 12, 12, 12);
-	}
-	else
-	{
-		k.at(0x999A);
-		const bool cell1 = peek(0x021C) == 1;
-		k.add(30, 12);
-		if (cell1)
-		{
-			T.r[2] = 1;
-			k.add(18, 12, 12);
 		}
 		else
 		{
-			T.r[2] = 0;
-			k.add(12, 12, 12);
+			tick(0x97D8, 12);
+			T.r[0] = 0x0007;
+			fl::mov(T.r[0]);
+			tick(0x97DC, 18);
+			T.r[0] = fl::logic((uint16_t)(T.r[0] & ~peek(0x0306)));
+			tick(0x97E0, 24);
+			if (T.r[0])
+				tick(0x97F8, 12);                      // BNE
+			else
+			{
+				tick(0x97E2, 12);
+				set_w(0x021C, 0x0002, 0x97E8);
+				tick(0x97F8, 12);                      // BR
+			}
 		}
 	}
-	if ((int16_t)T.r[2] <= 0)
+	T.r[0] = peek(0x021C);
+	fl::mov(T.r[0]);
+	tick(0x97FC, 24);
+	if ((int16_t)T.r[0] < 0)
 	{
-		fl::tst(T.r[2]);
-		k.leave();
+		tick(0x97B8, 12);                              // BLT: none
+		rts();
 		return;
 	}
-	k.at(0x99AE); poke(0x0212, 0x0100); k.add(33);
-	k.at(0x99B4); poke(0x0218, peek(0x0316)); k.add(39);
-	push(0x7FFD); k.add(30);
-	k.at(0x99BE); T.r[0] = peek(0x030A); k.add(24);
-	k.at(0x99C2); T.r[1] = peek(0x0310); k.add(24);
-	k.call(0x9C5E, 0x99CA);                            // trace_cells
-	k.at(0x99CA); poke(0x0304, T.r[0]); k.add(27);
-	k.at(0x99CE); T.r[0] = peek(0x06B2); k.add(24);
-	k.at(0x99D2); T.r[0] = (uint16_t)(T.r[0] - peek(0x0222)); k.add(24, 18, 12);
-	if ((int16_t)T.r[0] >= 0x0200)
+	tick(0x97FE, 12);
+	T.r[0] = fl::asl(T.r[0]);
+	tick(0x9800, 12);
 	{
-		k.at(0x99DC); poke(0x06B0, peek(0x0222)); k.add(39, 12);
+		const uint8_t v = peekb((uint16_t)(0x0302 + T.r[0]));   // its code, once per new code
+		fl::movb(v);
+		pokeb(0x0329, v);
+	}
+	tick(0x9806, 42);
+	{
+		const uint8_t code = peekb((uint16_t)(0x0302 + T.r[0]));
+		const uint8_t last = peekb(0x0328);
+		fl::cmpb(code, last);
+		tick(0x980C, 39);
+		if (code == last)
+		{
+			tick(0x97B8, 12);                          // BEQ
+			rts();
+			return;
+		}
+	}
+	tick(0x980E, 12);
+	T.r[3] = sext8(peekb((uint16_t)(0x0302 + T.r[0])));
+	fl::movb((uint8_t)T.r[3]);
+	tick(0x9812, 27);
+	T.r[1] = 0;
+	fl::clr();
+	tick(0x9814, 12);
+	fl::cmp(T.r[3], 0x0037);
+	tick(0x9818, 18);
+	if (T.r[3] == 0x0037)
+	{
+		tick(0x9828, 12);                              // BEQ
+		T.r[2] = 0xFFFF;
+		fl::mov(T.r[2]);
+		tick(0x982C, 18);
 	}
 	else
 	{
-		k.at(0x99E4); poke(0x06B0, peek(0x06B2)); k.add(39);
+		tick(0x981A, 12);
+		T.r[1] = fl::inc(T.r[1]);
+		tick(0x981C, 12);
+		push(T.r[3]);
+		fl::mov(T.r[3]);
+		tick(0x981E, 24);
+		jsr(0x9822, 0x9E52);                           // slope_table_value
+		T.r[2] = T.r[0];
+		fl::mov(T.r[2]);
+		tick(0x9824, 12);
+		drop(0x9824);
+		tick(0x982C, 12);                              // BR
 	}
-	k.at(0x99EA);
-	const bool park4 = peekb(0x0F59) == 4;
-	k.add(30, 12);
-	if (park4)
+	fl::tst(T.r[2]);
+	tick(0x982E, 12);
+	uint16_t at;
+	if ((int16_t)T.r[2] < 0)
 	{
-		k.at(0x99F2); T.r[0] = peek(0x06B2); k.add(24);
-		k.at(0x99F6); T.r[0] = (uint16_t)(T.r[0] - peek(0x06B0)); k.add(24, 18, 12);
-		if ((int16_t)T.r[0] > 0x2800)
+		tick(0x9830, 12);                              // BGE not taken: a step
+		tick(0x9968, 18);                              // JMP
+		at = 0x9968;
+	}
+	else
+	{
+		tick(0x9834, 12);                              // a wall
+		at = 0x9834;
+	}
+	for (;;)
+	{
+		switch (at)
 		{
-			sel_ab(k, 0x9A00, 0x3800, 0x3C00);
-			k.call(0x7A9E, 0x9A1C);                    // snapshot_skater
+		case 0x9834:
+		{
+			T.r[0] = peek(0x021C);
+			fl::mov(T.r[0]);
+			tick(0x9838, 24);
+			T.r[0] = fl::asl(T.r[0]);
+			tick(0x983A, 12);
+			static const struct { uint16_t from, to, next; } cell[3] = {
+				{0x0308, 0x021E, 0x9840}, {0x030E, 0x0220, 0x9846}, {0x0314, 0x0218, 0x984C},
+			};
+			for (const auto &c : cell)
+			{
+				const uint16_t v = peek((uint16_t)(c.from + T.r[0]));
+				fl::mov(v);
+				poke(c.to, v);
+				tick(c.next, 42);
+			}
+			T.r[0] = peek((uint16_t)(0x0314 + T.r[0]));
+			fl::mov(T.r[0]);
+			tick(0x9850, 27);
+			jsr(0x9854, 0x8078);                       // select_video_bank
+			const uint8_t ramp = peekb(0x01EA);
+			fl::tstb(ramp);
+			tick(0x9858, 24);
+			if (ramp)
+			{
+				tick(0x98F0, 12);                      // BNE
+				at = 0x98F0;
+				break;
+			}
+			tick(0x985A, 12);
+			const bool b6 = fl::logic((uint16_t)(T.r[3] & 0x0040)) != 0;
+			tick(0x985E, 18);
+			if (b6)
+			{
+				tick(0x9860, 12);                      // B1:7B3E walls always rise above him
+				bank_a(0x9860, 0x1800);
+				bank_b(0x986C, 0x1C00);
+				push(T.r[3]);
+				fl::mov(T.r[3]);
+				tick(0x987A, 24);
+				jsr(0x987E, 0x7B3E);
+				bank_a(0x987E, 0x0800);
+				bank_b(0x988A, 0x0C00);
+				T.r[3] = 0x8000;
+				fl::mov(T.r[3]);
+				tick(0x989A, 18);
+				tick(0x98BA, 12);                      // BR
+			}
+			else
+			{
+				tick(0x989C, 12);                      // BEQ: F:9C5E with his height
+				T.r[3] = peek(0x06B2);
+				fl::mov(T.r[3]);
+				tick(0x98A0, 24);
+				T.r[3] = fl::add(T.r[3], peek(0x05B2));
+				tick(0x98A4, 24);
+				set_w(0x0212, 0xFF00, 0x98AA);
+				push(T.r[3]);
+				fl::mov(T.r[3]);
+				tick(0x98AC, 24);
+				T.r[0] = peek(0x021E);
+				fl::mov(T.r[0]);
+				tick(0x98B0, 24);
+				T.r[1] = peek(0x0220);
+				fl::mov(T.r[1]);
+				tick(0x98B4, 24);
+				jsr(0x98B8, 0x9C5E);                   // trace_cells
+				T.r[3] = T.r[0];
+				fl::mov(T.r[3]);
+				tick(0x98BA, 12);
+			}
+			fl::cmp(T.r[3], 0x8000);
+			tick(0x98BE, 18);
+			if (T.r[3] == 0x8000)
+			{
+				tick(0x98C0, 12);                      // above him: he bounces
+				poke(T.r[6], T.r[2]);
+				fl::mov(T.r[2]);
+				tick(0x98C2, 21);
+				jsr(0x98C6, 0x9E96);                   // skater_bounce
+				at = 0x98C6;
+				break;
+			}
+			tick(0x98D0, 12);                          // BNE
+			const uint16_t which = peek(0x021C);
+			fl::cmp(which, 0x0001);
+			tick(0x98D6, 30);
+			if (which != 1)
+			{
+				tick(0x98CC, 12);                      // BNE
+				at = 0x98CC;
+				break;
+			}
+			tick(0x98D8, 12);                          // from cell 1: onto it
+			poke(0x0304, T.r[3]);
+			fl::mov(T.r[3]);
+			tick(0x98DC, 27);
+			copy_w(0x0222, 0x06B0, 0x98E2);
+			set_b(0x031E, 0x02, 0x98E8);
+			set_b(0x031C, 0x06, 0x98EE);
+			tick(0x98C6, 12);                          // BR
+			at = 0x98C6;
+			break;
+		}
+		case 0x98C6:
+			keep_code(0x98C6);
+			at = 0x98CC;
+			break;
+		case 0x98CC:
+			tick(0x9A2E, 18);                          // JMP
+			at = 0x9A2E;
+			break;
+		case 0x98F0:                                   // on the ramp
+		{
+			T.r[0] = sext8(peekb(0x0327));
+			fl::movb((uint8_t)T.r[0]);
+			tick(0x98F4, 24);
+			T.r[0] = fl::logic((uint16_t)(T.r[0] & 0x0007));
+			tick(0x98F8, 18);
+			fl::cmp(T.r[0], 0x0005);
+			tick(0x98FC, 18);
+			if (T.r[0] < 5)
+			{
+				tick(0x9960, 12);                      // BCS
+				at = 0x9960;
+				break;
+			}
+			tick(0x98FE, 12);
+			T.r[1] = sext8(peekb(0x0327));
+			fl::movb((uint8_t)T.r[1]);
+			tick(0x9902, 24);
+			T.r[1] = fl::logic((uint16_t)(T.r[1] & 0x0038));
+			tick(0x9906, 18);
+			T.r[0] = T.r[3];
+			fl::mov(T.r[0]);
+			tick(0x9908, 12);
+			T.r[0] = fl::logic((uint16_t)(T.r[0] & 0x0038));
+			tick(0x990C, 18);
+			fl::cmp(T.r[1], T.r[0]);
+			tick(0x990E, 12);
+			if (T.r[1] != T.r[0])
+			{
+				tick(0x9960, 12);                      // BNE
+				at = 0x9960;
+				break;
+			}
+			tick(0x9910, 12);
+			T.r[0] = 0x0007;
+			fl::mov(T.r[0]);
+			tick(0x9914, 18);
+			T.r[0] = fl::logic((uint16_t)(T.r[0] & ~peek(0x0304)));
+			tick(0x9918, 24);
+			if (T.r[0])
+			{
+				tick(0x991A, 12);                      // BEQ not taken
+				rts();
+				return;
+			}
+			tick(0x991C, 12);                          // a matching corner takes him off
+			pokeb(0x0327, (uint8_t)T.r[3]);
+			fl::movb((uint8_t)T.r[3]);
+			tick(0x9920, 27);
+			jsr(0x9924, 0x9FB4);                       // skater_take_off
+			set_b(0x031E, 0x02, 0x992A);
+			set_b(0x031C, 0x02, 0x9930);
+			keep_code(0x9930);
+			bank_a(0x9936, 0x1800);
+			jsr(0x9946, 0x5264);                       // start_trick
+			bank_a(0x9946, 0x0800);
+			bank_b(0x9952, 0x2C00);
+			rts();
+			return;
+		}
+		case 0x9960:                                   // deflected
+			push(T.r[2]);
+			fl::mov(T.r[2]);
+			tick(0x9962, 24);
+			jsr(0x9966, 0x9EEE);                       // skater_deflect
+			tick(0x98C6, 12);                          // BR
+			at = 0x98C6;
+			break;
+		case 0x9968:                                   // a step
+		{
+			T.r[1] = fl::ror(T.r[1]);
+			tick(0x996A, 12);
+			bool test = true;                          // TST R2 at 0x99AA
+			if (C())
+			{
+				tick(0x996C, 12);                      // going up it: the height in the direction
+				bank_a(0x996C, 0x1800);
+				push_w(0x0304, 0x997C);
+				jsr(0x9980, 0x51EE);                   // slope_height
+				T.r[2] = T.r[0];
+				fl::mov(T.r[2]);
+				tick(0x9982, 12);
+				bank_a(0x9982, 0x0800);
+				const uint16_t speed = peek(0x01B4);
+				fl::tst(speed);
+				tick(0x9992, 24);
+				if ((int16_t)speed >= 0)
+					tick(0x9996, 12);                  // BGE
+				else
+				{
+					tick(0x9994, 12);
+					T.r[2] = fl::neg(T.r[2]);
+					tick(0x9996, 12);
+				}
+				drop(0x9996);
+				tick(0x99AA, 12);                      // BR
+			}
+			else
+			{
+				tick(0x999A, 12);                      // BCC
+				const uint16_t which = peek(0x021C);
+				fl::cmp(which, 0x0001);
+				tick(0x99A0, 30);
+				if (which == 1)
+				{
+					tick(0x99A2, 12);
+					T.r[2] = 0x0001;
+					fl::mov(T.r[2]);
+					tick(0x99A6, 18);
+					tick(0x99AC, 12);                  // BR
+					test = false;
+				}
+				else
+				{
+					tick(0x99A8, 12);                  // BNE
+					T.r[2] = 0;
+					fl::clr();
+					tick(0x99AA, 12);
+				}
+			}
+			if (test)
+			{
+				fl::tst(T.r[2]);
+				tick(0x99AC, 12);
+			}
+			if ((int16_t)T.r[2] <= 0)
+			{
+				tick(0x9A30, 12);                      // BLE
+				rts();
+				return;
+			}
+			tick(0x99AE, 12);                          // the next level (F:9C5E mode 0x7FFD)
+			set_w(0x0212, 0x0100, 0x99B4);
+			copy_w(0x0316, 0x0218, 0x99BA);
+			push(0x7FFD);
+			fl::mov(0x7FFD);
+			tick(0x99BE, 30);
+			T.r[0] = peek(0x030A);
+			fl::mov(T.r[0]);
+			tick(0x99C2, 24);
+			T.r[1] = peek(0x0310);
+			fl::mov(T.r[1]);
+			tick(0x99C6, 24);
+			jsr(0x99CA, 0x9C5E);                       // trace_cells
+			poke(0x0304, T.r[0]);
+			fl::mov(T.r[0]);
+			tick(0x99CE, 27);
+			T.r[0] = peek(0x06B2);
+			fl::mov(T.r[0]);
+			tick(0x99D2, 24);
+			T.r[0] = fl::sub(T.r[0], peek(0x0222));
+			tick(0x99D6, 24);
+			fl::cmp(T.r[0], 0x0200);
+			tick(0x99DA, 18);
+			if ((int16_t)T.r[0] < 0x0200)
+			{
+				tick(0x99E4, 12);                      // BLT
+				copy_w(0x06B2, 0x06B0, 0x99EA);
+			}
+			else
+			{
+				tick(0x99DC, 12);                      // up to 0x200 below object 1
+				copy_w(0x0222, 0x06B0, 0x99E2);
+				tick(0x99EA, 12);                      // BR
+			}
+			const uint8_t level = peekb(0x0F59);
+			fl::cmpb(level, 0x04);
+			tick(0x99F0, 30);
+			if (level != 4)
+				tick(0x9A1C, 12);                      // BNE
+			else
+			{
+				tick(0x99F2, 12);
+				T.r[0] = peek(0x06B2);
+				fl::mov(T.r[0]);
+				tick(0x99F6, 24);
+				T.r[0] = fl::sub(T.r[0], peek(0x06B0));
+				tick(0x99FA, 24);
+				fl::cmp(T.r[0], 0x2800);
+				tick(0x99FE, 18);
+				if ((int16_t)T.r[0] <= 0x2800)
+					tick(0x9A1C, 12);                  // BLE
+				else
+				{
+					tick(0x9A00, 12);
+					bank_a(0x9A00, 0x3800);
+					bank_b(0x9A0C, 0x3C00);
+					jsr(0x9A1C, 0x7A9E);
+				}
+			}
+			keep_code(0x9A1C);
+			set_b(0x031C, 0x02, 0x9A28);
+			set_b(0x031E, 0x02, 0x9A2E);
+			at = 0x9A2E;
+			break;
+		}
+		case 0x9A2E:
+			drop(0x9A2E);
+			rts();
+			return;
+		default:
+			leave_to(at);
 		}
 	}
-	k.at(0x9A1C); pokeb(0x0328, peekb(0x0329)); k.add(39);
-	k.at(0x9A22); pokeb(0x031C, 2); k.add(33);
-	k.at(0x9A28); pokeb(0x031E, 2); k.add(33);
-	fl::tst(rw(T.r[6]));
-	T.r[6] = (uint16_t)(T.r[6] + 2);
-	k.add(18);
-	k.leave();
 }
 
 // F:A9FC  run_text_script(const int *script): first the screen part of the script (an
