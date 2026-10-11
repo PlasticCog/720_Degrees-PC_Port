@@ -170,8 +170,8 @@ port/src/editor   level editor (SDL3 + Dear ImGui)
   codes, stack contents and cycles, with interrupts let in at the same instruction boundaries.
   `render720 --difftest` runs every call both ways (the rewrite and the translated original) and
   compares the results and every step, for the sound CPU also every access to the sound chips
-  and latches; `tools/difftest_all.py` does that over 16 scenarios (attract mode, random play,
-  each park, events, tricks, self test, high score, two players). `tools/compare_runs.py`
+  and latches; `tools/difftest_all.py` does that over 17 scenarios (attract mode, random play,
+  each park, events, tricks, self test, high score tables and new entries, two players). `tools/compare_runs.py`
   compares whole runs frame by frame (RAM including the stack, screens, sound commands, the
   sound CPU's RAM and every chip and latch access with its time); they are byte-identical. The
   game and the editor are built without any translated code (`gamecore_native`): both CPUs run
@@ -203,9 +203,9 @@ port/src/editor   level editor (SDL3 + Dear ImGui)
 ## Status
 
 * Main and sound programs rewritten and verified against the original; the game and the editor
-  run without any translated code. A few paths that no test scenario reaches (for example
-  entering a new high score, the self test's fault reports and some music commands) follow the
-  original but have not been compared with it. Video, POKEY, YM2151 and TMS5220 audio done.
+  run without any translated code. A few paths that no test scenario reaches (for example the
+  self test's fault reports, some music commands and three sound board commands the game never
+  sends) follow the original but have not been compared with it. Video, POKEY, YM2151 and TMS5220 audio done.
 * Level editor: all maps decode and re-encode exactly. An unedited mod plays pixel-identically to
   the original, and edits show up in the game.
 * Still open: the park palettes, which the colour capture does not reach, and the exact meaning of
