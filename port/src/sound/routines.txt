@@ -34,6 +34,9 @@
 461E  cmd_mask
 4FF5  wait_ym
 57AC  nmi
+5831  speech_init
+5883  speech
+58FC  cmd_speak
 F47B  count_8c
 F488  times10
 F490  ptr_1000

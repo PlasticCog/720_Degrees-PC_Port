@@ -100,6 +100,9 @@ void jmp(uint16_t target);
 // RTS used as a jump (the address pushed before): on to the code there, which returns to this
 // routine's caller
 void rts_jump();
+// the code at pc (the PC set): the rewritten code that starts there (a routine or an INNER
+// entry), else the dispatcher
+void jump_to(uint16_t pc);
 // continue the program at pc, abandoning the routine and its callers up to one that expects pc
 [[noreturn]] inline void leave_to(uint16_t pc)
 {

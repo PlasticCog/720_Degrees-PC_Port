@@ -20,6 +20,7 @@ namespace sound {
 const Routine *sound_core(int &count);
 const Routine *sound_main(int &count);
 const Routine *sound_command(int &count);
+const Routine *sound_speech(int &count);
 
 namespace {
 
@@ -36,6 +37,7 @@ struct Slot {
 struct Table { const char *name; TableFn fn; };
 const Table TABLES[] = {
 	{"core", sound_core}, {"main", sound_main}, {"command", sound_command},
+	{"speech", sound_speech},
 };
 
 std::vector<Routine> &registry()
@@ -320,18 +322,30 @@ void rti()
 	sync6_dyn();
 }
 
+void jump_to(uint16_t pc)
+{
+	static std::unordered_map<uint16_t, Fn> native;
+	if (native.empty())
+		for (const auto &r : registry()) native[r.addr] = r.fn;
+	S.pc = pc;
+	const auto it = native.find(pc);
+	if (it != native.end())
+		it->second();
+	else
+		sdispatch();
+}
+
 void jmp(uint16_t target)
 {
 	cyc(3);
 	step(target);
-	S.pc = target;
-	sdispatch();
+	jump_to(target);
 }
 
 void rts_jump()
 {
 	rts();
-	sdispatch();
+	jump_to(S.pc);
 }
 
 bool enter(int index)
