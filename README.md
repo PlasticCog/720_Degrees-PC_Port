@@ -1,14 +1,15 @@
 # 720 Degrees - native PC port
 
 A native port of Atari Games' **720 Degrees** (1986 arcade, rev 4) for Windows, Linux and macOS, written in C++ with SDL3,
-plus a level editor. The main program's game logic is newly written C++ (`port/src/logic`),
-checked instruction by instruction against the original arcade program; the sound program is
-still the original, statically translated from its machine code into C++. Graphics, sound chips
-and controls are reimplemented natively. No CPU emulator runs inside the game.
+plus a level editor. Both of the arcade board's programs, the main program (`port/src/logic`) and
+the sound program (`port/src/sound`), are newly written C++, checked instruction by instruction
+against the original programs; the game and the editor contain no translated program code.
+Graphics, sound chips and controls are reimplemented natively. No CPU emulator runs inside the
+game.
 
-> You need your own copy of the arcade ROMs. Nothing derived from the ROMs is stored in this
-> repository: the translated program code (the sound program, and the original main program for
-> the test tools) is generated on your machine from your ROM files.
+> You need your own copy of the arcade ROMs: the game reads its graphics, sounds and data from
+> them. Nothing derived from the ROMs is stored in this repository: the translated program code,
+> which only the test tools use, is generated on your machine from your ROM files.
 
 ## Quick start
 
@@ -59,8 +60,10 @@ Apple Silicon and Intel Macs are both supported.
 ### Packaging
 
 `python tools/package.py` puts the built programs, an empty `Game` folder, this README and the
-third-party licences into `dist/720degrees-<version>-<platform>.zip`. The program code inside the
-executables is translated from your ROMs, so such a package is for your own use: do not publish it.
+third-party licences into `dist/720degrees-<version>-<platform>.zip`. The executables contain no
+translated program code, but a build can include data generated from your ROMs
+(`port/src/level/level_palettes.inc`, if present), so such a package is for your own use: do not
+publish it.
 
 ## Controls
 
@@ -140,9 +143,10 @@ they share one block bank, so two park mods replace each other.
 ## How it works
 
 ```
-Game/ (your ROMs) --tools/*.py--> port/src/game/*.cpp   translated main (T-11) + sound (6502) programs
-                                        |
+Game/ (your ROMs) --tools/*.py--> port/src/game/*.cpp   translated main (T-11) + sound (6502)
+                                                        programs, for the test tools only
 port/src/logic    the main program rewritten: 317 routines, instruction by instruction
+port/src/sound    the sound program rewritten: 98 routines, instruction by instruction
 port/src/native   runtime: interrupts, time slicing (fibers), bank dispatch
 port/src/board    native hardware: memory map, playfield/sprite/text renderer,
                   POKEY, YM2151 (ymfm), TMS5220 speech, controls, EEPROM
@@ -160,15 +164,18 @@ port/src/editor   level editor (SDL3 + Dear ImGui)
   reference model (`port/src/ref`, development only) and compares all RAM, video memory, CPU
   registers and every pixel after each frame. Four 30,000-frame random-play sessions are
   bit-identical.
-* **Rewrite.** Every routine of the main program has been rewritten in `port/src/logic`. Each one
-  does what the original's instructions do, one instruction at a time: the same memory accesses,
-  registers, condition codes, stack contents and cycles, with interrupts let in at the same
-  instruction boundaries. `render720 --difftest` runs every call both ways (the rewrite and the
-  translated original) and compares the results and every step; `tools/difftest_all.py` does
-  that over 16 scenarios (attract mode, random play, each park, events, tricks, self test, high
-  score, two players). `tools/compare_runs.py` compares whole runs frame by frame (RAM including
-  the stack, screens, sound commands); they are byte-identical. The game and the editor are built
-  without the translated main program (`gamecore_native`): the main CPU runs only the rewrite.
+* **Rewrite.** Every routine of both programs has been rewritten: the main program in
+  `port/src/logic`, the sound program in `port/src/sound`. Each one does what the original's
+  instructions do, one instruction at a time: the same memory accesses, registers, condition
+  codes, stack contents and cycles, with interrupts let in at the same instruction boundaries.
+  `render720 --difftest` runs every call both ways (the rewrite and the translated original) and
+  compares the results and every step, for the sound CPU also every access to the sound chips
+  and latches; `tools/difftest_all.py` does that over 16 scenarios (attract mode, random play,
+  each park, events, tricks, self test, high score, two players). `tools/compare_runs.py`
+  compares whole runs frame by frame (RAM including the stack, screens, sound commands, the
+  sound CPU's RAM and every chip and latch access with its time); they are byte-identical. The
+  game and the editor are built without any translated code (`gamecore_native`): both CPUs run
+  only the rewrite.
 * **Levels.** Maps are grids of 16x16-tile blocks stored as run-length-coded halves. See
   `tools/levels.py` and `port/src/level/leveldata.h` for the format. Each park has six map
   layouts, and maps are stored back to back, so a map ends where the next one begins. Edited
@@ -181,7 +188,7 @@ port/src/editor   level editor (SDL3 + Dear ImGui)
 | Tool | Purpose |
 |---|---|
 | `verify720` | Lockstep check: translated game against the reference model |
-| `render720native` | `render720` built like the game, without the translated main program |
+| `render720native` | `render720` built like the game, without any translated code |
 | `tools/difftest_all.py` | Difference test of the rewritten routines against the original over all scenarios |
 | `tools/compare_runs.py` | Whole runs of the rewrite against the original, frame by frame (`--exe render720native --original-exe render720` for the game's build) |
 | `render720` | Run the game headless; write screenshots, a WAV of the audio (`--wav`), per-chip audio levels (`--audio-stats N`), the sound command log (`--sound-log FILE`) and per-frame RAM dumps (`--ram-dump FILE`) and palette dumps (`--pal-dump FILE`); `--hide-pf` / `--hide-alpha` leave layers out of the screenshots; poke RAM with `--poke FRAME:ADDR:VALUE` |
@@ -195,16 +202,17 @@ port/src/editor   level editor (SDL3 + Dear ImGui)
 
 ## Status
 
-* Main program rewritten and verified against the original; the game runs without its
-  translation. Sound program translated and verified. Video, POKEY, YM2151 and TMS5220 audio done.
+* Main and sound programs rewritten and verified against the original; the game and the editor
+  run without any translated code. A few paths that no test scenario reaches (for example
+  entering a new high score, the self test's fault reports and some music commands) follow the
+  original but have not been compared with it. Video, POKEY, YM2151 and TMS5220 audio done.
 * Level editor: all maps decode and re-encode exactly. An unedited mod plays pixel-identically to
   the original, and edits show up in the game.
 * Still open: the park palettes, which the colour capture does not reach, and the exact meaning of
   the zone switch modes.
 * Platforms: Windows is the tested platform for the full game. On Linux and macOS (x86-64 and ARM64)
   everything that does not need the ROMs is built and tested in CI, including the context switch
-  the translated game runs on (`port/src/native/coro_posix.cpp`); the full game has not been run
-  there yet.
+  the game runs on (`port/src/native/coro_posix.cpp`); the full game has not been run there yet.
 
 ## Credits
 
