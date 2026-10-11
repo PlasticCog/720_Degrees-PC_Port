@@ -10,6 +10,11 @@
 //   Library      Pieces: structures of the original maps (ramps, ledges, pits, walls,
 //                markings) to stamp; Tiles: single tiles by kind; All tiles: the raw banks
 //   Map, Stamp   left click: put the brush piece or tile there (shared blocks are copied)
+//   Map, Objects the sprite objects Skate City places (by town stage) and the screens' ones:
+//                left click selects, drag moves (moves the place it stands on), Delete removes;
+//                the Object panel changes the type and adds objects
+//   Library      Sprites: every sprite frame by category (skater, helmet, skateboard, chasers,
+//                vehicles, people, ...) and the object types with their animations
 //
 //   editor720 --capture-test    runs the palette capture headless and prints what it found
 //
@@ -26,6 +31,8 @@
 #include "inputscript.h"
 #include "romzip.h"
 #include "pieces.h"
+#include "sprites.h"
+#include <map>
 #include "../app/window_icon.h"
 #include <algorithm>
 #include <cmath>
@@ -194,6 +201,8 @@ struct Snapshot {
 	std::vector<uint8_t> alt;
 	std::vector<LevelBlock> blocks;
 	bool dirty;
+	std::vector<sprites::ObjectList> obj_lists;
+	std::map<int, std::pair<uint16_t, uint16_t>> def_moves;
 };
 
 struct Editor {
@@ -238,6 +247,28 @@ struct Editor {
 	SDL_Texture *lib_tile_tex = nullptr;          // atlas of lib_tiles, 32 per row
 	int brush_piece = -1;                         // index into pieces, -1: the brush is brush_tile
 	bool lib_common_only = true;
+
+	// sprites and map objects (sprites.h).  spr is decoded from the levels' ROM image (with the
+	// opened mod), spr_orig from the original; obj_lists / def_moves are the edited state.
+	sprites::SpriteSet spr, spr_orig;
+	bool spr_ok = false;
+	std::map<uint16_t, SDL_Texture *> frame_tex;
+	int spr_view = 0;                             // 0 frames, 1 object types
+	bool spr_show_unused = false;
+	int spr_sel_frame = -1, spr_sel_type = -1, spr_dir = 0;
+	bool show_objects = true;
+	int obj_stage = 1;
+	std::vector<sprites::ObjectList> obj_lists;
+	std::map<int, std::pair<uint16_t, uint16_t>> def_moves;   // definition -> new world x / y
+	int obj_sel_list = -1, obj_sel_entry = -1;    // selected editable object (list, entry)
+	sprites::MapObject obj_sel_view;              // selected object (any), for the panel
+	bool obj_sel_valid = false;
+	bool obj_dragging = false, obj_drag_moved = false, obj_placing = false;
+	double obj_grab_dx = 0, obj_grab_dy = 0;
+	int obj_new_type = 0, obj_new_target = 1;     // target 0: town list, 1: the stage's list
+	int lib_tab_force = -1;                       // --lib-tab: library tab to show (screenshots)
+	float view_zoom = 0;                          // --zoom / --center: map view to show (screenshots)
+	ImVec2 view_center = {0, 0};
 	SDL_Texture *picker_tex = nullptr;
 	int picker_key = -1;
 	std::vector<Snapshot> undo_stack, redo_stack;
@@ -257,6 +288,10 @@ struct Editor {
 		if (!roms.load(rom_dir, err)) return false;
 		if (!original.load(roms, err)) return false;
 		gfx.decode(roms);
+		{
+			std::string serr;
+			spr_ok = spr_orig.load(roms, serr);
+		}
 		for (int i = 0; i < 32; i++) random_var[i] = (int8_t)roms.main[RANDOM_VAR_TAB + i];
 		return open_levels("", err);
 	}
@@ -285,6 +320,18 @@ struct Editor {
 			lm.dirty = !same;
 		}
 		level_roms = std::move(r);
+		if (spr_ok)
+		{
+			std::string serr;
+			spr_ok = spr.load(*level_roms, serr);
+			obj_lists = spr.lists;
+			if (!obj_lists.empty() && !obj_lists[0].entries.empty()) obj_new_type = obj_lists[0].entries[0].first;
+		}
+		def_moves.clear();
+		obj_sel_list = obj_sel_entry = -1;
+		obj_sel_valid = obj_dragging = obj_placing = false;
+		for (auto &kv : frame_tex) if (kv.second) SDL_DestroyTexture(kv.second);
+		frame_tex.clear();
 		levels = std::move(ls);
 		mod_file = mod_path;
 		if (!mod_path.empty())
@@ -708,7 +755,7 @@ struct Editor {
 	void push_undo()
 	{
 		LevelMap &lm = map();
-		undo_stack.push_back({map_index, lm.cells, lm.alt, lm.blocks, lm.dirty});
+		undo_stack.push_back({map_index, lm.cells, lm.alt, lm.blocks, lm.dirty, obj_lists, def_moves});
 		if (undo_stack.size() > 60) undo_stack.erase(undo_stack.begin());
 		redo_stack.clear();
 		unsaved = true;
@@ -719,7 +766,11 @@ struct Editor {
 		Snapshot s = std::move(from.back());
 		from.pop_back();
 		LevelMap &lm = levels.maps[s.map];
-		to.push_back({s.map, lm.cells, lm.alt, lm.blocks, lm.dirty});
+		to.push_back({s.map, lm.cells, lm.alt, lm.blocks, lm.dirty, obj_lists, def_moves});
+		obj_lists = std::move(s.obj_lists);
+		def_moves = std::move(s.def_moves);
+		obj_sel_list = obj_sel_entry = -1;
+		obj_sel_valid = false;
 		lm.cells = std::move(s.cells);
 		lm.alt = std::move(s.alt);
 		lm.blocks = std::move(s.blocks);
@@ -774,7 +825,9 @@ struct Editor {
 	{
 		ModPatch p = levels.build_patch(roms, report);
 		if (report.find("ERROR") != std::string::npos) return false;
-		if (p.chunks.empty()) { report = "no level differs from the original"; return false; }
+		std::string oerr;
+		if (!add_object_patches(p, oerr)) { report = "objects: " + oerr; return false; }
+		if (p.chunks.empty()) { report = "no level or object differs from the original"; return false; }
 		std::error_code ec;
 		std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ec);
 		if (!p.save(path)) { report = "cannot write " + path; return false; }
@@ -827,6 +880,7 @@ struct Editor {
 		if (!std::filesystem::exists(exe, ec)) { status = "Play test: " + exe + " not found (build the game first)"; return; }
 		bool edited = false;
 		for (auto &m : levels.maps) edited |= m.dirty;
+		edited |= objects_differ();
 		const std::string path = pref_file("playtest.720mod");
 		std::string report;
 		if (edited && !save_mod(path, report)) { status = "Play test: " + report; return; }
@@ -956,6 +1010,21 @@ struct Editor {
 		ImGui::RadioButton("Paint blocks", &tool, 1);
 		ImGui::SameLine();
 		ImGui::RadioButton("Stamp", &tool, 2);
+		ImGui::SameLine();
+		ImGui::RadioButton("Objects", &tool, 3);
+		if (ImGui::IsItemHovered()) ImGui::SetTooltip("Select, move, remove and add the sprite objects the level places\n(Skate City by town stage; the attract screens).");
+		if (spr_ok && (lm.level == 0 || lm.level >= 5))
+		{
+			ImGui::SameLine();
+			ImGui::Checkbox("Show objects", &show_objects);
+			if (lm.level == 0)
+			{
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(60);
+				ImGui::SliderInt("Stage", &obj_stage, 1, 7);
+				if (ImGui::IsItemHovered()) ImGui::SetTooltip("Town stage (the cars and people change as the game goes on)");
+			}
+		}
 		if (ImGui::IsItemHovered()) ImGui::SetTooltip("Put the brush piece or tile (Library panel) on the map, tile by tile.\nBlocks other cells share are copied, so only the place you click changes.");
 		ImGui::SameLine();
 		ImGui::Checkbox("Grid", &show_grid);
@@ -975,6 +1044,12 @@ struct Editor {
 			zoom = std::clamp(std::min(avail.x / (lm.cols * 128.0f), avail.y / (lm.rows * 128.0f)), 0.05f, 2.0f);
 			pan = {0, 0};
 			fit_pending = false;
+		}
+		if (view_zoom > 0)
+		{
+			zoom = view_zoom;
+			pan = {avail.x / 2 - view_center.x * zoom, avail.y / 2 - view_center.y * zoom};
+			view_zoom = 0;
 		}
 		ImGui::InvisibleButton("map_canvas", avail, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight | ImGuiButtonFlags_MouseButtonMiddle);
 		const bool hovered = ImGui::IsItemHovered();
@@ -1018,10 +1093,26 @@ struct Editor {
 					dl->AddText({p0.x + 4, p0.y + 3}, IM_COL32(255, 255, 0, 255), t);
 				}
 			}
-		if (sel_cx >= 0 && sel_cx < lm.cols && sel_cy < lm.rows)
+		if (sel_cx >= 0 && sel_cx < lm.cols && sel_cy < lm.rows && tool != 3)
 		{
 			const ImVec2 p0 = {origin.x + pan.x + sel_cx * c2, origin.y + pan.y + sel_cy * c2};
 			dl->AddRect(p0, {p0.x + c2, p0.y + c2}, IM_COL32(255, 255, 0, 255), 0, 0, 2.0f);
+		}
+		std::vector<Shown> objs;
+		if (show_objects && spr_ok) objs = shown_objects();
+		for (const Shown &s : objs)
+		{
+			ImVec2 b0, b1;
+			object_box(s.o, origin.x + pan.x, origin.y + pan.y, b0, b1);
+			const sprites::Frame *f = s.o.frame >= 0 ? spr.frame((uint16_t)s.o.frame) : nullptr;
+			if (f && f->width() > 0)
+				dl->AddImage((ImTextureID)(intptr_t)frame_texture(f->id), b0, b1);
+			else
+				dl->AddRect(b0, b1, IM_COL32(255, 160, 0, 200));
+			const bool sel = obj_sel_valid && ((s.list >= 0 && s.list == obj_sel_list && s.entry == obj_sel_entry) ||
+				(s.list < 0 && s.o.source == obj_sel_view.source && s.o.index == obj_sel_view.index && s.o.stage == obj_sel_view.stage));
+			if (sel) dl->AddRect({b0.x - 1, b0.y - 1}, {b1.x + 1, b1.y + 1}, IM_COL32(255, 255, 0, 255), 0, 0, 2.0f);
+			else if (tool == 3) dl->AddRect(b0, b1, s.list >= 0 ? IM_COL32(0, 220, 255, 110) : IM_COL32(255, 255, 255, 60));
 		}
 		dl->PopClipRect();
 
@@ -1065,7 +1156,10 @@ struct Editor {
 		}
 		if (in_map && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && tool == 0)
 			edit_block = lm.cell(mcx, mcy);
-		if (in_map && !ImGui::IsMouseDown(ImGuiMouseButton_Right))
+		bool object_tip = false;
+		if (tool == 3 && hovered && spr_ok)
+			object_tip = map_objects_input(objs, origin.x + pan.x, origin.y + pan.y);
+		if (in_map && !object_tip && !ImGui::IsMouseDown(ImGuiMouseButton_Right))
 		{
 			const int bi = lm.cell(mcx, mcy);
 			ImGui::SetTooltip("cell %d,%d   block %d   zones %02X/%02X%s", mcx, mcy, bi,
@@ -1136,7 +1230,13 @@ struct Editor {
 	{
 		ImGui::SetNextWindowPos({x, y});
 		ImGui::SetNextWindowSize({w, h});
-		ImGui::Begin("Block editor", nullptr, PANEL);
+		ImGui::Begin(tool == 3 ? "Object###blockeditor" : "Block editor###blockeditor", nullptr, PANEL);
+		if (tool == 3)
+		{
+			ui_object_panel();
+			ImGui::End();
+			return;
+		}
 		LevelMap &lm = map();
 		if (edit_block < 0 || edit_block >= (int)lm.blocks.size())
 		{
@@ -1261,6 +1361,485 @@ struct Editor {
 		ImGui::End();
 	}
 
+	// ------------------------------------------------------------ sprites and map objects
+	SDL_Texture *frame_texture(uint16_t id)
+	{
+		auto it = frame_tex.find(id);
+		if (it != frame_tex.end()) return it->second;
+		SDL_Texture *t = nullptr;
+		if (const sprites::Frame *f = spr.frame(id))
+			if (f->width() > 0 && f->height() > 0)
+			{
+				const std::vector<uint32_t> px = spr.render(gfx, *f);
+				t = SDL_CreateTexture(ren, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, f->width(), f->height());
+				SDL_SetTextureScaleMode(t, SDL_SCALEMODE_NEAREST);
+				SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
+				SDL_UpdateTexture(t, nullptr, px.data(), f->width() * 4);
+			}
+		frame_tex[id] = t;
+		return t;
+	}
+
+	const char *type_name(int t) const
+	{
+		return t >= 0 && t < (int)spr.types.size() && !spr.types[t].name.empty() ? spr.types[t].name.c_str() : "?";
+	}
+
+	// a moved definition puts the object at its new place (same formula as the game's)
+	void apply_move(sprites::MapObject &o) const
+	{
+		auto it = def_moves.find(o.definition);
+		if (o.definition < 0 || it == def_moves.end()) return;
+		const sprites::ObjectType *t = o.type >= 0 && o.type < (int)spr.types.size() ? &spr.types[o.type] : nullptr;
+		o.map_x = 256.0 * o.cell_col + ((int)it->second.first + (t ? t->off_x : 0)) / 64.0;
+		o.map_y = 256.0 * (o.cell_row + 1) - ((int)it->second.second + (t ? t->off_y : 0)) / 64.0;
+	}
+
+	struct Shown { sprites::MapObject o; int list = -1, entry = -1; };
+
+	// the objects shown on the current map: Skate City's town list, the park gates and the
+	// selected stage's list and scripted skaters; the attract screens' objects
+	std::vector<Shown> shown_objects() const
+	{
+		std::vector<Shown> v;
+		const LevelMap &lm = levels.maps[map_index];
+		if (lm.level == 0)
+		{
+			for (int li = 0; li < (int)obj_lists.size(); li++)
+			{
+				const sprites::ObjectList &l = obj_lists[li];
+				if (l.source == sprites::ObjectSource::StageList && l.stage != obj_stage) continue;
+				const bool dyn = l.source == sprites::ObjectSource::TownList;
+				for (int i = 0; i < (int)l.entries.size(); i++)
+				{
+					Shown s;
+					s.o = spr.place(l.source, l.stage, i, l.entries[i].first, l.entries[i].second, dyn, 0);
+					apply_move(s.o);
+					s.list = li;
+					s.entry = i;
+					v.push_back(s);
+				}
+			}
+			for (const sprites::MapObject &o : spr.objects)
+				if (o.source == sprites::ObjectSource::FixedFour ||
+					(o.source == sprites::ObjectSource::StageSkaters && o.stage == obj_stage))
+				{
+					Shown s;
+					s.o = o;
+					apply_move(s.o);
+					v.push_back(s);
+				}
+		}
+		else
+			for (const sprites::MapObject &o : spr.objects)
+				if (o.source == sprites::ObjectSource::Screen && o.level == lm.level)
+				{
+					Shown s;
+					s.o = o;
+					v.push_back(s);
+				}
+		return v;
+	}
+
+	// screen box of an object's frame (or a small marker without one); (ox, oy) = map origin
+	void object_box(const sprites::MapObject &o, float ox, float oy, ImVec2 &b0, ImVec2 &b1) const
+	{
+		const float hx = ox + (float)o.map_x * zoom, hy = oy + (float)o.map_y * zoom;
+		const sprites::Frame *f = o.frame >= 0 ? spr.frame((uint16_t)o.frame) : nullptr;
+		if (f && f->width() > 0)
+		{
+			b0 = {hx + f->left * zoom, hy + f->top * zoom};
+			b1 = {hx + f->right * zoom, hy + f->bottom * zoom};
+		}
+		else
+		{
+			const float r = std::max(4.0f, 8 * zoom);
+			b0 = {hx - r, hy - r};
+			b1 = {hx + r, hy + r};
+		}
+	}
+
+	// how many shown objects stand on definition def
+	int definition_users(int def) const
+	{
+		int n = 0;
+		for (const sprites::ObjectList &l : obj_lists)
+		{
+			const bool dyn = l.source == sprites::ObjectSource::TownList;
+			for (size_t i = 0; i < l.entries.size(); i++)
+				n += spr.place(l.source, l.stage, (int)i, l.entries[i].first, l.entries[i].second, dyn, 0).definition == def;
+		}
+		for (const sprites::MapObject &o : spr.objects)
+			if (o.source == sprites::ObjectSource::FixedFour || o.source == sprites::ObjectSource::StageSkaters) n += o.definition == def;
+		return n;
+	}
+
+	// Objects tool on the map: select, drag (moves the definition inside its cell), Delete,
+	// place a new object; returns true when it showed a tooltip
+	bool map_objects_input(const std::vector<Shown> &objs, float ox, float oy)
+	{
+		ImGuiIO &io = ImGui::GetIO();
+		const double mx = (io.MousePos.x - ox) / zoom, my = (io.MousePos.y - oy) / zoom;
+		int hit = -1;
+		for (int k = (int)objs.size() - 1; k >= 0 && hit < 0; k--)
+		{
+			ImVec2 b0, b1;
+			object_box(objs[k].o, ox, oy, b0, b1);
+			if (io.MousePos.x >= b0.x && io.MousePos.x < b1.x && io.MousePos.y >= b0.y && io.MousePos.y < b1.y) hit = k;
+		}
+		if (obj_placing)
+		{
+			ImGui::SetTooltip("Click to place a %s here (Esc cancels)", type_name(obj_new_type));
+			if (ImGui::IsKeyPressed(ImGuiKey_Escape)) obj_placing = false;
+			if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) { add_object_at(mx, my); obj_placing = false; }
+			return true;
+		}
+		if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+		{
+			obj_sel_valid = hit >= 0;
+			obj_sel_list = obj_sel_entry = -1;
+			if (hit >= 0)
+			{
+				obj_sel_view = objs[hit].o;
+				obj_sel_list = objs[hit].list;
+				obj_sel_entry = objs[hit].entry;
+				if (obj_sel_list >= 0 && objs[hit].o.definition >= 0)
+				{
+					obj_grab_dx = mx - objs[hit].o.map_x;
+					obj_grab_dy = my - objs[hit].o.map_y;
+					obj_dragging = true;
+					obj_drag_moved = false;
+				}
+			}
+		}
+		if (obj_dragging && ImGui::IsMouseDown(ImGuiMouseButton_Left) && (io.MouseDelta.x != 0 || io.MouseDelta.y != 0))
+		{
+			if (!obj_drag_moved) { push_undo(); obj_drag_moved = true; }
+			const sprites::MapObject &o = obj_sel_view;
+			const sprites::ObjectType *t = o.type >= 0 && o.type < (int)spr.types.size() ? &spr.types[o.type] : nullptr;
+			const double hx = mx - obj_grab_dx, hy = my - obj_grab_dy;
+			const int nx = std::clamp((int)std::lround((hx - 256.0 * o.cell_col) * 64) - (t ? t->off_x : 0), 0, 0x3FFF);
+			const int ny = std::clamp((int)std::lround((256.0 * (o.cell_row + 1) - hy) * 64) - (t ? t->off_y : 0), 0, 0x3FFF);
+			def_moves[o.definition] = {(uint16_t)nx, (uint16_t)ny};
+			apply_move(obj_sel_view);
+			unsaved = true;
+		}
+		if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) obj_dragging = false;
+		if (obj_sel_list >= 0 && !ImGui::GetIO().WantTextInput && (ImGui::IsKeyPressed(ImGuiKey_Delete) || ImGui::IsKeyPressed(ImGuiKey_Backspace)))
+			remove_selected_object();
+		if (hit >= 0 && !obj_dragging)
+		{
+			const sprites::MapObject &o = objs[hit].o;
+			ImGui::SetTooltip("%s (type %d)\n%s%s%s\ncell %d,%d  place %d%s", type_name(o.type), o.type, sprites::source_name(o.source),
+				o.stage ? (" stage " + std::to_string(o.stage)).c_str() : "", objs[hit].list >= 0 ? "" : "  (fixed by the game)",
+				o.cell_col, o.cell_row, o.definition, o.note.empty() ? "" : ("\n" + o.note).c_str());
+			return true;
+		}
+		return false;
+	}
+
+	void remove_selected_object()
+	{
+		if (obj_sel_list < 0 || obj_sel_list >= (int)obj_lists.size()) return;
+		auto &e = obj_lists[obj_sel_list].entries;
+		if (obj_sel_entry < 0 || obj_sel_entry >= (int)e.size()) return;
+		push_undo();
+		e.erase(e.begin() + obj_sel_entry);
+		status = "Removed the object";
+		obj_sel_list = obj_sel_entry = -1;
+		obj_sel_valid = false;
+	}
+
+	// add an object of obj_new_type to the town list or the stage's list, standing on the
+	// place (definition) of the cell under (x, y) nearest to it
+	void add_object_at(double x, double y)
+	{
+		const LevelMap &lm = map();
+		if (lm.level != 0) { status = "Objects can be added in Skate City only"; return; }
+		const int col = (int)std::floor(x / 256), row = (int)std::floor(y / 256);
+		int li = -1;
+		for (int i = 0; i < (int)obj_lists.size(); i++)
+			if ((obj_new_target == 0 && obj_lists[i].source == sprites::ObjectSource::TownList) ||
+				(obj_new_target == 1 && obj_lists[i].source == sprites::ObjectSource::StageList && obj_lists[i].stage == obj_stage))
+				li = i;
+		if (li < 0) return;
+		const bool dyn = obj_lists[li].source == sprites::ObjectSource::TownList;
+		int first = -1, count = 0;
+		spr.cell_definitions(col, row, dyn, first, count);
+		if (count <= 0) { status = "This cell has no places for objects (the game's cells define where objects can stand)"; return; }
+		int best = -1;
+		double bd = 1e30;
+		for (int k = 0; k < count && k < 64; k++)
+		{
+			sprites::MapObject o = spr.place(obj_lists[li].source, obj_stage, 0, obj_new_type, sprites::SpriteSet::make_descriptor(col, row, k), dyn, 0);
+			apply_move(o);
+			const double d = (o.map_x - x) * (o.map_x - x) + (o.map_y - y) * (o.map_y - y);
+			if (o.definition >= 0 && d < bd) { bd = d; best = k; }
+		}
+		if (best < 0) return;
+		if (obj_lists[li].source == sprites::ObjectSource::TownList && (int)obj_lists[li].entries.size() >= obj_lists[li].capacity)
+		{
+			status = "The town list is full (" + std::to_string(obj_lists[li].capacity) + " objects); remove one first";
+			return;
+		}
+		push_undo();
+		obj_lists[li].entries.push_back({(uint16_t)obj_new_type, sprites::SpriteSet::make_descriptor(col, row, best)});
+		obj_sel_list = li;
+		obj_sel_entry = (int)obj_lists[li].entries.size() - 1;
+		obj_sel_view = spr.place(obj_lists[li].source, obj_lists[li].stage, obj_sel_entry, obj_new_type, obj_lists[li].entries.back().second, dyn, 0);
+		apply_move(obj_sel_view);
+		obj_sel_valid = true;
+		status = std::string("Added ") + type_name(obj_new_type) + " (cell " + std::to_string(col) + "," + std::to_string(row) + ", place " + std::to_string(best) + ")";
+	}
+
+	// combo of all object types; returns true when changed
+	bool type_combo(const char *label, int &t)
+	{
+		bool changed = false;
+		char cur[96];
+		snprintf(cur, sizeof(cur), "%d %s", t, type_name(t));
+		if (ImGui::BeginCombo(label, cur, ImGuiComboFlags_HeightLarge))
+		{
+			for (int i = 0; i < (int)spr.types.size(); i++)
+			{
+				char item[96];
+				snprintf(item, sizeof(item), "%d %s (%s)", i, type_name(i), sprites::category_name(spr.types[i].category));
+				if (ImGui::Selectable(item, i == t)) { t = i; changed = true; }
+			}
+			ImGui::EndCombo();
+		}
+		return changed;
+	}
+
+	void ui_object_panel()
+	{
+		if (!spr_ok) { ImGui::TextWrapped("The sprite data could not be decoded."); return; }
+		const LevelMap &lm = map();
+		if (lm.level != 0 && lm.level < 5)
+		{
+			ImGui::TextWrapped("The parks place no sprite objects; Skate City and the attract screens do.");
+			return;
+		}
+		if (obj_sel_valid)
+		{
+			sprites::MapObject &o = obj_sel_view;
+			if (obj_sel_list >= 0 && obj_sel_list < (int)obj_lists.size() && obj_sel_entry >= 0 && obj_sel_entry < (int)obj_lists[obj_sel_list].entries.size())
+			{
+				const sprites::ObjectList &l = obj_lists[obj_sel_list];
+				o = spr.place(l.source, l.stage, obj_sel_entry, l.entries[obj_sel_entry].first, l.entries[obj_sel_entry].second,
+					l.source == sprites::ObjectSource::TownList, 0);
+				apply_move(o);
+			}
+			ImGui::Text("%s", type_name(o.type));
+			ImGui::TextDisabled("%s%s, cell %d,%d, place %d", sprites::source_name(o.source),
+				o.stage ? (" stage " + std::to_string(o.stage)).c_str() : "", o.cell_col, o.cell_row, o.definition);
+			if (const sprites::Frame *f = o.frame >= 0 ? spr.frame((uint16_t)o.frame) : nullptr)
+				if (f->width() > 0)
+				{
+					const float s = std::min(3.0f, 120.0f / std::max(f->width(), f->height()));
+					ImGui::Image((ImTextureID)(intptr_t)frame_texture(f->id), {f->width() * s, f->height() * s});
+				}
+			if (obj_sel_list >= 0)
+			{
+				int t = o.type;
+				ImGui::SetNextItemWidth(-1);
+				if (type_combo("##seltype", t))
+				{
+					push_undo();
+					obj_lists[obj_sel_list].entries[obj_sel_entry].first = (uint16_t)t;
+				}
+				if (ImGui::Button("Remove")) remove_selected_object();
+				const int users = o.definition >= 0 ? definition_users(o.definition) : 0;
+				if (users > 1)
+					ImGui::TextColored({1, 0.7f, 0.2f, 1}, "%d objects stand on this place: moving it moves them all.", users);
+			}
+			else
+				ImGui::TextWrapped("Placed by the game itself (not editable here).");
+			if (!o.note.empty()) ImGui::TextWrapped("%s", o.note.c_str());
+			ImGui::Separator();
+		}
+		else
+			ImGui::TextWrapped("Click an object on the map to select it; drag it to move it.");
+		if (lm.level == 0)
+		{
+			ImGui::Text("Add an object");
+			ImGui::SetNextItemWidth(-1);
+			type_combo("##newtype", obj_new_type);
+			ImGui::RadioButton("town list", &obj_new_target, 0);
+			ImGui::SameLine();
+			ImGui::RadioButton(("stage " + std::to_string(obj_stage)).c_str(), &obj_new_target, 1);
+			if (ImGui::Button(obj_placing ? "Click on the map..." : "Place on the map")) obj_placing = true;
+			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+			ImGui::TextWrapped("Objects stand on the places the town's cells define; a new one takes the nearest place in "
+				"the cell you click, and moving an object moves its place.  The town list holds %d objects.",
+				obj_lists.empty() ? 0 : obj_lists[0].capacity);
+			ImGui::PopStyleColor();
+		}
+	}
+
+	// do the objects differ from the original ROM (lists or places)?
+	bool objects_differ() const
+	{
+		if (!spr_ok) return false;
+		if (obj_lists.size() != spr_orig.lists.size()) return true;
+		for (size_t i = 0; i < obj_lists.size(); i++)
+			if (obj_lists[i].entries != spr_orig.lists[i].entries) return true;
+		for (int d : referenced_definitions())
+		{
+			const auto a = current_def(d);
+			const sprites::Definition o = spr_orig.definition(d);
+			if (a.first != o.x || a.second != o.y) return true;
+		}
+		return false;
+	}
+
+	std::pair<uint16_t, uint16_t> current_def(int d) const
+	{
+		auto it = def_moves.find(d);
+		if (it != def_moves.end()) return it->second;
+		const sprites::Definition c = spr.definition(d);
+		return {c.x, c.y};
+	}
+
+	std::vector<int> referenced_definitions() const
+	{
+		std::vector<int> v;
+		for (const sprites::ObjectList &l : obj_lists)
+		{
+			const bool dyn = l.source == sprites::ObjectSource::TownList;
+			for (size_t i = 0; i < l.entries.size(); i++)
+			{
+				const int d = spr.place(l.source, l.stage, (int)i, l.entries[i].first, l.entries[i].second, dyn, 0).definition;
+				if (d >= 0) v.push_back(d);
+			}
+		}
+		for (const sprites::MapObject &o : spr.objects)
+			if (o.definition >= 0) v.push_back(o.definition);
+		for (const auto &kv : def_moves) v.push_back(kv.first);
+		std::sort(v.begin(), v.end());
+		v.erase(std::unique(v.begin(), v.end()), v.end());
+		return v;
+	}
+
+	// the object lists and moved places as patches (relative to the original ROM)
+	bool add_object_patches(ModPatch &p, std::string &err) const
+	{
+		if (!objects_differ()) return true;
+		std::vector<sprites::SpriteSet::Patch> out;
+		bool lists_changed = false;
+		for (size_t i = 0; i < obj_lists.size(); i++) lists_changed |= obj_lists[i].entries != spr_orig.lists[i].entries;
+		if (lists_changed && !spr_orig.encode_lists(obj_lists, out, err)) return false;
+		for (int d : referenced_definitions())
+		{
+			const auto a = current_def(d);
+			const sprites::Definition o = spr_orig.definition(d);
+			if (a.first != o.x || a.second != o.y)
+				for (auto &pt : spr_orig.encode_definition_position(d, a.first, a.second)) out.push_back(pt);
+		}
+		for (auto &pt : out) p.chunks.push_back({pt.offset, pt.data});
+		return true;
+	}
+
+	// Library tab: every sprite frame by category, and the object types with their animations
+	void ui_sprites()
+	{
+		if (!spr_ok) { ImGui::TextDisabled("The sprite data could not be decoded."); return; }
+		ImGui::RadioButton("Frames", &spr_view, 0);
+		ImGui::SameLine();
+		ImGui::RadioButton("Object types", &spr_view, 1);
+		if (spr_view == 0) { ImGui::SameLine(); ImGui::Checkbox("unused frames", &spr_show_unused); }
+		// preview
+		ImGui::BeginChild("sprpreview", {0, 150}, ImGuiChildFlags_Borders);
+		uint16_t show = 0xFFFF;
+		if (spr_view == 0 && spr_sel_frame >= 0)
+		{
+			show = (uint16_t)spr_sel_frame;
+			if (const sprites::Frame *f = spr.frame(show))
+			{
+				ImGui::Text("%s", f->name.c_str());
+				ImGui::TextDisabled("frame %04X, %d x %d, %s", f->id, f->width(), f->height(), sprites::category_name(f->category));
+			}
+		}
+		else if (spr_view == 1 && spr_sel_type >= 0 && spr_sel_type < (int)spr.types.size())
+		{
+			const sprites::ObjectType &t = spr.types[spr_sel_type];
+			ImGui::Text("%d %s", t.type, type_name(t.type));
+			std::vector<uint16_t> frames;
+			if (t.directional)
+			{
+				ImGui::SetNextItemWidth(160);
+				ImGui::SliderInt("direction", &spr_dir, 0, 15);
+				if (t.dir_list[spr_dir & 15]) frames = spr.list_frames(t.dir_list[spr_dir & 15]);
+				else if (t.dir_frame[spr_dir & 15] >= 0) frames = {(uint16_t)t.dir_frame[spr_dir & 15]};
+			}
+			else if (t.anim) frames = spr.list_frames(t.anim);
+			else if (t.first_frame >= 0) frames = {(uint16_t)t.first_frame};
+			if (!frames.empty())
+			{
+				const int rate = std::max(1, (int)t.rate ? (int)t.rate : 6);
+				show = frames[(size_t)(ImGui::GetTime() * 60.0 / rate) % frames.size()];
+				ImGui::TextDisabled("%zu frame%s, %s", frames.size(), frames.size() == 1 ? "" : "s",
+					t.rate ? ("every " + std::to_string(t.rate) + " frames").c_str() : "steps set by the game");
+			}
+		}
+		if (const sprites::Frame *f = show != 0xFFFF ? spr.frame(show) : nullptr)
+			if (f->width() > 0)
+			{
+				const float s = std::min(3.0f, 90.0f / std::max(f->width(), f->height()));
+				ImGui::Image((ImTextureID)(intptr_t)frame_texture(f->id), {f->width() * s, f->height() * s});
+			}
+		ImGui::EndChild();
+		ImGui::BeginChild("sprlist", {0, 0}, ImGuiChildFlags_Borders);
+		const float avail = ImGui::GetContentRegionAvail().x;
+		if (spr_view == 0)
+		{
+			for (int c = 0; c < (int)sprites::Category::Count; c++)
+			{
+				const bool unused_cat = c == (int)sprites::Category::Unused;
+				if (unused_cat && !spr_show_unused) continue;
+				std::vector<int> list;
+				for (int i = 0; i < (int)spr.frames.size(); i++)
+					if ((int)spr.frames[i].category == c && spr.frames[i].width() > 0) list.push_back(i);
+				if (list.empty()) continue;
+				char head[96];
+				snprintf(head, sizeof(head), "%s (%zu)###scat%d", sprites::category_name((sprites::Category)c), list.size(), c);
+				if (!ImGui::CollapsingHeader(head, c == 0 ? ImGuiTreeNodeFlags_DefaultOpen : 0)) continue;
+				float row = 0;
+				for (int i : list)
+				{
+					const sprites::Frame &f = spr.frames[i];
+					const float s = std::min(2.0f, 48.0f / std::max(f.width(), f.height()));
+					ImGui::PushID(i);
+					if (flow_image(frame_texture(f.id), {f.width() * s, f.height() * s}, {0, 0}, {1, 1}, avail, row, spr_sel_frame == f.id))
+						spr_sel_frame = f.id;
+					if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s\nframe %04X, %d x %d", f.name.c_str(), f.id, f.width(), f.height());
+					ImGui::PopID();
+				}
+			}
+		}
+		else
+		{
+			for (int c = 0; c < (int)sprites::Category::Count; c++)
+			{
+				std::vector<int> list;
+				for (int i = 0; i < (int)spr.types.size(); i++)
+					if ((int)spr.types[i].category == c) list.push_back(i);
+				if (list.empty()) continue;
+				char head[96];
+				snprintf(head, sizeof(head), "%s (%zu)###tcat%d", c == (int)sprites::Category::Unused ? "without frames (drawn by code or unused)" :
+					sprites::category_name((sprites::Category)c), list.size(), c);
+				if (!ImGui::CollapsingHeader(head, c == 0 ? ImGuiTreeNodeFlags_DefaultOpen : 0)) continue;
+				for (int i : list)
+				{
+					char item[96];
+					snprintf(item, sizeof(item), "%3d  %s", i, type_name(i));
+					if (ImGui::Selectable(item, spr_sel_type == i)) { spr_sel_type = i; spr_dir = 0; }
+				}
+			}
+		}
+		ImGui::EndChild();
+	}
+
 	void ui_library(float x, float y, float w, float h)
 	{
 		ImGui::SetNextWindowPos({x, y});
@@ -1278,9 +1857,11 @@ struct Editor {
 			ImGui::Text("Brush: tile %04X", brush_tile);
 		if (ImGui::BeginTabBar("library"))
 		{
-			if (ImGui::BeginTabItem("Pieces")) { ui_pieces(); ImGui::EndTabItem(); }
-			if (ImGui::BeginTabItem("Tiles")) { ui_lib_tiles(); ImGui::EndTabItem(); }
-			if (ImGui::BeginTabItem("All tiles")) { ui_raw_tiles(); ImGui::EndTabItem(); }
+			auto tab = [&](int i) { return lib_tab_force == i ? ImGuiTabItemFlags_SetSelected : 0; };
+			if (ImGui::BeginTabItem("Pieces", nullptr, tab(0))) { ui_pieces(); ImGui::EndTabItem(); }
+			if (ImGui::BeginTabItem("Tiles", nullptr, tab(1))) { ui_lib_tiles(); ImGui::EndTabItem(); }
+			if (ImGui::BeginTabItem("All tiles", nullptr, tab(2))) { ui_raw_tiles(); ImGui::EndTabItem(); }
+			if (ImGui::BeginTabItem("Sprites", nullptr, tab(3))) { ui_sprites(); ImGui::EndTabItem(); }
 			ImGui::EndTabBar();
 		}
 		ImGui::End();
@@ -1399,7 +1980,9 @@ int main(int argc, char **argv)
 {
 	std::string rom_dir, shot, open_mod;
 	bool test = false;
-	int shot_map = 0, shot_block = -1;
+	int shot_map = 0, shot_block = -1, shot_tool = -1, shot_tab = -1, shot_spr_view = -1, shot_spr_sel = -1, shot_stage = -1;
+	float shot_zoom = 0, shot_cx = 0, shot_cy = 0;
+	int shot_obj_list = -1, shot_obj_entry = -1;
 	for (int i = 1; i < argc; i++)
 	{
 		const std::string a = argv[i];
@@ -1410,6 +1993,16 @@ int main(int argc, char **argv)
 		else if (a == "--map" && i + 1 < argc) shot_map = atoi(argv[++i]);
 		else if (a == "--block" && i + 1 < argc) shot_block = atoi(argv[++i]);
 		else if (a == "--open" && i + 1 < argc) open_mod = argv[++i];
+		// screenshot setup: map tool, library tab (0-3), sprite view (0 frames / 1 types) and
+		// selection (frame id / type), town stage, map zoom
+		else if (a == "--tool" && i + 1 < argc) shot_tool = atoi(argv[++i]);
+		else if (a == "--lib-tab" && i + 1 < argc) shot_tab = atoi(argv[++i]);
+		else if (a == "--spr-view" && i + 1 < argc) shot_spr_view = atoi(argv[++i]);
+		else if (a == "--spr-sel" && i + 1 < argc) shot_spr_sel = (int)strtol(argv[++i], nullptr, 0);
+		else if (a == "--stage" && i + 1 < argc) shot_stage = atoi(argv[++i]);
+		else if (a == "--zoom" && i + 1 < argc) shot_zoom = (float)atof(argv[++i]);
+		else if (a == "--select-object" && i + 2 < argc) { shot_obj_list = atoi(argv[++i]); shot_obj_entry = atoi(argv[++i]); }
+		else if (a == "--center" && i + 2 < argc) { shot_cx = (float)atof(argv[++i]); shot_cy = (float)atof(argv[++i]); }
 	}
 	if (test) return capture_test(find_rom_dir(rom_dir));
 
@@ -1445,6 +2038,19 @@ int main(int argc, char **argv)
 		ed.map_index = std::clamp(shot_map, 0, (int)ed.levels.maps.size() - 1);
 		ed.edit_block = shot_block;
 		ed.show_attr = true;
+		if (shot_tool >= 0) ed.tool = shot_tool;
+		ed.lib_tab_force = shot_tab;
+		if (shot_spr_view >= 0) ed.spr_view = shot_spr_view;
+		if (shot_spr_sel >= 0) (ed.spr_view == 1 ? ed.spr_sel_type : ed.spr_sel_frame) = shot_spr_sel;
+		if (shot_stage >= 1) ed.obj_stage = shot_stage;
+		if (shot_obj_list >= 0 && shot_obj_list < (int)ed.obj_lists.size() && shot_obj_entry >= 0 &&
+			shot_obj_entry < (int)ed.obj_lists[shot_obj_list].entries.size())
+		{
+			ed.obj_sel_list = shot_obj_list;
+			ed.obj_sel_entry = shot_obj_entry;
+			ed.obj_sel_valid = true;
+		}
+		if (shot_zoom > 0) { ed.view_zoom = shot_zoom; ed.view_center = {shot_cx, shot_cy}; }
 	}
 
 	if (!SDL_CreateWindowAndRenderer("720 Degrees - Level Editor", 1600, 960,
@@ -1506,6 +2112,7 @@ int main(int argc, char **argv)
 	ed.invalidate_all();
 	if (ed.picker_tex) SDL_DestroyTexture(ed.picker_tex);
 	ed.drop_library_textures();
+	for (auto &kv : ed.frame_tex) if (kv.second) SDL_DestroyTexture(kv.second);
 	ImGui_ImplSDLRenderer3_Shutdown();
 	ImGui_ImplSDL3_Shutdown();
 	ImGui::DestroyContext();

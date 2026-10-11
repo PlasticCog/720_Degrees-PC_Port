@@ -251,8 +251,10 @@ uint16_t Board::main_read16(uint16_t a, uint16_t mask)
 	if (a < 0x1800) return 0xffff;          // ADC (unused by 720) and write-only registers
 	if (a < 0x1c00)
 	{
-		return 0x7f0f | (m_mainlatch_pending ? 0x10 : 0) | (m_soundlatch_pending ? 0x20 : 0) |
+		const uint16_t v = 0x7f0f | (m_mainlatch_pending ? 0x10 : 0) | (m_soundlatch_pending ? 0x20 : 0) |
 			(input.button2 ? 0 : 0x40) | (input.button1 ? 0 : 0x80) | (input.test ? 0 : 0x8000);
+		if (on_in0_read) on_in0_read(v);
+		return v;
 	}
 	if (a < 0x2000)
 	{
@@ -292,7 +294,12 @@ void Board::main_write16(uint16_t a, uint16_t data, uint16_t mask)
 		if (mask & 0xff00) m_ram[a + 1] = data >> 8;
 		return;
 	}
-	if (a < 0x1400) { combine(m_palette[(a >> 1) & 0xff]); return; }
+	if (a < 0x1400)
+	{
+		combine(m_palette[(a >> 1) & 0xff]);
+		if (on_palette_write) on_palette_write(a, data, mask);
+		return;
+	}
 	if (a < 0x1480) { m_bank_entry[(a >> 1) & 1] = bank_entry_from_data(data); return; }
 	if (a < 0x1580) return;     // ADC start / unmapped
 	if (a < 0x15a0) { if (lo) { m_p2portrd = false; update_interrupts(); } return; }
@@ -305,6 +312,7 @@ void Board::main_write16(uint16_t a, uint16_t data, uint16_t mask)
 			{
 				m_sound_reset = rst;
 				m_link.sound_set_reset(rst);
+				if (!rst) m_sound_irq_restart = true;      // the 6502's timer restarts with it (see scheduler.h)
 				if (rst) m_chips->reset();
 			}
 		}
@@ -375,6 +383,14 @@ uint8_t Board::leta_r(int offset)
 
 uint8_t Board::sound_read(uint16_t a)
 {
+	if (on_sound_cpu_io_read && (a & 0xd87f) >= 0x1800 && (a & 0xd87f) < 0x1880 && a < 0x4000)
+	{
+		auto hook = std::move(on_sound_cpu_io_read);       // read once without the hook, then report
+		const uint8_t v = sound_read(a);
+		on_sound_cpu_io_read = std::move(hook);
+		on_sound_cpu_io_read(a, v);
+		return v;
+	}
 	if (a >= 0x4000) return m_roms.sound[a];
 	if ((a & 0xdfff) < 0x1000) return m_sram[a & 0xfff];
 	const uint16_t c = a & 0xd9ff;
@@ -409,6 +425,7 @@ void Board::sound_write(uint16_t a, uint8_t data)
 	if ((a & 0xdfff) < 0x1000) { m_sram[a & 0xfff] = data; return; }
 	const uint16_t c = a & 0xd9ff;
 	if (c >= 0x1000 && c < 0x1200) { m_eeprom[a & 0x1ff] = data; return; }
+	if (on_sound_cpu_io_write && (a & 0x1800) == 0x1800) on_sound_cpu_io_write(a, data);
 	if ((a & 0xd87f) >= 0x1800 && (a & 0xd87f) < 0x1880)
 	{
 		const int o = a & 0x7f;
@@ -461,6 +478,9 @@ void Board::begin_line(int line)
 	if (line == SCREEN_H)
 	{
 		update_partial(SCREEN_H - 1);
+		// the finished frame is shown with the colours of this moment: palette writes during the
+		// vertical blank only show in the next frame, as on the monitor (and in MAME)
+		m_shown_palette = m_palette;
 		m_video_int = (m_interrupt_enable & 8) != 0;
 		update_interrupts();
 		frame_number++;
@@ -469,12 +489,16 @@ void Board::begin_line(int line)
 
 uint32_t Board::palette_rgb(int index) const
 {
+	return raw_rgb(m_palette[index & 0xff]);
+}
+
+uint32_t Board::raw_rgb(uint16_t raw)
+{
 	static const int ZB = 115, Z3 = 78, Z2 = 37, Z1 = 17, Z0 = 9;
 	static const int intensity_table[16] = {
 		0, ZB + Z0, ZB + Z1, ZB + Z1 + Z0, ZB + Z2, ZB + Z2 + Z0, ZB + Z2 + Z1, ZB + Z2 + Z1 + Z0,
 		ZB + Z3, ZB + Z3 + Z0, ZB + Z3 + Z1, ZB + Z3 + Z1 + Z0, ZB + Z3 + Z2, ZB + Z3 + Z2 + Z0, ZB + Z3 + Z2 + Z1, ZB + Z3 + Z2 + Z1 + Z0 };
 	static const int color_table[16] = { 0x0, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xa, 0xb, 0xc, 0xd, 0xe, 0xe, 0xf, 0xf };
-	const uint16_t raw = m_palette[index & 0xff];
 	const int i = intensity_table[raw & 15];
 	const int r = (color_table[(raw >> 12) & 15] * i) >> 4;
 	const int g = (color_table[(raw >> 8) & 15] * i) >> 4;
@@ -485,7 +509,7 @@ uint32_t Board::palette_rgb(int index) const
 void Board::frame_rgb(uint32_t *out) const
 {
 	uint32_t pal[256];
-	for (int i = 0; i < 256; i++) pal[i] = palette_rgb(i);
+	for (int i = 0; i < 256; i++) pal[i] = raw_rgb(m_shown_palette[i]);
 	for (int i = 0; i < SCREEN_W * SCREEN_H; i++) out[i] = pal[m_frame[i] & 0xff];
 }
 
