@@ -456,46 +456,73 @@ uint16_t park_level(const Args &)
 // 0x2000) with the large (F:8B52) or small (F:8C12) font.  An entry is a screen offset and
 // the characters; the last one has bit 7 set.  Bit 7 of the string number draws it with
 // code 0x23 instead (erasing).  R1-R3 are preserved (register-save helper F144).
-void draw_string(uint16_t put_char)
+void draw_string(uint16_t base, uint16_t put_char)
 {
-	Clock k;
-	k.save((uint16_t)(put_char == 0x8B52 ? 0x8AB6 : 0x8B04), 3);
-	k.at(0x8ABA); push(peek(0x01D2)); k.add(36);
-	k.at(0x8ABE); poke(0x01D2, 0x2000); k.add(33);
-	k.at(0x8AC4); poke(0x1400, peek(0x01D2)); k.add(39);
-	const uint16_t base = put_char == 0x8B52 ? 0x8ABA : 0x8B08;   // the two copies of the code
-	k.call(0x8068, (uint16_t)(base + 0x14));           // select_video_bank0 (R0 kept)
+	c_save(2, (uint16_t)(base + 4));
+	push_w(0x01D2, (uint16_t)(base + 8));              // bank A, put back at the end
+	set_w(0x01D2, 0x2000, (uint16_t)(base + 0x0E));
+	copy_w(0x01D2, 0x1400, (uint16_t)(base + 0x14));
+	jsr((uint16_t)(base + 0x18), 0x8068);              // select_video_bank0
 	T.r[3] = T.r[0];
-	T.r[0] = (uint16_t)((T.r[0] << 1) & 0x00FF);
-	k.add(12, 12, 18);
-	k.at((uint16_t)(base + 0x1C)); T.r[0] = (uint16_t)(T.r[0] + peek(0x0184)); k.add(24);
-	k.at((uint16_t)(base + 0x20)); T.r[1] = peek(T.r[0]); k.add(18);
-	k.at((uint16_t)(base + 0x22)); T.r[2] = peek(T.r[1]); T.r[1] = (uint16_t)(T.r[1] + 2); k.add(18);
-	T.r[2] = (uint16_t)(T.r[2] + 0x2000); k.add(18);
-	k.at((uint16_t)(base + 0x28)); poke(0x0186, T.r[2]); k.add(27);
-	for (;;)
+	fl::mov(T.r[3]);
+	tick((uint16_t)(base + 0x1A), 12);
+	T.r[0] = fl::asl(T.r[0]);
+	tick((uint16_t)(base + 0x1C), 12);
+	T.r[0] = fl::logic((uint16_t)(T.r[0] & 0x00FF));
+	tick((uint16_t)(base + 0x20), 18);
+	T.r[0] = fl::add(T.r[0], peek(0x0184));            // the string table
+	tick((uint16_t)(base + 0x24), 24);
+	T.r[1] = peek(T.r[0]);
+	fl::mov(T.r[1]);
+	tick((uint16_t)(base + 0x26), 18);
+	T.r[2] = peek(T.r[1]);                             // its screen offset
+	fl::mov(T.r[2]);
+	T.r[1] = (uint16_t)(T.r[1] + 2);
+	tick((uint16_t)(base + 0x28), 18);
+	T.r[2] = fl::add(T.r[2], 0x2000);
+	tick((uint16_t)(base + 0x2C), 18);
+	poke(0x0186, T.r[2]);
+	fl::mov(T.r[2]);
+	tick((uint16_t)(base + 0x30), 27);
+	for (;;)                                           // the characters (the last has bit 7)
 	{
-		k.at((uint16_t)(base + 0x2C)); T.r[0] = sext8(peekb(T.r[1])); k.add(18, 12, 12);
-		if (T.r[3] & 0x0080)
+		T.r[0] = sext8(peekb(T.r[1]));
+		fl::movb((uint8_t)T.r[0]);
+		tick((uint16_t)(base + 0x32), 18);
+		fl::tstb((uint8_t)T.r[3]);
+		tick((uint16_t)(base + 0x34), 12);
+		if (!(T.r[3] & 0x80))
+			tick((uint16_t)(base + 0x3A), 12);         // BPL
+		else
 		{
+			tick((uint16_t)(base + 0x36), 12);         // erasing: code 0x23
 			T.r[0] = 0x0023;
-			k.add(18);
+			fl::mov(T.r[0]);
+			tick((uint16_t)(base + 0x3A), 18);
 		}
-		k.call(put_char, (uint16_t)(base + 0x3A));
-		k.at((uint16_t)(base + 0x3A));
+		jsr((uint16_t)(base + 0x3E), put_char);
 		const uint8_t c = peekb(T.r[1]);
-		T.r[1] = (uint16_t)(T.r[1] + 1);
-		k.add(18, 12);
-		if (c & 0x80) break;
+		fl::tstb(c);
+		T.r[1]++;
+		tick((uint16_t)(base + 0x40), 18);
+		if (c & 0x80)
+		{
+			tick((uint16_t)(base + 0x42), 12);         // BPL not taken
+			break;
+		}
+		tick((uint16_t)(base + 0x30), 12);
 	}
-	k.at((uint16_t)(base + 0x3E)); poke(0x01D2, pop()); k.add(33);
-	k.at((uint16_t)(base + 0x42)); poke(0x1400, peek(0x01D2)); k.add(39);
-	k.restore(3);
-	f_nzvc(nzw(T.r[1]));                               // C clear from the last TSTB
-	k.leave();
+	{
+		const uint16_t v = pop();
+		fl::mov(v);
+		poke(0x01D2, v);
+	}
+	tick((uint16_t)(base + 0x46), 33);
+	copy_w(0x01D2, 0x1400, (uint16_t)(base + 0x4C));
+	c_restore(2);
 }
-void draw_string_large() { draw_string(0x8B52); }
-void draw_string_small() { draw_string(0x8C12); }
+void draw_string_large() { draw_string(0x8AB6, 0x8B52); }
+void draw_string_small() { draw_string(0x8B04, 0x8C12); }
 
 // F:9F8A: from kick phase 4 the speed comes back from 0x02E8; then the kick state is reset,
 // phase 0x01EB = 8, 0x0330 = 4, and the skater takes off (F:9FB4)
@@ -1583,71 +1610,100 @@ void update_push()
 // the text pointer, banks and video window are put back
 void irq_vblank_play()
 {
-	Clock k;
-	for (int i = 0; i <= 5; i++) push(T.r[i]);
-	k.add(24, 24, 24, 24, 24, 24);
-	k.at(0x89A8); push(peek(0x01D0)); k.add(36);
-	k.at(0x89AC); push(peek(0x01D2)); k.add(36);
-	k.at(0x89B0); push(peek(0x01D4)); k.add(36);
-	k.at(0x89B4); push(peek(0x0186)); k.add(36);
-	k.call(0xDBE2, 0x89BC);                            // step_palette_fade
-	k.call(0xDDEC, 0x89C0);                            // run_palette_job
-	sel_ab(k, 0x89C0, 0x1800, 0x1C00);
-	k.call(0x7D82, 0x89DC);                            // blink_screen7_palette
-	k.call(0x917C, 0x89E0);                            // feed_watchdog
-	k.at(0x89E0); pokeb(0x0192, (uint8_t)(peekb(0x0192) + 1)); k.add(27);
-	k.at(0x89E4); poke(0x15E0, 0); k.add(27);
-	k.at(0x89E8); poke(0x15C0, 0); k.add(27);
-	k.at(0x89EC); pokeb(0x0191, 0); k.add(27);
-	k.at(0x89F0); poke(0x01C4, (uint16_t)(peek(0x01C4) + 1)); k.add(27);
-	k.at(0x89F4);
-	const bool stopped = peek(0x0F18) == 0xFFFF;
-	k.add(30, 12);
-	if (!stopped)
+	for (int i = 0; i <= 5; i++)
 	{
-		k.at(0x89FC); poke(0x0F18, (uint16_t)(peek(0x0F18) - 1)); k.add(27);
+		push(T.r[i]);
+		fl::mov(T.r[i]);
+		tick((uint16_t)(0x899E + 2 * i), 24);
 	}
-	sel_a(k, 0x8A00, 0x1800);
-	k.call(0x5D86, 0x8A10);                            // step_sound_level
-	sel_ab(k, 0x8A10, 0x3800, 0x3C00);
-	k.call(0x7A3A, 0x8A2C);
-	k.call(0x80A4, 0x8A30);                            // read_input_edges
-	k.call(0x8036, 0x8A34);                            // load_scroll_registers
-	k.at(0x8A34);
-	const bool running = (int16_t)peek(0x0F22) > 0;
-	k.add(24, 12);
-	if (running)
+	push_w(0x01D0, 0x89AC);                            // kept for the end
+	push_w(0x01D2, 0x89B0);
+	push_w(0x01D4, 0x89B4);
+	push_w(0x0186, 0x89B8);
+	jsr(0x89BC, 0xDBE2);                               // step_palette_fade
+	jsr(0x89C0, 0xDDEC);                               // run_palette_job
+	bank_a(0x89C0, 0x1800);
+	bank_b(0x89CC, 0x1C00);
+	jsr(0x89DC, 0x7D82);
+	jsr(0x89E0, 0x917C);                               // feed_watchdog
+	pokeb(0x0192, fl::incb(peekb(0x0192)));            // the frame counters and acknowledges
+	tick(0x89E4, 27);
+	clr_w(0x15E0, 0x89E8);
+	clr_w(0x15C0, 0x89EC);
+	clr_b(0x0191, 0x89F0);
+	poke(0x01C4, fl::inc(peek(0x01C4)));
+	tick(0x89F4, 27);
 	{
-		k.at(0x8A3A);
-		const bool held = peek(0x0180) != 0;
-		k.add(24, 12);
-		if (!held)
+		const uint16_t left = peek(0x0F18);            // the timer 0x0F18 (-1: off)
+		fl::cmp(left, 0xFFFF);
+		tick(0x89FA, 30);
+		if (left == 0xFFFF)
+			tick(0x8A00, 12);                          // BEQ
+		else
 		{
-			k.at(0x8A40); poke(0x0F22, (uint16_t)(peek(0x0F22) - 1)); k.add(27);
+			tick(0x89FC, 12);
+			poke(0x0F18, fl::dec(peek(0x0F18)));
+			tick(0x8A00, 27);
 		}
 	}
-	k.at(0x8A44);
-	const bool quiet = peekb(0x01A4) != 0;
-	k.add(24, 12);
-	if (!quiet)
+	bank_a(0x8A00, 0x1800);
+	jsr(0x8A10, 0x5D86);
+	bank_a(0x8A10, 0x3800);
+	bank_b(0x8A1C, 0x3C00);
+	jsr(0x8A2C, 0x7A3A);
+	jsr(0x8A30, 0x80A4);                               // read_input_edges
+	jsr(0x8A34, 0x8036);                               // load_scroll_registers
 	{
-		sel_ab(k, 0x8A4A, 0x3800, 0x3C00);
-		k.call(0x4314, 0x8A66);                        // send_queued_sound
+		const uint16_t bee = peek(0x0F22);             // the bee timer
+		fl::tst(bee);
+		tick(0x8A38, 24);
+		if ((int16_t)bee <= 0)
+			tick(0x8A44, 12);                          // BLE
+		else
+		{
+			tick(0x8A3A, 12);
+			const uint16_t frozen = peek(0x0180);
+			fl::tst(frozen);
+			tick(0x8A3E, 24);
+			if (frozen)
+				tick(0x8A44, 12);                      // BNE
+			else
+			{
+				tick(0x8A40, 12);
+				poke(0x0F22, fl::dec(peek(0x0F22)));
+				tick(0x8A44, 27);
+			}
+		}
 	}
-	const uint16_t sp = T.r[6];
-	k.at(0x8A66); poke(0x0186, rw(sp)); k.add(33);
-	k.at(0x8A6A); poke(0x01D2, rw((uint16_t)(sp + 4))); k.add(42);
-	k.at(0x8A70); poke(0x1400, peek(0x01D2)); k.add(39);
-	k.at(0x8A76); poke(0x01D4, rw((uint16_t)(sp + 2))); k.add(42);
-	k.at(0x8A7C); poke(0x1402, peek(0x01D4)); k.add(39);
-	k.at(0x8A82); poke(0x01D0, rw((uint16_t)(sp + 6))); k.add(42);
-	k.call(0x8096, 0x8A8C);                            // reselect_video_bank
-	T.r[6] = (uint16_t)(T.r[6] + 8); k.add(18);
+	{
+		const uint8_t busy = peekb(0x01A4);            // the sound queue
+		fl::tstb(busy);
+		tick(0x8A48, 24);
+		if (busy)
+			tick(0x8A66, 12);                          // BNE
+		else
+		{
+			tick(0x8A4A, 12);
+			bank_a(0x8A4A, 0x3800);
+			bank_b(0x8A56, 0x3C00);
+			jsr(0x8A66, 0x4314);
+		}
+	}
+	copy_sp(0, 0x0186, 0x8A6A);                        // put back
+	copy_sp(4, 0x01D2, 0x8A70);
+	copy_w(0x01D2, 0x1400, 0x8A76);
+	copy_sp(2, 0x01D4, 0x8A7C);
+	copy_w(0x01D4, 0x1402, 0x8A82);
+	copy_sp(6, 0x01D0, 0x8A88);
+	jsr(0x8A8C, 0x8096);                               // reselect_video_bank
+	T.r[6] = fl::add(T.r[6], 0x0008);
+	tick(0x8A90, 18);
 	for (int i = 5; i >= 0; i--)
 	{
-		T.r[i] = pop(); k.add(18);
+		T.r[i] = pop();
+		fl::mov(T.r[i]);
+		tick((uint16_t)(0x8A92 + 2 * (5 - i)), 18);
 	}
-	k.flush();                                         // the RTI (in the table)
 }
 
 // F:8512 (assembly; from the attract mode vertical blank F:84D4): the frame's work outside
@@ -5342,23 +5398,26 @@ void start_view()
 // F:891E (interrupt; not reached by the tests): acknowledge the sound CPU's interrupt
 void irq_sound_ack()
 {
-	Clock k;
-	k.at(0x891E); poke(0x1580, 0); k.add(27);
-	k.flush();                                         // the RTI (in the table)
+	clr_w(0x1580, 0x8922);                             // the RTI is in the table
 }
 
 // F:8A9E (assembly; not reached by the tests): string 0x19 and the one for the sound CPU's
 // fault 0x01A2 (0x19 + code)
 void show_sound_fault()
 {
-	Clock k;
-	T.r[0] = 0x0019; k.add(18);
-	k.call(0x8AB6, 0x8AA6);                     // draw_string_large
-	T.r[0] = 0; k.add(12);
-	k.at(0x8AA8); T.r[0] = peekb(0x01A2); k.add(24);
-	T.r[0] = fl::add(T.r[0], 0x0019); k.add(18);
-	k.call(0x8AB6, 0x8AB4);
-	k.leave();
+	T.r[0] = 0x0019;
+	fl::mov(T.r[0]);
+	tick(0x8AA2, 18);
+	jsr(0x8AA6, 0x8AB6);                               // draw_string_large(0x19)
+	T.r[0] = 0;
+	fl::clr();
+	tick(0x8AA8, 12);
+	T.r[0] = fl::logicb(peekb(0x01A2));
+	tick(0x8AAC, 24);
+	T.r[0] = fl::add(T.r[0], 0x0019);
+	tick(0x8AB0, 18);
+	jsr(0x8AB4, 0x8AB6);                               // draw_string_large(0x19 + fault)
+	rts();
 }
 
 // F:9182 (assembly; not reached by the tests): sounds 0x53, 0x42, 0x70 and 0x76
