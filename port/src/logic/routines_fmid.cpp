@@ -995,9 +995,9 @@ void frame_velocity(uint16_t pc, int k)
 	T.r[6] = (uint16_t)(T.r[6] + 2);
 	pokeb((uint16_t)(T.r[6] + 2), b);
 	tick((uint16_t)(pc + 0x0C), 36);                   // MOVB (SP)+,2(SP)
-	poke((uint16_t)(T.r[6] + 2), (uint16_t)(peek((uint16_t)(T.r[6] + 2)) << 1));
+	poke((uint16_t)(T.r[6] + 2), fl::asl(peek((uint16_t)(T.r[6] + 2))));
 	tick((uint16_t)(pc + 0x10), 30);
-	poke((uint16_t)(T.r[6] + 2), (uint16_t)(peek((uint16_t)(T.r[6] + 2)) << 1));
+	poke((uint16_t)(T.r[6] + 2), fl::asl(peek((uint16_t)(T.r[6] + 2))));
 	tick((uint16_t)(pc + 0x14), 30);
 	T.r[k] = peek((uint16_t)(T.r[6] + 2));
 	tick((uint16_t)(pc + 0x18), 27);
@@ -1346,6 +1346,7 @@ uint16_t show_object(const Args &)
 				if (top)
 				{
 					pokeb(0x0994, (uint8_t)T.r[0]);
+					fl::movb((uint8_t)T.r[0]);
 					tick(0xB504, 27);
 					tick(0xB50A, 12);                  // BR
 					break;
@@ -1977,10 +1978,10 @@ uint16_t map_object_position(const Args &)
 	tick(0xBF86, 12);
 	for (uint16_t pc = 0xBF88; pc <= 0xBF8E; pc += 2)
 	{
-		T.r[2] = asr(T.r[2], 1);
+		T.r[2] = fl::asr(T.r[2]);
 		tick(pc, 12);                                  // ASR R2
 	}
-	T.r[2] = (uint16_t)(T.r[2] + T.r[1]);
+	T.r[2] = fl::add(T.r[2], T.r[1]);
 	tick(0xBF90, 12);
 	T.r[2] = fl::logic((uint16_t)(T.r[2] & 0x0003));
 	tick(0xBF94, 18);
@@ -2265,7 +2266,7 @@ uint16_t turn_map_object(const Args &)
 	push(T.r[4]);
 	fl::mov(T.r[4]);
 	tick(0xC152, 24);
-	poke(T.r[6], (uint16_t)(peek(T.r[6]) << 1));
+	poke(T.r[6], fl::asl(peek(T.r[6])));
 	tick(0xC154, 21);
 	T.r[1] = 0;
 	fl::clr();
@@ -2675,10 +2676,10 @@ uint16_t turn_map_object(const Args &)
 			tick(0xC2EC, 12);
 			for (uint16_t pc = 0xC2EE; pc <= 0xC2F2; pc += 2)
 			{
-				T.r[5] = (uint16_t)(T.r[5] << 1);
+				T.r[5] = fl::asl(T.r[5]);
 				tick(pc, 12);                          // ASL R5
 			}
-			T.r[5] = (uint16_t)(T.r[5] + T.r[4]);
+			T.r[5] = fl::add(T.r[5], T.r[4]);
 			tick(0xC2F4, 12);
 			T.r[2] = T.r[5];
 			fl::mov(T.r[2]);
@@ -2703,10 +2704,10 @@ uint16_t turn_map_object(const Args &)
 				tick(0xC312, 12);                      // BNE
 				for (uint16_t pc = 0xC314; pc <= 0xC318; pc += 2)
 				{
-					T.r[1] = (uint16_t)(T.r[1] << 1);
+					T.r[1] = fl::asl(T.r[1]);
 					tick(pc, 12);                      // ASL R1
 				}
-				T.r[1] = (uint16_t)(T.r[1] + T.r[4]);
+				T.r[1] = fl::add(T.r[1], T.r[4]);
 				tick(0xC31A, 12);
 				pokeb(peek(sp_at(4)), peekb((uint16_t)(0x3FF8 + T.r[1])));
 				tick(0xC320, 51);
@@ -2775,7 +2776,7 @@ uint16_t turn_map_object(const Args &)
 		tick(0xC3A6, 12);
 		for (uint16_t pc = 0xC3A8; pc <= 0xC3AE; pc += 2)
 		{
-			T.r[2] = asr(T.r[2], 1);
+			T.r[2] = fl::asr(T.r[2]);
 			tick(pc, 12);                              // ASR R2
 		}
 		poke(peek(sp_at(0x0C)), T.r[2]);
@@ -2790,10 +2791,11 @@ uint16_t turn_map_object(const Args &)
 		tick(0xC3BC, 12);
 		for (uint16_t pc = 0xC3BE; pc <= 0xC3C4; pc += 2)
 		{
-			T.r[2] = asr(T.r[2], 1);
+			T.r[2] = fl::asr(T.r[2]);
 			tick(pc, 12);                              // ASR R2
 		}
 		poke(peek(sp_at(0x0E)), T.r[2]);
+		fl::mov(T.r[2]);
 		tick(0xC3C8, 36);
 		poke(peek(sp_at(8)), 0x0006);
 		fl::mov(0x0006);
@@ -2905,7 +2907,7 @@ uint16_t move_map_object(const Args &)
 			tick(0xC028, 18);
 			for (uint16_t pc = 0xC02A; pc <= 0xC02E; pc += 2)
 			{
-				T.r[1] = asr(T.r[1], 1);
+				T.r[1] = fl::asr(T.r[1]);
 				tick(pc, 12);                          // ASR R1
 			}
 			pokeb((uint16_t)(0x0CF6 + T.r[1]), fl::logicb((uint8_t)(peekb((uint16_t)(0x0CF6 + T.r[1])) & ~T.r[0])));
@@ -3026,7 +3028,7 @@ uint16_t move_map_object(const Args &)
 			tick(0xC09E, 27);
 			for (uint16_t pc = 0xC0A0; pc <= 0xC0A4; pc += 2)
 			{
-				T.r[1] = asr(T.r[1], 1);
+				T.r[1] = fl::asr(T.r[1]);
 				tick(pc, 12);                          // ASR R1
 			}
 			pokeb((uint16_t)(0x0CF6 + T.r[1]), fl::logicb((uint8_t)(peekb((uint16_t)(0x0CF6 + T.r[1])) | T.r[0])));
@@ -6580,9 +6582,9 @@ uint16_t print_number()
 	tick(0xBAD0, 12);
 	T.r[1] = sext8((uint8_t)T.r[4]);
 	tick(0xBAD2, 12);
-	T.r[1] = (uint16_t)(T.r[1] << 1);
+	T.r[1] = fl::asl(T.r[1]);
 	tick(0xBAD4, 12);
-	T.r[1] = (uint16_t)(T.r[1] << 1);
+	T.r[1] = fl::asl(T.r[1]);
 	tick(0xBAD6, 12);
 	T.r[1] = (uint16_t)(T.r[1] + 0xBA6A);              // 10^n at 0xBA6A + 4n (high word first)
 	tick(0xBADA, 18);

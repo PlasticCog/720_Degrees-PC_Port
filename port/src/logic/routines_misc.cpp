@@ -728,7 +728,7 @@ void find_other_slot()
 			fl::mov(T.r[0]);
 			tick(0xCE04, 12);
 			if (T.r[0] & 0x8000) T.psw |= CF; else T.psw &= ~CF;
-			T.r[0] = (uint16_t)(T.r[0] << 1);
+			T.r[0] = fl::asl(T.r[0]);
 			tick(0xCE06, 12);
 			const uint16_t w = peek((uint16_t)(0x0AF8 + T.r[0]));
 			const uint16_t value = rw((uint16_t)(T.r[6] + 6));

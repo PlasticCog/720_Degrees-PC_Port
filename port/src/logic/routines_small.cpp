@@ -68,7 +68,7 @@ void irq_disable_bit2()
 {
 	const uint16_t v = peek(0x018C) & ~0x0004;
 	poke(0x018C, v);
-	fl::mov(v);
+	fl::logic(v);
 	tick(0x8288, 33);
 	const uint16_t m = peek(0x018C);
 	ww(0x1600, m);

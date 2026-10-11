@@ -42,7 +42,7 @@ void send_queued_sound()
 	}
 	tick(0x4320, 12);
 	const uint16_t busy = peek(0x1800) & 0x0020;
-	fl::mov(busy);
+	fl::logic(busy);
 	tick(0x4326, 30);                                  // BIT #0x20,@#IN0
 	if (busy)
 	{
@@ -208,7 +208,7 @@ void step_sound_level()
 	}
 	tick(0x5D8C, 12);
 	const uint16_t phase = peek(0x01C4) & 0x000F;
-	fl::mov(phase);
+	fl::logic(phase);
 	tick(0x5D92, 30);                                  // BIT #0x0F,@#0x01C4
 	if (phase)
 	{

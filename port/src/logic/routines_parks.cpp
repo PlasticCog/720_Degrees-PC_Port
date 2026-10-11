@@ -42,6 +42,7 @@ uint16_t clear_0fb4(const Args &)
 uint16_t set_ticket_bits(const Args &)
 {
 	T.r[0] = 4;
+	fl::mov(T.r[0]);
 	tick(0x5606, 18);
 	for (;;)
 	{
@@ -257,6 +258,7 @@ uint16_t park_at_area(const Args &)
 	if (two)
 	{
 		T.r[0] = 2;
+		fl::mov(T.r[0]);
 		tick(0x5358, 18);
 	}
 	else
@@ -558,17 +560,19 @@ uint16_t set_medal_level(const Args &)
 				tick(0x6E58, 12);
 				for (uint16_t pc = 0x6E5A; pc <= 0x6E5E; pc += 2)
 				{
-					T.r[1] = (uint16_t)(T.r[1] << 1);
+					T.r[1] = fl::asl(T.r[1]);
 					tick(pc, 12);                      // ASL R1
 				}
 				T.r[4] = T.r[1];
+				fl::mov(T.r[4]);
 				tick(0x6E60, 12);
 				for (uint16_t pc = 0x6E62; pc <= 0x6E66; pc += 2)
 				{
-					T.r[4] = (uint16_t)(T.r[4] << 1);
+					T.r[4] = fl::asl(T.r[4]);
 					tick(pc, 12);                      // ASL R4
 				}
 				pokeb((uint16_t)(0x0262 + T.r[0]), (uint8_t)T.r[4]);
+				fl::movb((uint8_t)T.r[4]);
 				tick(0x6E6A, 30);
 				T.r[1] = 0x3800;
 				fl::mov(T.r[1]);

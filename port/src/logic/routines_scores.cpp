@@ -47,19 +47,26 @@ uint16_t print_time(const Args &a)
 	{
 		const uint16_t pc = (uint16_t)(0x68FA + 0x1C * (part - 1));
 		T.r[0] = 0x003A;
+		fl::mov(T.r[0]);
 		tick((uint16_t)(pc + 4), 18);
 		jsr((uint16_t)(pc + 8), 0x8B52);               // draw_large_char(':')
 		T.r[1] = sext8(peekb((uint16_t)(T.r[2] + 2 * part)));
+		fl::movb((uint8_t)T.r[1]);
 		tick((uint16_t)(pc + 0x0C), 27);
 		ww(T.r[6], T.r[1]);
+		fl::mov(T.r[1]);
 		tick((uint16_t)(pc + 0x0E), 21);
 		push(0);
+		fl::clr();
 		tick((uint16_t)(pc + 0x10), 24);
 		push(2);
+		fl::mov(0x0002);
 		tick((uint16_t)(pc + 0x14), 30);
 		push(rw(T.r[6]));
+		fl::mov(peek(T.r[6]));
 		tick((uint16_t)(pc + 0x16), 30);
 		push(0);
+		fl::clr();
 		tick((uint16_t)(pc + 0x18), 24);
 		jsr((uint16_t)(pc + 0x1C), 0xBA9A);
 	}
@@ -556,6 +563,7 @@ void selftest_charset_screen()
 	digits(0x7094, 1, 0x8C56);                         // draw_big_char
 	letters(0x70B0, 0x0144, 0x8B52);                   // draw_large_char
 	poke(0x0186, 0x2F2C);
+	fl::mov(0x2F2C);
 	tick(0x70E0, 33);
 	poke(0x0188, fl::add(peek(0x0188), 0x2000));
 	tick(0x70E6, 33);

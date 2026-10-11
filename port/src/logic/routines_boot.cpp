@@ -674,7 +674,7 @@ uint16_t selftest_items_screen(const Args &)
 		tick(0xF9B8, 12);
 		for (uint16_t pc = 0xF9BA; pc <= 0xF9BE; pc += 2)
 		{
-			T.r[0] = (uint16_t)(T.r[0] << 1);
+			T.r[0] = fl::asl(T.r[0]);
 			tick(pc, 12);                              // ASL R0
 		}
 		T.r[0] = fl::add(T.r[0], 0x7798);

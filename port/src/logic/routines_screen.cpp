@@ -438,7 +438,7 @@ void flash_text_colours()
 	}
 	tick(0xDD16, 12);
 	const uint16_t phase = peek(0x01C4) & 0x0003;
-	fl::mov(phase);
+	fl::logic(phase);
 	tick(0xDD1C, 30);
 	if (phase)
 	{
