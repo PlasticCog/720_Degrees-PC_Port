@@ -15,11 +15,11 @@ constexpr double PI = 3.14159265358979323846;
 
 const char *ACTION_NAMES[ACTION_COUNT] = {
 	"Point up", "Point down", "Point left", "Point right", "Rotate left", "Rotate right",
-	"Jump", "Kick", "Coin (left)", "Coin (right)", "Pause",
+	"Jump", "Kick", "Coin (left)", "Coin (right)", "Start 1 player", "Start 2 players", "Pause",
 };
 const char *ACTION_KEYS[ACTION_COUNT] = {     // names used in the settings file
 	"aim_up", "aim_down", "aim_left", "aim_right", "rotate_left", "rotate_right",
-	"jump", "kick", "coin1", "coin2", "pause",
+	"jump", "kick", "coin1", "coin2", "start1", "start2", "pause",
 };
 
 std::string trim(std::string s)
@@ -77,6 +77,8 @@ void InputConfig::set_defaults()
 	set(Action::Kick, SDL_SCANCODE_LSHIFT, SDL_SCANCODE_RSHIFT, P::button(SDL_GAMEPAD_BUTTON_WEST), P::button(SDL_GAMEPAD_BUTTON_EAST));
 	set(Action::Coin1, SDL_SCANCODE_5, SDL_SCANCODE_UNKNOWN, P::button(SDL_GAMEPAD_BUTTON_BACK));
 	set(Action::Coin2, SDL_SCANCODE_6, SDL_SCANCODE_UNKNOWN, {});
+	set(Action::Start1, SDL_SCANCODE_1, SDL_SCANCODE_KP_1, {});
+	set(Action::Start2, SDL_SCANCODE_2, SDL_SCANCODE_KP_2, {});
 	set(Action::Pause, SDL_SCANCODE_P, SDL_SCANCODE_UNKNOWN, P::button(SDL_GAMEPAD_BUTTON_START));
 }
 
@@ -234,6 +236,8 @@ InputFrame Input::poll(bool keys_allowed, bool mouse_captured, double mouse_dx)
 	f.kick = on(Action::Kick);
 	f.coin1 = on(Action::Coin1);
 	f.coin2 = on(Action::Coin2);
+	f.start1 = on(Action::Start1);
+	f.start2 = on(Action::Start2);
 	if (mouse_captured && cfg.mouse_enabled)
 	{
 		const SDL_MouseButtonFlags mb = SDL_GetMouseState(nullptr, nullptr);

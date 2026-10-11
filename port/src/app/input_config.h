@@ -12,7 +12,7 @@
 
 enum class Action {
 	AimUp, AimDown, AimLeft, AimRight, RotateLeft, RotateRight,
-	Jump, Kick, Coin1, Coin2, Pause, Count
+	Jump, Kick, Coin1, Coin2, Start1, Start2, Pause, Count
 };
 constexpr int ACTION_COUNT = (int)Action::Count;
 
@@ -54,6 +54,7 @@ struct InputFrame {
 	double angle_deg = 0;           // 0 = up, 90 = right
 	double rotate = 0;              // degrees to rotate this frame (+ clockwise)
 	bool jump = false, kick = false, coin1 = false, coin2 = false;
+	bool start1 = false, start2 = false;    // the start keys (see main.cpp: where the game waits for a start)
 };
 
 class Input {
