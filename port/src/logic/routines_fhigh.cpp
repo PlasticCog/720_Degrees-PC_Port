@@ -4,11 +4,32 @@
 #include <exception>
 
 namespace logic {
+namespace steps {                                      // defined in routines_core.cpp
+void rts();
+void jsr(uint16_t ret, uint16_t addr);
+void c_save(int n, uint16_t body);
+void c_restore(int n);
+}
+
 namespace {
 
 using namespace t11rt;
+using namespace steps;
 
 uint16_t sext8(uint8_t v) { return (uint16_t)(int16_t)(int8_t)v; }
+
+// condition codes of the instructions the fl:: helpers do not cover (as the T-11 sets them)
+uint16_t fl_asl(uint16_t v) { const uint16_t r = (uint16_t)(v << 1); f_nzvc(nzw(r) | (v >> 15)); f_shift(); return r; }
+uint16_t fl_asr(uint16_t v) { const uint16_t r = (uint16_t)((int16_t)v >> 1); f_nzvc(nzw(r) | (v & 1)); f_shift(); return r; }
+uint16_t fl_ror(uint16_t v) { const uint16_t r = (uint16_t)((C() << 15) | (v >> 1)); f_nzvc(nzw(r) | (v & 1)); f_shift(); return r; }
+uint16_t fl_rol(uint16_t v) { const uint16_t r = (uint16_t)((v << 1) | C()); f_nzvc(nzw(r) | (v >> 15)); f_shift(); return r; }
+uint16_t fl_neg(uint16_t v) { const uint16_t r = (uint16_t)-v; f_nzvc(nzw(r) | (r == 0x8000 ? VF : 0) | (r ? CF : 0)); return r; }
+uint8_t fl_negb(uint8_t v) { const uint8_t r = (uint8_t)-v; f_nzvc(nzb(r) | (r == 0x80 ? VF : 0) | (r ? CF : 0)); return r; }
+uint16_t fl_com(uint16_t v) { const uint16_t r = (uint16_t)~v; f_nzvc(nzw(r) | CF); return r; }
+uint8_t fl_comb(uint8_t v) { const uint8_t r = (uint8_t)~v; f_nzvc(nzb(r) | CF); return r; }
+uint16_t fl_swab(uint16_t v) { const uint16_t r = (uint16_t)((v << 8) | (v >> 8)); f_nzvc(nzb(r & 0xFF)); return r; }
+uint16_t fl_logic(uint16_t r) { f_nzv(nzw(r)); return r; }   // BIC / BIS / XOR / BIT
+uint8_t fl_logicb(uint8_t r) { f_nzv(nzb(r)); return r; }
 
 // Cycles: every routine charges the original's exact cost on the path it takes (per
 // straight-line part, see tools/insn_cycles.py); loops charge each pass (charge(), at the
