@@ -40,26 +40,52 @@ using namespace t11rt;
 struct Slot {
 	const Original *orig = nullptr;
 	const Routine *r = nullptr;
+	std::string table;                                      // routines_<table>.cpp
+	bool translated = false;                                // run the translation (use_translation)
 	uint64_t calls = 0, tests = 0, bad = 0, timeouts = 0, unwound = 0;
+	uint64_t off_time = 0;                                 // tested calls whose cycles differ from the original's
+	double off_abs = 0;                                    // sum of |native - original| over those
 	double orig_cycles = 0, native_cycles = 0;            // per tested call, callees included
 	std::string first_bad;
 };
 
 // the routine tables of the routines_*.cpp files
-const TableFn TABLES[] = { routines_core, routines_small, routines_misc, routines_world, routines_system, routines_wait, routines_screen, routines_boot, routines_parks, routines_scores, routines_fhigh, routines_banka, routines_bankb, routines_flow, routines_fmid };
+struct Table { const char *name; TableFn fn; };
+const Table TABLES[] = {
+	{"core", routines_core}, {"small", routines_small}, {"misc", routines_misc}, {"world", routines_world},
+	{"system", routines_system}, {"wait", routines_wait}, {"screen", routines_screen}, {"boot", routines_boot},
+	{"parks", routines_parks}, {"scores", routines_scores}, {"fhigh", routines_fhigh}, {"banka", routines_banka},
+	{"bankb", routines_bankb}, {"flow", routines_flow}, {"fmid", routines_fmid},
+};
 
 std::vector<Routine> &registry()
 {
 	static std::vector<Routine> r;
 	if (r.empty())
-		for (TableFn f : TABLES)
+		for (const Table &tb : TABLES)
 		{
 			int n = 0;
-			const Routine *t = f(n);
+			const Routine *t = tb.fn(n);
 			r.insert(r.end(), t, t + n);
 		}
 	return r;
 }
+
+// the table a registered routine comes from
+const char *table_of(const Routine *r)
+{
+	size_t i = (size_t)(r - registry().data());
+	for (const Table &tb : TABLES)
+	{
+		int n = 0;
+		tb.fn(n);
+		if (i < (size_t)n) return tb.name;
+		i -= (size_t)n;
+	}
+	return "";
+}
+
+std::string g_translated_spec;                           // see use_translation
 
 std::vector<Slot> g_slots;
 bool g_inited = false;
@@ -77,6 +103,16 @@ void init()
 		g_slots[i].orig = &t11_originals[i];
 		for (const auto &r : registry())
 			if (!strcmp(r.seg, t11_originals[i].seg) && r.addr == t11_originals[i].addr) g_slots[i].r = &r;
+		if (g_slots[i].r)
+		{
+			g_slots[i].table = table_of(g_slots[i].r);
+			char key[16];
+			snprintf(key, sizeof(key), "%s:%04X", g_slots[i].r->seg, g_slots[i].r->addr);
+			const std::string spec = "," + g_translated_spec + ",";
+			g_slots[i].translated = spec.find("," + std::string(key) + ",") != std::string::npos ||
+				spec.find("," + g_slots[i].table + ",") != std::string::npos ||
+				spec.find("," + std::string(g_slots[i].r->name) + ",") != std::string::npos || g_translated_spec == "all";
+		}
 		if (!g_slots[i].r)
 			fprintf(stderr, "logic: %s:%04X is listed in routines.txt but has no replacement\n", t11_originals[i].seg, t11_originals[i].addr);
 	}
@@ -249,6 +285,11 @@ void difftest(Slot &s)
 	s.tests++;
 	s.orig_cycles += cycles1;
 	s.native_cycles += cycles2;
+	if (cycles1 != cycles2)
+	{
+		s.off_time++;
+		s.off_abs += std::abs(cycles2 - cycles1);
+	}
 
 	// continue exactly as the original did
 	B->load(b1);
@@ -268,7 +309,7 @@ bool enter(int index)
 	if (!g_inited) init();
 	if (!g_enabled || g_original_side || index < 0 || index >= (int)g_slots.size()) return false;
 	Slot &s = g_slots[index];
-	if (!s.r) return false;
+	if (!s.r || s.translated) return false;
 	s.calls++;
 	if (g_difftest)
 		difftest(s);
@@ -324,7 +365,7 @@ uint16_t call(uint16_t addr, std::initializer_list<uint16_t> args)
 
 void reset_stats()
 {
-	for (auto &s : g_slots) { s.calls = s.tests = s.bad = s.timeouts = s.unwound = 0; s.orig_cycles = s.native_cycles = 0; s.first_bad.clear(); }
+	for (auto &s : g_slots) { s.calls = s.tests = s.bad = s.timeouts = s.unwound = 0; s.orig_cycles = s.native_cycles = 0; s.off_time = 0; s.off_abs = 0; s.first_bad.clear(); }
 }
 
 int rewritten_count()
@@ -344,6 +385,12 @@ int instructions_rewritten()
 }
 
 int instructions_total() { return t11_total_instructions; }
+
+void use_translation(const std::string &spec)
+{
+	g_translated_spec = spec;
+	if (g_inited) init();
+}
 
 uint64_t mismatches()
 {
@@ -365,6 +412,7 @@ std::string report(bool all)
 			out += fmt("  tested %8llu  mismatches %llu  original %.0f cycles/call (charged %d)",
 				(unsigned long long)s.tests, (unsigned long long)s.bad, s.orig_cycles / s.tests, s.r->cycles);
 		if (s.tests) out += fmt(" native %.0f", s.native_cycles / s.tests);
+		if (s.off_time) out += fmt("  timing off in %llu calls (avg %.0f cycles)", (unsigned long long)s.off_time, s.off_abs / s.off_time);
 		if (s.timeouts) out += fmt("  waits (not compared) %llu", (unsigned long long)s.timeouts);
 		if (s.unwound) out += fmt("  left by an interrupt %llu", (unsigned long long)s.unwound);
 		out += "\n";

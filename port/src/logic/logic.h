@@ -137,6 +137,9 @@ inline uint8_t decb(uint8_t d) { const int r = d - 1; f_nzv(nzb(r) | (d == 0x80 
 // settings and statistics
 extern bool g_enabled;                                 // use the rewritten routines
 extern bool g_difftest;                                // compare every call with the original
+// run some rewritten routines as the translation again (for hunting differences): a comma-
+// separated list of SEG:ADDR, routine names or table names (routines_<table>.cpp), or "all"
+void use_translation(const std::string &spec);
 void reset_stats();
 std::string report(bool all = false);
 int rewritten_count();

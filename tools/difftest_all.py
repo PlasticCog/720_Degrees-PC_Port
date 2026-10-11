@@ -10,7 +10,7 @@ report adds up calls / tested calls / mismatches per rewritten routine, averages
 original's cycles per call (input for tools/update_cycles.py) and keeps the first mismatch
 of each routine with the scenario it came from.  Exit status 1 if anything mismatched.
 
-Scenarios: random play with three seeds, each of the four parks (entered by setting the park
+Scenarios: the attract mode without input, random play with three seeds, each of the four parks (entered by setting the park
 number 0x027A and the game phase 0x0F26 = 1), the ticket gate event (0x032A = 1), a series of
 other terrain events, power-on with the test switch held (self test) and a game ending with a
 high score (initials entry).
@@ -35,7 +35,8 @@ EVENTS = ['1100:032A:0005', '1150:032A:000D', '1200:032A:000E', '1250:032A:0010'
 
 
 def scenarios(selftest_script):
-    s = [('random3', 12000, ['--random', '3']),
+    s = [('attract', 3000, []),                     # power-on, no input: the attract mode and its demo
+         ('random3', 12000, ['--random', '3']),
          ('random7', 12000, ['--random', '7']),
          ('random11', 12000, ['--random', '11'])]
     for p in range(4):
