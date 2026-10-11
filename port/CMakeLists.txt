@@ -17,12 +17,16 @@ option(D720_REGENERATE "Re-run the static translators at configure time" OFF)
 # tools, coroutine test): used by CI, where no ROMs are available.
 option(D720_GAME "Build the game, the level editor and the tools that use the translated ROM code" ON)
 option(D720_ROM_FREE "Leave out data generated from the ROMs (level_palettes.inc), for builds that are given to others" OFF)
+# The game and the editor run only the rewritten programs and build without the ROMs.  The
+# tools that compare the rewrite with the original (render720, verify720) need the program
+# ROMs translated to C++ at configure time; OFF (or no ROMs found) leaves them out.
+option(D720_TRANSLATION "Translate the program ROMs for the tools that compare with the original" ON)
 
 # ---------------------------------------------------------------------------
 # Static translation of the arcade program ROMs into C++ (src/game).
 # The generated code is derived from the user's ROMs and is not part of the repository.
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
-if(D720_GAME)
+if(D720_GAME AND D720_TRANSLATION)
 # re-translate whenever the translators or their inputs change (hash stamp in src/game)
 set(D720_TRANSLATOR_INPUTS
   ${REPO_ROOT}/tools/t11_to_cpp.py ${REPO_ROOT}/tools/m6502_to_cpp.py ${REPO_ROOT}/tools/codedb.py
@@ -52,9 +56,15 @@ if(D720_REGENERATE OR NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/game/files.cmak
   execute_process(COMMAND ${Python3_EXECUTABLE} -I ${REPO_ROOT}/tools/romzip.py ${D720_ROM_DIR}
     OUTPUT_QUIET ERROR_QUIET)
   if(NOT EXISTS ${D720_ROM_DIR}/136047-3126.7lm)
-    message(FATAL_ERROR "720 Degrees ROM files not found in '${D720_ROM_DIR}'. "
-      "Copy the rev 4 ROM set (MAME '720', the files or the zip) there or pass -DD720_ROM_DIR=<folder>.")
+    message(WARNING "720 Degrees ROM files not found in '${D720_ROM_DIR}': building the game and the "
+      "editor without the comparison tools (render720, verify720).  The game needs the ROMs to run: "
+      "copy the rev 4 ROM set (MAME '720', the files or the zip) there.")
+    set(D720_TRANSLATION OFF)
   endif()
+endif()
+if(D720_GAME AND D720_TRANSLATION AND (D720_REGENERATE OR NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/game/files.cmake
+   OR NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/game/s65_code.cpp
+   OR NOT D720_OLD_HASH STREQUAL D720_TRANSLATOR_HASH))
   message(STATUS "Translating the 720 Degrees program ROMs to C++ ...")
   foreach(tool t11_to_cpp.py m6502_to_cpp.py)
     execute_process(
@@ -68,6 +78,8 @@ if(D720_REGENERATE OR NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/game/files.cmak
   endforeach()
   file(WRITE ${D720_STAMP} "${D720_TRANSLATOR_HASH}")
 endif()
+endif()
+if(D720_GAME AND D720_TRANSLATION)
 add_custom_target(regenerate
   COMMAND ${CMAKE_COMMAND} -E env D720_ROM_DIR=${D720_ROM_DIR} ${Python3_EXECUTABLE} -I tools/t11_to_cpp.py
   COMMAND ${CMAKE_COMMAND} -E env D720_ROM_DIR=${D720_ROM_DIR} ${Python3_EXECUTABLE} -I tools/m6502_to_cpp.py
@@ -156,11 +168,14 @@ target_include_directories(refcpu PUBLIC src/ref)
 target_link_libraries(refcpu PUBLIC board)
 
 # ---------------------------------------------------------------------------
-# Native game core: translated programs + runtime
+# Native game core: the rewritten programs + runtime (gamecore_native); gamecore adds the
+# translated original programs for the comparison tools
 if(D720_GAME)
-include(src/game/files.cmake)
 file(GLOB D720_LOGIC_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/logic/*.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/sound/*.cpp)
+endif()
+if(D720_GAME AND D720_TRANSLATION)
+include(src/game/files.cmake)
 add_library(gamecore STATIC
   src/native/t11rt.cpp
   src/native/t11dispatch.cpp
@@ -177,7 +192,9 @@ target_link_libraries(gamecore PUBLIC board)
 if(NOT MSVC)
   set_source_files_properties(${T11_GENERATED} src/game/s65_code.cpp PROPERTIES COMPILE_OPTIONS "-O1;-fno-strict-aliasing")
 endif()
+endif()
 
+if(D720_GAME)
 # The same without any translated code: both CPUs run only the rewritten routines
 # (src/native/dispatch_native.cpp, src/native/s65dispatch_native.cpp).
 add_library(gamecore_native STATIC
@@ -265,11 +282,13 @@ add_executable(editor720 WIN32 src/editor/editor.cpp ${D720_ICON_RC})
 target_link_libraries(editor720 PRIVATE gamecore_native leveldata imgui SDL3::SDL3)
 d720_copy_to_output(editor720)
 
+if(D720_TRANSLATION)
 add_executable(verify720 src/tools/verify720.cpp)
 target_link_libraries(verify720 PRIVATE gamecore refcpu)
 add_executable(render720 src/tools/render720.cpp src/app/extras.cpp)
 target_include_directories(render720 PRIVATE src/app)
 target_link_libraries(render720 PRIVATE gamecore leveldata)
+endif()
 # render720 without the translated main program, to compare whole runs with the original
 add_executable(render720native src/tools/render720.cpp src/app/extras.cpp)
 target_include_directories(render720native PRIVATE src/app)

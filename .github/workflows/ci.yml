@@ -1,7 +1,7 @@
-# Builds everything that does not need the arcade ROMs (board model, reference CPUs, level
-# library, tools, Dear ImGui with SDL3) on Windows, Linux and macOS, and runs the coroutine
-# self-test that the translated game relies on.  The game itself is translated from the
-# user's ROMs at build time, so it cannot be built here.
+# Builds the game, the level editor and the tools on Windows, Linux and macOS without the
+# arcade ROMs (the game runs only the rewritten programs; D720_TRANSLATION=OFF leaves out the
+# tools that compare with the translated original), and runs the coroutine self-test the game
+# relies on.
 name: ci
 
 on:
@@ -39,11 +39,11 @@ jobs:
 
       - name: Configure
         if: runner.os != 'Windows'
-        run: cmake -S port -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DD720_GAME=OFF -DD720_OUTPUT_DIR=${{ github.workspace }}/out
+        run: cmake -S port -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DD720_TRANSLATION=OFF -DD720_ROM_FREE=ON -DD720_OUTPUT_DIR=${{ github.workspace }}/out
 
       - name: Configure (Windows)
         if: runner.os == 'Windows'
-        run: cmake -S port -B build -DD720_GAME=OFF -DD720_OUTPUT_DIR=${{ github.workspace }}/out
+        run: cmake -S port -B build -DD720_TRANSLATION=OFF -DD720_ROM_FREE=ON -DD720_OUTPUT_DIR=${{ github.workspace }}/out
 
       - name: Build
         run: cmake --build build --config Release --parallel

@@ -13,9 +13,12 @@ game.
 
 ## Quick start
 
-On Windows (x64) you can skip building: download the zip from the
-[Releases](https://github.com/PlasticCog/720_Degrees-PC_Port/releases) page, unpack it, put your ROM
-files (or `720.zip`) into its `Game` folder and run `720degrees.exe`. To build it yourself:
+Ready-made builds for Windows (x64), Linux (x86-64, ARM64) and macOS (Apple Silicon, Intel) are
+on the [Releases](https://github.com/PlasticCog/720_Degrees-PC_Port/releases) page: unpack the
+zip, put your ROM files (or `720.zip`) into its `Game` folder and run `720degrees`
+(`720degrees.exe` on Windows). The programs are not signed: on macOS, clear the download
+quarantine first (`xattr -dr com.apple.quarantine <unpacked folder>`) or open them once with
+right-click > Open. To build it yourself:
 
 1. Put the 37 ROM files of the MAME set `720` (rev 4) into the [`Game`](Game/README.txt) folder, or just
    drop the MAME `720.zip` there; it is unpacked automatically.
@@ -28,8 +31,10 @@ files (or `720.zip`) into its `Game` folder and run `720degrees.exe`. To build i
    ```
 
    Configuration translates the program ROMs to C++ (`tools/t11_to_cpp.py`,
-   `tools/m6502_to_cpp.py`). On Windows it downloads the SDL3 development package if SDL3 is not
-   installed; on Linux and macOS it builds SDL3 from source as a static library.
+   `tools/m6502_to_cpp.py`) for the tools that compare the rewrite with the original; the game
+   and the editor do not use it and also build without the ROMs (`-DD720_TRANSLATION=OFF`, or
+   automatically when no ROMs are found). On Windows it downloads the SDL3 development package if
+   SDL3 is not installed; on Linux and macOS it builds SDL3 from source as a static library.
 4. Run `720degrees` (`720degrees.exe` on Windows) in the top folder of the repository. The build puts
    the game and the level editor there; the `Game` folder holds only the ROMs.
 
@@ -221,8 +226,9 @@ port/src/editor   level editor (SDL3 + Dear ImGui)
 * Still open: the park palettes, which the colour capture does not reach, and the exact meaning of
   the zone switch modes.
 * Platforms: Windows is the tested platform for the full game. On Linux and macOS (x86-64 and ARM64)
-  everything that does not need the ROMs is built and tested in CI, including the context switch
-  the game runs on (`port/src/native/coro_posix.cpp`); the full game has not been run there yet.
+  the game, the editor and the tools are built in CI, which has no ROMs, and the context switch the
+  game runs on (`port/src/native/coro_posix.cpp`) is tested there; the full game has not been run
+  on these systems yet. The release builds for them are made by `.github/workflows/release.yml`.
 
 ## Credits
 
