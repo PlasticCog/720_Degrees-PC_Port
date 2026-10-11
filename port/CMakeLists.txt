@@ -16,6 +16,7 @@ option(D720_REGENERATE "Re-run the static translators at configure time" OFF)
 # OFF builds only what does not need the ROMs (board, reference CPUs, level library,
 # tools, coroutine test): used by CI, where no ROMs are available.
 option(D720_GAME "Build the game, the level editor and the tools that use the translated ROM code" ON)
+option(D720_ROM_FREE "Leave out data generated from the ROMs (level_palettes.inc), for builds that are given to others" OFF)
 
 # ---------------------------------------------------------------------------
 # Static translation of the arcade program ROMs into C++ (src/game).
@@ -198,6 +199,9 @@ add_library(leveldata STATIC src/level/leveldata.cpp src/level/pieces.cpp src/le
 target_include_directories(leveldata PUBLIC src/level)
 target_link_libraries(leveldata PUBLIC board)
 target_include_directories(leveldata PUBLIC src/native)
+if(D720_ROM_FREE)
+  target_compile_definitions(leveldata PRIVATE D720_ROM_FREE)
+endif()
 
 # ---------------------------------------------------------------------------
 # Dear ImGui (vendored in third_party/imgui): debug menu, controls window, level editor

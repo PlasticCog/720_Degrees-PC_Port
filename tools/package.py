@@ -5,8 +5,9 @@
 Collects the programs the build copied to the repository's top folder (720degrees,
 editor720 and, on Windows, SDL3.dll), an empty Game folder with its README, the README and
 the third-party licences into dist/720degrees-<version>-<platform>.zip.  ROM files are
-never included: the program code inside the executables is translated from the user's own
-ROMs, so a package is for the person who built it and must not be redistributed.
+never included, and the game and the editor contain no translated program code; build with
+-DD720_ROM_FREE=ON (as the releases are) so they also leave out the data generated from the
+ROMs (level_palettes.inc).
 """
 import argparse
 import datetime

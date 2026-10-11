@@ -13,6 +13,10 @@ game.
 
 ## Quick start
 
+On Windows (x64) you can skip building: download the zip from the
+[Releases](https://github.com/PlasticCog/720_Degrees-PC_Port/releases) page, unpack it, put your ROM
+files (or `720.zip`) into its `Game` folder and run `720degrees.exe`. To build it yourself:
+
 1. Put the 37 ROM files of the MAME set `720` (rev 4) into the [`Game`](Game/README.txt) folder, or just
    drop the MAME `720.zip` there; it is unpacked automatically.
 2. Install a C++20 compiler, CMake 3.20+, Ninja and Python 3 (details per platform below).
@@ -60,10 +64,16 @@ Apple Silicon and Intel Macs are both supported.
 ### Packaging
 
 `python tools/package.py` puts the built programs, an empty `Game` folder, this README and the
-third-party licences into `dist/720degrees-<version>-<platform>.zip`. The executables contain no
-translated program code, but a build can include data generated from your ROMs
-(`port/src/level/level_palettes.inc`, if present), so such a package is for your own use: do not
-publish it.
+third-party licences into `dist/720degrees-<version>-<platform>.zip`. The game and the editor
+contain no translated program code. A normal build can still include data generated from your
+ROMs (`port/src/level/level_palettes.inc`, if present); configure with `-DD720_ROM_FREE=ON`, as
+the release builds are, to leave it out:
+
+```sh
+cmake -S port -B port/build-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DD720_ROM_FREE=ON
+cmake --build port/build-release --target 720degrees editor720
+python tools/package.py
+```
 
 ## Controls
 

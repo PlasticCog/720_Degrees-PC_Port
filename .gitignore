@@ -19,6 +19,7 @@
 
 # --- build output ---------------------------------------------------------------
 /port/build/
+/port/build-*/
 /build/
 /720degrees.exe
 /editor720.exe

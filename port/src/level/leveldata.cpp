@@ -12,9 +12,10 @@ namespace {
 struct LevelRenderInfo { int level; int tile_bank[2]; uint16_t palette[256]; };
 // Palettes are set up by game code at runtime, not stored per level.  The editor captures
 // them by running the game headless on first start (see LevelSet::set_palette); a locally
-// generated level_palettes.inc, if present, provides defaults for other tools.  Its tile
-// bank values are not used: the banks come from ROM tables.
-#if __has_include("level_palettes.inc")
+// generated level_palettes.inc, if present, provides defaults for other tools (not in a
+// D720_ROM_FREE build, which is given to others).  Its tile bank values are not used: the banks
+// come from ROM tables.
+#if !defined(D720_ROM_FREE) && __has_include("level_palettes.inc")
 #include "level_palettes.inc"
 #else
 static const LevelRenderInfo LEVEL_RENDER_INFO[] = { { 0, { 0, 4 }, {} } };
