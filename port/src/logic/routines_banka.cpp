@@ -9241,458 +9241,770 @@ at_50FC:                                               // the sprite priority bi
 // A7:45B0  enter_high_score(int first, long score): put score into the table of 15 entries
 // from first (A7:43C0).  For a new entry the screen is cleared and the table shown (ranks,
 // initials with the large font, scores by F:BA9A; the new place highlighted, colour 0x4000);
-// unless the entry is only being shown again (0x0208 = -1 or bit 0 of the flag word set) the
-// player enters three initials with the joystick (F:8D86 / F:8E2E; '?' deletes, 0x3F-0x5A
-// wrap, 30 seconds counted down in the corner), else the previous initials are copied.  The
+// for the main table (flag word bit 0: first is 0, its place kept in 0x0208) or when the
+// score did not make it there (0x0208 = -1) the player enters three initials with the
+// joystick (F:8D86 / F:8E2E; '?' deletes, 0x3F-0x5A wrap, 30 seconds counted down in the
+// corner), else the initials of the main table's entry 0x0208 are copied.  The
 // entry is sent to the sound CPU, which keeps the table (command 0x0F / 0x10 by the flag
 // word, F:8F50 / F:8F62).  When the player's slot 0x0F3A is set and first is 0 a "game
-// over" screen (texts 0x78F8 / 0x21 or 0x32, delay of 600 frames) comes first.
-// The routine's locals are on the stack as in the original (SP-relative offsets below are the
-// original's).  R0 ends as 0x3C00.
-uint16_t enter_high_score(const Args &)
+// over" screen (texts 0x78F8 / 0x21 or 0x32, delay of 600 frames) comes first.  R0 ends as
+// 0x3C00.
+uint16_t enter_high_score(const Args &a)
 {
-	uint16_t saved[6];
-	for (int i = 1; i <= 5; i++) saved[i] = T.r[i];
-	auto at = [](int off) { return (uint16_t)(T.r[6] + off); };
-	auto pop2 = []() { T.r[6] = (uint16_t)(T.r[6] + 2); };
-	blk(0x45B4, 207 + 237);
-	T.r[6] = (uint16_t)(T.r[6] - 0x0C);                // the frame of F:F162 (R1-R5, its return)
-	T.r[6] = (uint16_t)(T.r[6] - 0x10);
+	c_save(4, 0x45B4);
+	T.r[6] = (uint16_t)(T.r[6] - 0x0010);
+	const uint16_t S = T.r[6];
+	// the locals: the entry's offset (place * 8), the letter (byte), the letters entered, the
+	// seconds left (byte), the place in the shown part, the rank's position pointer (into
+	// 0x7FB8), the last place shown, the flag word (1: first is 0)
+	const uint16_t E8 = S, LET = (uint16_t)(S + 2), CNT = (uint16_t)(S + 4), SEC = (uint16_t)(S + 6);
+	const uint16_t REL = (uint16_t)(S + 8), ROW = (uint16_t)(S + 0x0A), LAST = (uint16_t)(S + 0x0C);
+	const uint16_t FLAG = (uint16_t)(S + 0x0E);
+	tick(0x45B8, 18);                                  // SUB #0x10,SP
 	T.r[0] = 0x1C00;
-	set_bank_b(0x1C00);
-	for (int i = 0; i < 3; i++) push(peek(at(0x22)));
-	T.r[0] = call(0x43C0, {});                         // insert_high_score
-	blk(0x45D4, 120);
-	const uint16_t place = T.r[0];
-	T.r[2] = place;
+	tick(0x45BC, 18);
+	poke(0x01D4, T.r[0]);
+	tick(0x45C0, 27);
+	poke(0x1402, T.r[0]);
+	tick(0x45C4, 27);
+	push(a.u(2));
+	tick(0x45C8, 39);
+	push(a.u(1));
+	tick(0x45CC, 39);
+	push(a.u(0));
+	tick(0x45D0, 39);
+	jsr(0x45D4, 0x43C0);                               // insert_high_score
+	T.r[2] = T.r[0];
+	tick(0x45D6, 12);
 	poke(0x0184, 0x5CD2);
+	tick(0x45DC, 33);
+	T.r[0] = 0;
+	tick(0x45DE, 12);
 	T.r[0] = peekb(0x01F5);
-	if (peekb((uint16_t)(0x0F3A + T.r[0])))
+	tick(0x45E2, 24);
+	bool b = peekb((uint16_t)(0x0F3A + T.r[0])) != 0;
+	tick(0x45E6, 27);                                  // TSTB 0xF3A(R0)
+	if (b)
 	{
-		blk(0x45E8, 39);
-		if (!peek(at(0x24)))
+		tick(0x45E8, 12);                              // BEQ
+		b = a.u(0) != 0;
+		tick(0x45EC, 27);                              // TST 0x24(SP)
+		if (!b)
 		{
-			blk(0x45EE, 30);
-			call(0x8CE8, {});                          // clear_playfield
-			blk(0x45F2, 30);
-			call(0x8D2C, {});                          // clear_playfield_ram
-			blk(0x45F6, 57);
-			poke(at(0), 0x0045);
-			call(0x8E78, {});                          // queue_sound
-			blk(0x45FE, 90);
+			tick(0x45EE, 12);                          // BNE
+			jsr(0x45F2, 0x8CE8);                       // clear_playfield
+			jsr(0x45F6, 0x8D2C);
+			poke(T.r[6], 0x0045);
+			tick(0x45FA, 27);
+			jsr(0x45FE, 0x8E78);                       // queue_sound
 			poke(0x0188, 0xE000);
-			poke(at(0), 0x78F8);
-			call(0xA9FC, {});
-			blk(0x460C, 36);
-			if (!peekb(0x01F6))
+			tick(0x4604, 33);
+			poke(T.r[6], 0x78F8);
+			tick(0x4608, 27);
+			jsr(0x460C, 0xA9FC);                       // "game over"
+			b = peekb(0x01F6) != 0;
+			tick(0x4610, 24);                          // TSTB @#0x01F6
+			if (!b)
 			{
-				blk(0x4612, 81);
+				tick(0x4612, 12);                      // BNE
 				poke(0x0186, 0x275E);
+				tick(0x4618, 33);
 				T.r[0] = 0x0021;
-				call(0x8B52, {});                      // draw_large_char
-				blk(0x4620, 12);
+				tick(0x461C, 18);
+				jsr(0x4620, 0x8B52);                   // draw_large_char
+				tick(0x463E, 12);                      // BR
 			}
 			else
 			{
-				blk(0x4622, 48);
+				tick(0x4622, 12);
 				T.r[0] = 0x0032;
-				call(0x8AB6, {});
-				blk(0x462A, 117);
+				tick(0x4626, 18);
+				jsr(0x462A, 0x8AB6);
 				poke(0x0186, (uint16_t)(peek(0x0186) - 8));
-				T.r[0] = (uint16_t)(peekb(0x01F5) + 0x0031);
-				call(0x8C56, {});                      // draw_big_char
+				tick(0x4630, 33);
+				T.r[0] = 0;
+				tick(0x4632, 12);
+				T.r[0] = peekb(0x01F5);
+				tick(0x4636, 24);
+				T.r[0] = (uint16_t)(T.r[0] + 0x0031);
+				tick(0x463A, 18);
+				jsr(0x463E, 0x8C56);                   // draw_big_char: the player
 			}
-			blk(0x463E, 57);
-			poke(at(0), 0x0258);
-			call(0x8D74, {});                          // wait 600 frames
+			poke(T.r[6], 0x0258);
+			tick(0x4642, 27);
+			jsr(0x4646, 0x8D74);                       // wait_frames(600)
 		}
+		else
+			tick(0x4646, 12);
 	}
-	blk(0x4646, 69);
-	poke(at(0x14), 0);
-	if (!peek(at(0x24)))
-	{
-		blk(0x4650, 57);
-		poke(at(0x14), (uint16_t)(peek(at(0x14)) + 1));
-		poke(0x0208, place);
-	}
-	blk(0x4658, 24);
-	if (place & 0x8000)
-		blk(0x465C, 18);                               // JMP 0x4A4E
 	else
+		tick(0x4646, 12);                              // BEQ
+	poke(FLAG, 0);
+	tick(0x464A, 30);
+	b = a.u(0) != 0;
+	tick(0x464E, 27);                                  // TST 0x24(SP)
+	if (!b)
 	{
-	// the table
-	blk(0x4660, 30);
-	call(0x8CE8, {});                                  // clear_playfield
-	blk(0x4664, 30);
-	call(0x8D2C, {});                                  // clear_playfield_ram
-	blk(0x4668, 114);
-	poke(0x0188, 0xE000);
-	poke(at(0), 0x5F1E);
-	push(0x0000);
-	call(0xEAD4, {});                                  // draw_tile_block(0, 0x5F1E)
-	blk(0x4678, 45);
-	if (peek(at(0x16)) & 1)
+		tick(0x4650, 12);                              // BNE
+		poke(FLAG, (uint16_t)(peek(FLAG) + 1));
+		tick(0x4654, 30);
+		poke(0x0208, T.r[2]);
+		tick(0x4658, 27);
+	}
+	else
+		tick(0x4658, 12);
+	tick(0x465A, 12);                                  // TST R2
+	if (T.r[2] & 0x8000)
 	{
-		blk(0x4680, 30);
-		T.r[0] = 0x0035;
+		tick(0x465C, 12);                              // BGE
+		tick(0x4A4E, 18);                              // JMP: not a high score
 	}
 	else
 	{
-		blk(0x4686, 18);
-		T.r[0] = 0x0036;
-	}
-	blk(0x468A, 30);
-	call(0x8AB6, {});
-	blk(0x468E, 36);
-	if (peekb(0x01F6))
-	{
-		blk(0x4694, 57);
-		poke(at(0), 0x78D2);
-		call(0xA9FC, {});
-	}
-	blk(0x469C, 132);
-	poke(at(0x14), (uint16_t)(peek(at(0x26)) + 0x000E));
-	T.r[4] = (uint16_t)(peek(at(0x26)) - 1);
-	for (;;)
-	{
-		blk(0x4756, 51);
-		T.r[4]++;
-		if (!((int16_t)T.r[4] <= (int16_t)peek(at(0x14)))) break;
-		blk(0x46B0, 24);
-		if (T.r[4] == T.r[2])
+		tick(0x4660, 12);
+		jsr(0x4664, 0x8CE8);                           // clear_playfield
+		jsr(0x4668, 0x8D2C);
+		poke(0x0188, 0xE000);
+		tick(0x466E, 33);
+		poke(T.r[6], 0x5F1E);
+		tick(0x4672, 27);
+		push(0);
+		tick(0x4674, 24);
+		jsr(0x4678, 0xEAD4);                           // draw_tile_block(0, 0x5F1E)
+		b = (peek(FLAG) & 1) != 0;
+		tick(0x467E, 33);                              // BIT #1,0x16(SP)
+		if (b)
 		{
-			blk(0x46B4, 45);
-			poke(0x0188, 0x4000);
+			tick(0x4680, 12);
+			T.r[0] = 0x0035;
+			tick(0x4684, 18);
+			tick(0x468A, 12);                          // BR
 		}
 		else
 		{
-			blk(0x46BC, 33);
-			poke(0x0188, 0xE000);
+			tick(0x4686, 12);                          // BEQ
+			T.r[0] = 0x0036;
+			tick(0x468A, 18);
 		}
-		blk(0x46C2, 312);
-		T.r[1] = (uint16_t)(T.r[4] - peek(at(0x26)));
-		T.r[0] = (uint16_t)(T.r[1] << 1);
-		poke(0x0186, (uint16_t)(peek((uint16_t)(0x7FB8 + T.r[0])) + 0x1FF8));
-		poke(at(0), (uint16_t)(T.r[1] + 1));
-		push(0x0000);
-		push(0x0002);
-		push(0x0000);
-		push(0x0000);
-		T.r[0] = call(0xBA9A, {});                     // the rank
-		blk(0x46EA, 30);
-		if ((int16_t)T.r[1] >= 8)
+		jsr(0x468E, 0x8AB6);
+		b = peekb(0x01F6) != 0;
+		tick(0x4692, 24);                              // TSTB @#0x01F6
+		if (b)
 		{
-			blk(0x46F0, 33);
-			poke(0x0186, (uint16_t)(peek(0x0186) + 4));
-		}
-		blk(0x46F6, 24);
-		if (T.r[4] == T.r[2])
-		{
-			blk(0x4728, 33);
-			poke(0x0186, (uint16_t)(peek(0x0186) + 0x000C));
+			tick(0x4694, 12);
+			poke(T.r[6], 0x78D2);
+			tick(0x4698, 27);
+			jsr(0x469C, 0xA9FC);
 		}
 		else
-		{
-			blk(0x46FA, 78);
-			T.r[0] = (uint16_t)(T.r[4] << 3);
-			T.r[1] = T.r[0];
-			for (T.r[3] = 4;;)
-			{
-				blk(0x4708, 63);
-				T.r[0] = (uint16_t)(T.r[3] + T.r[1]);
-				T.r[5] = sext8(peekb((uint16_t)(0x0370 + T.r[0])));
-				if (!T.r[5])
-				{
-					blk(0x4712, 18);
-					T.r[5] = 0x0020;
-				}
-				blk(0x4716, 54);
-				T.r[0] = T.r[5] & 0x00FF;
-				call(0x8B52, {});                      // draw_large_char (initial)
-				blk(0x471E, 42);
-				T.r[3]++;
-				if (!((int16_t)T.r[3] <= 6)) break;
-			}
-			blk(0x4726, 12);
-		}
-		blk(0x472E, 276);
-		poke(0x0186, (uint16_t)(peek(0x0186) + 4));
-		T.r[0] = (uint16_t)(T.r[4] << 3);
-		poke(at(0), peek((uint16_t)(0x0372 + T.r[0])));
-		push(peek((uint16_t)(0x0370 + T.r[0])));
-		push(0x0006);
-		push(0x0001);
-		push(peek(at(0)));
-		T.r[0] = call(0xBA9A, {});                     // the score
-		blk(0x4752, 18);
-		T.r[6] = (uint16_t)(T.r[6] + 0x0010);
-	}
-	blk(0x475E, 333);
-	poke(0x0188, 0x4000);
-	T.r[0] = (uint16_t)(T.r[2] << 3);
-	poke(at(0x08), T.r[0]);                            // offset of the new entry
-	poke(at(0x10), (uint16_t)(T.r[2] - peek(at(0x26))));   // its place on the screen
-	T.r[0] = (uint16_t)(peek(at(0x10)) << 1);
-	poke(at(0x12), (uint16_t)(0x7FB8 + T.r[0]));       // its screen position
-	bool enter = peek(0x0208) == 0xFFFF;
-	if (!enter)
-	{
-		blk(0x4792, 45);
-		enter = peek(at(0x16)) & 1;
-	}
-	if (enter)
-	{
-		blk(0x479E, 75);
-		T.r[0] = peekb(0x01F5);
-		if (!peekb((uint16_t)(0x0F3A + T.r[0])))
-		{
-			blk(0x47AA, 57);
-			poke(at(0), 0x0045);
-			call(0x8E78, {});                          // queue_sound
-		}
-		blk(0x47B2, 57);
-		poke(at(0), 0x78DC);
-		call(0xA9FC, {});
-		blk(0x47BA, 57);
-		poke(at(0), 0x78C8);
-		call(0xA9FC, {});
-		blk(0x47C2, 300);
-		poke(0x0188, 0x4000);
-		T.r[0] = peek(at(0x08));
-		for (int k = 4; k <= 6; k++) pokeb((uint16_t)(0x0370 + k + T.r[0]), 0x20);
-		poke(at(0x0C), 0);                             // initial being entered
-		pokeb(at(0x0A), 0x41);                         // the letter
-		pokeb(at(0x0E), 0x1E);                         // seconds left
-		call(0x8D86, {});
-		blk(0x47F2, 30);
-		call(0x8E2E, {});
+			tick(0x469C, 12);                          // BEQ
+		poke(LAST, a.u(0));
+		tick(0x46A2, 45);
+		poke(LAST, (uint16_t)(peek(LAST) + 0x000E));
+		tick(0x46A8, 36);
+		T.r[4] = a.u(0);
+		tick(0x46AC, 27);
+		T.r[4]--;
+		tick(0x46AE, 12);
+		tick(0x4756, 12);                              // BR
+		// the table: rank, initials (spaces for none) and score of each entry
 		for (;;)
 		{
-			blk(0x47F6, 45);
-			if ((int16_t)peek(at(0x0C)) >= 3)
+			T.r[4]++;
+			tick(0x4758, 12);
+			b = (int16_t)T.r[4] <= (int16_t)peek(LAST);
+			tick(0x475C, 27);                          // CMP R4,0x14(SP)
+			if (!b)
 			{
-				blk(0x47FE, 18);
+				tick(0x475E, 12);                      // BLE
 				break;
 			}
-			blk(0x4802, 39);
-			if (peekb(at(0x0E)) & 0x80)
+			tick(0x46B0, 12);
+			tick(0x46B2, 12);                          // CMP R4,R2
+			if (T.r[4] == T.r[2])
 			{
-				blk(0x47FE, 18);
-				break;
+				tick(0x46B4, 12);                      // BNE
+				poke(0x0188, 0x4000);
+				tick(0x46BA, 33);
+				tick(0x46C2, 12);                      // BR
 			}
-			blk(0x4808, 30);
-			call(0x8D50, {});                          // wait_vblank
-			blk(0x480C, 42);
-			if (!(peekb(0x01C4) & 0x3F))
+			else
 			{
-				blk(0x4814, 99);
-				T.r[0] = (uint16_t)(sext8(peekb(at(0x0E))) - 1);
-				pokeb(at(0x0E), (uint8_t)T.r[0]);
-				if ((int8_t)T.r[0] < 0x0A)
-				{
-					blk(0x4824, 24);
-					if (!((int8_t)T.r[0] < 0))
-					{
-						blk(0x4828, 63);
-						poke(0x0188, 0xE000);
-						if ((uint8_t)T.r[0] == 9)
-						{
-							blk(0x4834, 81);
-							poke(at(0), 0x78E6);
-							push(0x0000);
-							call(0x4D30, {});          // message_box
-							blk(0x483E, 18);
-							pop2();
-						}
-						blk(0x4840, 108);
-						poke(0x0186, 0x20F0);
-						T.r[0] = (uint16_t)(sext8(peekb(at(0x0E))) + 0x0030);
-						call(0x8C56, {});              // draw_big_char
-						blk(0x4852, 33);
-						poke(0x0188, 0x4000);
-					}
-				}
+				tick(0x46BC, 12);
+				poke(0x0188, 0xE000);
+				tick(0x46C2, 33);
 			}
-			blk(0x4858, 30);
-			call(0x8D86, {});
-			blk(0x485C, 30);
-			T.r[0] = call(0x8E2E, {});                 // joystick step
-			blk(0x4860, 111);
-			T.r[1] = peekb(at(0x0A));
-			T.r[0] = (uint16_t)(T.r[0] + T.r[1]);
-			pokeb(at(0x0A), (uint8_t)T.r[0]);
-			if ((uint8_t)T.r[0] < 0x3F)
+			T.r[1] = T.r[4];
+			tick(0x46C4, 12);
+			T.r[1] = (uint16_t)(T.r[1] - a.u(0));
+			tick(0x46C8, 27);
+			T.r[0] = T.r[1];
+			tick(0x46CA, 12);
+			T.r[0] = (uint16_t)(T.r[0] << 1);
+			tick(0x46CC, 12);
+			poke(0x0186, peek((uint16_t)(0x7FB8 + T.r[0])));
+			tick(0x46D2, 42);
+			poke(0x0186, (uint16_t)(peek(0x0186) + 0x1FF8));
+			tick(0x46D8, 33);
+			poke(T.r[6], T.r[1]);
+			tick(0x46DA, 21);
+			poke(T.r[6], (uint16_t)(peek(T.r[6]) + 1));
+			tick(0x46DC, 21);
+			push(0);
+			tick(0x46DE, 24);
+			push(0x0002);
+			tick(0x46E2, 30);
+			push(0);
+			tick(0x46E4, 24);
+			push(0);
+			tick(0x46E6, 24);
+			jsr(0x46EA, 0xBA9A);                       // the rank
+			tick(0x46EE, 18);                          // CMP R1,#8
+			if ((int16_t)T.r[1] >= 8)
 			{
-				blk(0x4872, 36);
-				pokeb(at(0x0A), 0x5A);
-			}
-			blk(0x4878, 45);
-			if (peekb(at(0x0A)) > 0x5A)
-			{
-				blk(0x4880, 36);
-				pokeb(at(0x0A), 0x3F);
-			}
-			blk(0x4886, 201);
-			T.r[1] = (uint16_t)(peek(at(0x0C)) << 2);
-			T.r[0] = (uint16_t)(T.r[1] + peek(peek(at(0x12))));
-			poke(0x0186, (uint16_t)(T.r[0] + 0x2000));
-			if ((int16_t)peek(at(0x10)) >= 8)
-			{
-				blk(0x48A6, 33);
+				tick(0x46F0, 12);                      // BLT
 				poke(0x0186, (uint16_t)(peek(0x0186) + 4));
+				tick(0x46F6, 33);
 			}
-			blk(0x48AC, 57);
-			T.r[2] = 0;
-			if (peekb(at(0x0A)) < 0x41)
+			else
+				tick(0x46F6, 12);
+			tick(0x46F8, 12);                          // CMP R4,R2
+			if (T.r[4] == T.r[2])
 			{
-				blk(0x48B6, 81);
-				T.r[2]++;
-				T.r[0] = (uint16_t)(peekb(at(0x0A)) - 0x0020);
+				tick(0x4728, 12);                      // BEQ
+				poke(0x0186, (uint16_t)(peek(0x0186) + 0x000C));
+				tick(0x472E, 33);
 			}
 			else
 			{
-				blk(0x48C4, 39);
-				T.r[0] = peekb(at(0x0A));
-			}
-			blk(0x48CA, 30);
-			call(0x8B52, {});                          // draw_large_char: the letter
-			blk(0x48CE, 36);
-			if (!(peekb(0x0193) & 0x80))
-			{
-				blk(0x495A, 27 + 18);
-				pokeb(0x0190, 0);
-				continue;
-			}
-			blk(0x48D4, 36);
-			if (peekb(0x0190)) continue;               // button still held
-			blk(0x48DA, 45);
-			if (peekb(at(0x0A)) == 0x3F)
-			{
-				// delete the last initial
-				blk(0x48E2, 39);
-				if ((int16_t)peek(at(0x0C)) > 0)
+				tick(0x46FA, 12);
+				T.r[0] = T.r[4];
+				tick(0x46FC, 12);
+				for (uint16_t pc = 0x46FE; pc <= 0x4702; pc = (uint16_t)(pc + 2))
 				{
-					blk(0x48E8, 225);
-					pokeb(at(0x0A), 0x20);
-					T.r[0] = (uint16_t)(T.r[1] + peek(peek(at(0x12))));
-					poke(0x0186, (uint16_t)(T.r[0] + 0x2000));
-					T.r[0] = (uint16_t)(peek(at(0x14)) - peek(at(0x26)));
-					if (!((int16_t)T.r[0] < 8))
+					T.r[0] = (uint16_t)(T.r[0] << 1);
+					tick(pc, 12);
+				}
+				T.r[1] = T.r[0];
+				tick(0x4704, 12);
+				T.r[3] = 0x0004;
+				tick(0x4708, 18);
+				for (;;)
+				{
+					T.r[0] = T.r[3];
+					tick(0x470A, 12);
+					T.r[0] = (uint16_t)(T.r[0] + T.r[1]);
+					tick(0x470C, 12);
+					T.r[5] = sext8(peekb((uint16_t)(0x0370 + T.r[0])));
+					tick(0x4710, 27);
+					if (!T.r[5])
 					{
-						blk(0x490C, 33);
-						poke(0x0186, (uint16_t)(peek(0x0186) + 4));
+						tick(0x4712, 12);              // BNE
+						T.r[5] = 0x0020;               // MOVB #0x20,R5
+						tick(0x4716, 18);
 					}
-					blk(0x4912, 69);
-					T.r[0] = peekb(at(0x0A));
-					call(0x8B52, {});                  // draw_large_char: blank
-					blk(0x491C, 141);
-					T.r[0] = (uint16_t)(peek(at(0x08)) + peek(at(0x0C)));
-					pokeb((uint16_t)(0x0374 + T.r[0]), peekb(at(0x0A)));
-					poke(at(0x0C), (uint16_t)(peek(at(0x0C)) - 1));
+					else
+						tick(0x4716, 12);
+					T.r[0] = 0;
+					tick(0x4718, 12);
+					T.r[0] = (uint8_t)T.r[5];
+					tick(0x471A, 12);
+					jsr(0x471E, 0x8B52);               // draw_large_char
+					T.r[3]++;
+					tick(0x4720, 12);
+					tick(0x4724, 18);                  // CMP R3,#6
+					if ((int16_t)T.r[3] > 6)
+					{
+						tick(0x4726, 12);              // BLE
+						break;
+					}
+					tick(0x4708, 12);
 				}
+				tick(0x472E, 12);                      // BR
+			}
+			poke(0x0186, (uint16_t)(peek(0x0186) + 4));
+			tick(0x4734, 33);
+			T.r[0] = T.r[4];
+			tick(0x4736, 12);
+			for (uint16_t pc = 0x4738; pc <= 0x473C; pc = (uint16_t)(pc + 2))
+			{
+				T.r[0] = (uint16_t)(T.r[0] << 1);
+				tick(pc, 12);
+			}
+			poke(T.r[6], peek((uint16_t)(0x0372 + T.r[0])));
+			tick(0x4740, 36);
+			push(peek((uint16_t)(0x0370 + T.r[0])));
+			tick(0x4744, 39);
+			push(0x0006);
+			tick(0x4748, 30);
+			push(0x0001);
+			tick(0x474C, 30);
+			push(peek(T.r[6]));
+			tick(0x474E, 30);
+			jsr(0x4752, 0xBA9A);                       // the score
+			T.r[6] = (uint16_t)(T.r[6] + 0x0010);
+			tick(0x4756, 18);
+		}
+		poke(0x0188, 0x4000);
+		tick(0x4764, 33);
+		T.r[0] = T.r[2];
+		tick(0x4766, 12);
+		for (uint16_t pc = 0x4768; pc <= 0x476C; pc = (uint16_t)(pc + 2))
+		{
+			T.r[0] = (uint16_t)(T.r[0] << 1);
+			tick(pc, 12);
+		}
+		poke(E8, T.r[0]);
+		tick(0x4770, 30);
+		poke(REL, T.r[2]);
+		tick(0x4774, 30);
+		poke(REL, (uint16_t)(peek(REL) - a.u(0)));
+		tick(0x477A, 45);
+		T.r[0] = peek(REL);
+		tick(0x477E, 27);
+		T.r[0] = (uint16_t)(T.r[0] << 1);
+		tick(0x4780, 12);
+		poke(ROW, 0x7FB8);
+		tick(0x4786, 36);
+		poke(ROW, (uint16_t)(peek(ROW) + T.r[0]));
+		tick(0x478A, 30);
+		b = peek(0x0208) == 0xFFFF;
+		tick(0x4790, 30);                              // CMP @#0x0208,#-1
+		bool enter = b;
+		if (!b)
+		{
+			tick(0x4792, 12);                          // BEQ
+			enter = (peek(FLAG) & 1) != 0;
+			tick(0x4798, 33);                          // BIT #1,0x16(SP)
+			tick(enter ? 0x479E : 0x479A, 12);         // BNE
+		}
+		else
+			tick(0x479E, 12);
+		if (enter)
+		{
+			// the initials are entered
+			T.r[0] = 0;
+			tick(0x47A0, 12);
+			T.r[0] = peekb(0x01F5);
+			tick(0x47A4, 24);
+			b = peekb((uint16_t)(0x0F3A + T.r[0])) != 0;
+			tick(0x47A8, 27);                          // TSTB 0xF3A(R0)
+			if (!b)
+			{
+				tick(0x47AA, 12);                      // BNE
+				poke(T.r[6], 0x0045);
+				tick(0x47AE, 27);
+				jsr(0x47B2, 0x8E78);                   // queue_sound
 			}
 			else
+				tick(0x47B2, 12);
+			poke(T.r[6], 0x78DC);
+			tick(0x47B6, 27);
+			jsr(0x47BA, 0xA9FC);
+			poke(T.r[6], 0x78C8);
+			tick(0x47BE, 27);
+			jsr(0x47C2, 0xA9FC);
+			poke(0x0188, 0x4000);
+			tick(0x47C8, 33);
+			T.r[0] = peek(E8);
+			tick(0x47CC, 27);
+			pokeb((uint16_t)(0x0374 + T.r[0]), 0x20);
+			tick(0x47D2, 36);
+			pokeb((uint16_t)(0x0375 + T.r[0]), 0x20);
+			tick(0x47D8, 36);
+			pokeb((uint16_t)(0x0376 + T.r[0]), 0x20);
+			tick(0x47DE, 36);
+			poke(CNT, 0);
+			tick(0x47E2, 30);
+			pokeb(LET, 0x41);
+			tick(0x47E8, 36);
+			pokeb(SEC, 0x1E);
+			tick(0x47EE, 36);
+			jsr(0x47F2, 0x8D86);                       // read_controller
+			jsr(0x47F6, 0x8E2E);
+			for (;;)
 			{
-				blk(0x4930, 24);
-				if (T.r[2] & 1)
+				b = (int16_t)peek(CNT) < 3;
+				tick(0x47FC, 33);                      // CMP 0xC(SP),#3
+				if (!b)
 				{
-					blk(0x4934, 36);
-					pokeb(at(0x0A), 0x20);
+					tick(0x47FE, 12);                  // BLT
+					break;
 				}
-				T.r[2] >>= 1;
-				blk(0x493A, 129);
-				T.r[0] = (uint16_t)(peek(at(0x08)) + peek(at(0x0C)));
-				pokeb((uint16_t)(0x0374 + T.r[0]), peekb(at(0x0A)));
-				poke(at(0x0C), (uint16_t)(peek(at(0x0C)) + 1));
+				tick(0x4802, 12);
+				b = (peekb(SEC) & 0x80) != 0;
+				tick(0x4806, 27);                      // TSTB 0xE(SP)
+				if (b)
+				{
+					tick(0x47FE, 12);                  // BLT: time is up
+					break;
+				}
+				tick(0x4808, 12);
+				jsr(0x480C, 0x8D50);                   // wait_vblank
+				b = (peekb(0x01C4) & 0x3F) != 0;
+				tick(0x4812, 30);                      // BITB #0x3F,@#0x01C4
+				if (!b)
+				{
+					tick(0x4814, 12);                  // BNE: a second has passed
+					T.r[0] = sext8(peekb(SEC));
+					tick(0x4818, 27);
+					T.r[0]--;
+					tick(0x481A, 12);
+					pokeb(SEC, (uint8_t)T.r[0]);
+					tick(0x481E, 30);
+					tick(0x4822, 18);                  // CMPB R0,#10
+					if ((int8_t)T.r[0] < 10)
+					{
+						tick(0x4824, 12);              // BGE
+						tick(0x4826, 12);              // TSTB R0
+						if (!((int8_t)T.r[0] < 0))
+						{
+							tick(0x4828, 12);          // BLT
+							poke(0x0188, 0xE000);
+							tick(0x482E, 33);
+							tick(0x4832, 18);          // CMPB R0,#9
+							if ((uint8_t)T.r[0] == 9)
+							{
+								tick(0x4834, 12);      // BNE
+								poke(T.r[6], 0x78E6);
+								tick(0x4838, 27);
+								push(0);
+								tick(0x483A, 24);
+								jsr(0x483E, 0x4D30);   // message_box(draw)
+								T.r[6] = (uint16_t)(T.r[6] + 2);
+								tick(0x4840, 18);      // TST (SP)+
+							}
+							else
+								tick(0x4840, 12);
+							poke(0x0186, 0x20F0);
+							tick(0x4846, 33);
+							T.r[0] = sext8(peekb(SEC));
+							tick(0x484A, 27);
+							T.r[0] = (uint16_t)(T.r[0] + 0x0030);
+							tick(0x484E, 18);
+							jsr(0x4852, 0x8C56);       // draw_big_char: the seconds
+							poke(0x0188, 0x4000);
+							tick(0x4858, 33);
+						}
+						else
+							tick(0x4858, 12);
+					}
+					else
+						tick(0x4858, 12);
+				}
+				else
+					tick(0x4858, 12);
+				jsr(0x485C, 0x8D86);                   // read_controller
+				jsr(0x4860, 0x8E2E);
+				T.r[1] = 0;
+				tick(0x4862, 12);
+				T.r[1] = peekb(LET);
+				tick(0x4866, 27);
+				T.r[0] = (uint16_t)(T.r[0] + T.r[1]);
+				tick(0x4868, 12);
+				pokeb(LET, (uint8_t)T.r[0]);
+				tick(0x486C, 30);
+				tick(0x4870, 18);                      // CMPB R0,#0x3F
+				if ((uint8_t)T.r[0] < 0x3F)
+				{
+					tick(0x4872, 12);                  // BCC
+					pokeb(LET, 0x5A);
+					tick(0x4878, 36);
+				}
+				else
+					tick(0x4878, 12);
+				b = peekb(LET) > 0x5A;
+				tick(0x487E, 33);                      // CMPB 0xA(SP),#0x5A
+				if (b)
+				{
+					tick(0x4880, 12);                  // BLOS
+					pokeb(LET, 0x3F);
+					tick(0x4886, 36);
+				}
+				else
+					tick(0x4886, 12);
+				T.r[1] = peek(CNT);
+				tick(0x488A, 27);
+				T.r[1] = (uint16_t)(T.r[1] << 1);
+				tick(0x488C, 12);
+				T.r[1] = (uint16_t)(T.r[1] << 1);
+				tick(0x488E, 12);
+				T.r[0] = T.r[1];
+				tick(0x4890, 12);
+				T.r[0] = (uint16_t)(T.r[0] + peek(peek(ROW)));
+				tick(0x4894, 33);
+				poke(0x0186, T.r[0]);
+				tick(0x4898, 27);
+				poke(0x0186, (uint16_t)(peek(0x0186) + 0x2000));
+				tick(0x489E, 33);
+				b = (int16_t)peek(REL) >= 8;
+				tick(0x48A4, 33);                      // CMP 0x10(SP),#8
+				if (b)
+				{
+					tick(0x48A6, 12);                  // BLT
+					poke(0x0186, (uint16_t)(peek(0x0186) + 4));
+					tick(0x48AC, 33);
+				}
+				else
+					tick(0x48AC, 12);
+				T.r[2] = 0;
+				tick(0x48AE, 12);
+				b = peekb(LET) < 0x41;
+				tick(0x48B4, 33);                      // CMPB 0xA(SP),#0x41
+				if (b)
+				{
+					tick(0x48B6, 12);                  // BCC
+					T.r[2]++;
+					tick(0x48B8, 12);
+					T.r[0] = 0;
+					tick(0x48BA, 12);
+					T.r[0] = peekb(LET);
+					tick(0x48BE, 27);
+					T.r[0] = (uint16_t)(T.r[0] - 0x0020);
+					tick(0x48C2, 18);
+					tick(0x48CA, 12);                  // BR
+				}
+				else
+				{
+					tick(0x48C4, 12);
+					T.r[0] = 0;
+					tick(0x48C6, 12);
+					T.r[0] = peekb(LET);
+					tick(0x48CA, 27);
+				}
+				jsr(0x48CE, 0x8B52);                   // draw_large_char: the letter
+				b = (peekb(0x0193) & 0x80) != 0;
+				tick(0x48D2, 24);                      // TSTB @#0x0193
+				if (!b)
+				{
+					tick(0x495A, 12);                  // BPL: no button
+					pokeb(0x0190, 0);
+					tick(0x495E, 27);
+				}
+				else
+				{
+					tick(0x48D4, 12);
+					b = peekb(0x0190) != 0;
+					tick(0x48D8, 24);                  // TSTB @#0x0190
+					if (b)
+					{
+						tick(0x47F6, 12);              // BNE: still held
+						continue;
+					}
+					tick(0x48DA, 12);
+					const uint8_t letter = peekb(LET);
+					const bool carry = letter < 0x3F;
+					tick(0x48E0, 33);                  // CMPB 0xA(SP),#0x3F
+					if (letter == 0x3F)
+					{
+						// '?': delete the last letter
+						tick(0x48E2, 12);              // BNE
+						b = (int16_t)peek(CNT) > 0;
+						tick(0x48E6, 27);              // TST 0xC(SP)
+						if (b)
+						{
+							tick(0x48E8, 12);          // BLE
+							pokeb(LET, 0x20);
+							tick(0x48EE, 36);
+							T.r[0] = T.r[1];
+							tick(0x48F0, 12);
+							T.r[0] = (uint16_t)(T.r[0] + peek(peek(ROW)));
+							tick(0x48F4, 33);
+							poke(0x0186, T.r[0]);
+							tick(0x48F8, 27);
+							poke(0x0186, (uint16_t)(peek(0x0186) + 0x2000));
+							tick(0x48FE, 33);
+							T.r[0] = peek(LAST);
+							tick(0x4902, 27);
+							T.r[0] = (uint16_t)(T.r[0] - a.u(0));
+							tick(0x4906, 27);
+							tick(0x490A, 18);          // CMP R0,#8
+							if ((int16_t)T.r[0] >= 8)
+							{
+								tick(0x490C, 12);      // BLT
+								poke(0x0186, (uint16_t)(peek(0x0186) + 4));
+								tick(0x4912, 33);
+							}
+							else
+								tick(0x4912, 12);
+							T.r[0] = 0;
+							tick(0x4914, 12);
+							T.r[0] = peekb(LET);
+							tick(0x4918, 27);
+							jsr(0x491C, 0x8B52);       // draw_large_char: a space
+							T.r[0] = peek(E8);
+							tick(0x4920, 27);
+							T.r[0] = (uint16_t)(T.r[0] + peek(CNT));
+							tick(0x4924, 27);
+							pokeb((uint16_t)(0x0374 + T.r[0]), peekb(LET));
+							tick(0x492A, 45);
+							poke(CNT, (uint16_t)(peek(CNT) - 1));
+							tick(0x492E, 30);
+							tick(0x494C, 12);          // BR
+						}
+						else
+							tick(0x494C, 12);          // BLE
+					}
+					else
+					{
+						tick(0x4930, 12);              // BNE
+						const bool space = (T.r[2] & 1) != 0;
+						T.r[2] = (uint16_t)(((carry ? 1u : 0u) << 15) | (T.r[2] >> 1));
+						tick(0x4932, 12);              // ROR R2
+						if (space)
+						{
+							tick(0x4934, 12);          // BCC
+							pokeb(LET, 0x20);
+							tick(0x493A, 36);
+						}
+						else
+							tick(0x493A, 12);
+						T.r[0] = peek(E8);
+						tick(0x493E, 27);
+						T.r[0] = (uint16_t)(T.r[0] + peek(CNT));
+						tick(0x4942, 27);
+						pokeb((uint16_t)(0x0374 + T.r[0]), peekb(LET));
+						tick(0x4948, 45);
+						poke(CNT, (uint16_t)(peek(CNT) + 1));
+						tick(0x494C, 30);
+					}
+					pokeb(LET, 0x41);
+					tick(0x4952, 36);
+					pokeb(0x0190, 1);
+					tick(0x4958, 33);
+					tick(0x495E, 12);                  // BR
+				}
+				tick(0x47F6, 18);                      // JMP
 			}
-			blk(0x494C, 81 + 18);
-			pokeb(at(0x0A), 0x41);
-			pokeb(0x0190, 1);
-		}
-	}
-	else
-	{
-		// shown again: the initials of the earlier entry 0x0208
-		blk(0x479A, 18 + 126);
-		poke(0x0186, (uint16_t)(peek(peek(at(0x12))) + 0x2000));
-		if ((int16_t)peek(at(0x10)) >= 8)
-		{
-			blk(0x4976, 33);
-			poke(0x0186, (uint16_t)(peek(0x0186) + 4));
-		}
-		blk(0x497C, 12);
-		for (T.r[1] = 0;;)
-		{
-			blk(0x497E, 216);
-			T.r[2] = (uint16_t)(T.r[1] + peek(at(0x08)));
-			T.r[0] = (uint16_t)((peek(0x0208) << 3) + T.r[1]);
-			T.r[0] = peekb((uint16_t)(0x0374 + T.r[0]));
-			pokeb((uint16_t)(0x0374 + T.r[2]), (uint8_t)T.r[0]);
-			call(0x8B52, {});                          // draw_large_char
-			blk(0x49A0, 42);
-			T.r[1]++;
-			if (!((int16_t)T.r[1] <= 2)) break;
-		}
-		blk(0x49A8, 57);
-		poke(at(0), 0x012C);
-		call(0x8D74, {});                              // wait 300 frames
-	}
-	// to the sound CPU
-	{
-		blk(0x49B0, 30);
-		call(0x8E6A, {});                              // set_flag_01a4
-		const bool flag = peek(at(0x16)) & 1;
-		blk(0x49B4, 45);
-		if (flag)
-		{
-			blk(0x49BC, 39);
-			poke(at(0), 0x000F);
+			tick(0x49B0, 18);                          // JMP
 		}
 		else
 		{
-			blk(0x49C2, 27);
-			poke(at(0), 0x0010);
+			// shown again: the initials of the entry 0x0208 are copied
+			tick(0x4962, 18);                          // JMP
+			poke(0x0186, peek(peek(ROW)));
+			tick(0x4968, 48);
+			poke(0x0186, (uint16_t)(peek(0x0186) + 0x2000));
+			tick(0x496E, 33);
+			b = (int16_t)peek(REL) >= 8;
+			tick(0x4974, 33);                          // CMP 0x10(SP),#8
+			if (b)
+			{
+				tick(0x4976, 12);                      // BLT
+				poke(0x0186, (uint16_t)(peek(0x0186) + 4));
+				tick(0x497C, 33);
+			}
+			else
+				tick(0x497C, 12);
+			T.r[1] = 0;
+			tick(0x497E, 12);
+			for (;;)
+			{
+				T.r[2] = T.r[1];
+				tick(0x4980, 12);
+				T.r[2] = (uint16_t)(T.r[2] + peek(E8));
+				tick(0x4984, 27);
+				T.r[0] = peek(0x0208);
+				tick(0x4988, 24);
+				for (uint16_t pc = 0x498A; pc <= 0x498E; pc = (uint16_t)(pc + 2))
+				{
+					T.r[0] = (uint16_t)(T.r[0] << 1);
+					tick(pc, 12);
+				}
+				T.r[0] = (uint16_t)(T.r[0] + T.r[1]);
+				tick(0x4990, 12);
+				T.r[0] = sext8(peekb((uint16_t)(0x0374 + T.r[0])));
+				tick(0x4994, 27);
+				T.r[0] &= 0x00FF;
+				tick(0x4998, 18);
+				pokeb((uint16_t)(0x0374 + T.r[2]), (uint8_t)T.r[0]);
+				tick(0x499C, 30);
+				jsr(0x49A0, 0x8B52);                   // draw_large_char
+				T.r[1]++;
+				tick(0x49A2, 12);
+				tick(0x49A6, 18);                      // CMP R1,#2
+				if ((int16_t)T.r[1] > 2)
+				{
+					tick(0x49A8, 12);                  // BLE
+					break;
+				}
+				tick(0x497E, 12);
+			}
+			poke(T.r[6], 0x012C);
+			tick(0x49AC, 27);
+			jsr(0x49B0, 0x8D74);                       // wait_frames(300)
 		}
-		blk(0x49C6, 30);
-		call(0x8EA2, {});                              // send_sound_command
-		blk(0x49CA, 30);
-		call(0x8F50, {});
-		blk(0x49CE, 45);
-		auto send = [&](uint16_t pc, int cost, uint16_t a) {
-			blk(pc, cost);
-			poke(at(0), 0);
-			pokeb(at(0), peekb((uint16_t)(a + peek(at(0x08)))));
-			call(0x8EA2, {});
+		// the entry to the sound CPU
+		jsr(0x49B4, 0x8E6A);                           // set_flag_01a4
+		b = (peek(FLAG) & 1) != 0;
+		tick(0x49BA, 33);                              // BIT #1,0x16(SP)
+		if (b)
+		{
+			tick(0x49BC, 12);
+			poke(T.r[6], 0x000F);
+			tick(0x49C0, 27);
+			tick(0x49C6, 12);                          // BR
+		}
+		else
+		{
+			tick(0x49C2, 12);                          // BEQ
+			poke(T.r[6], 0x0010);
+			tick(0x49C6, 27);
+		}
+		jsr(0x49CA, 0x8EA2);                           // send_sound_command
+		jsr(0x49CE, 0x8F50);
+		// one byte of the entry at 0x0370 + k: CLR (SP); MOV 8(SP),R0; MOVB k(R0),(SP)
+		auto entry_byte = [&](uint16_t k, uint16_t pc) {
+			poke(T.r[6], 0);
+			tick((uint16_t)(pc + 2), 21);
+			T.r[0] = peek(E8);
+			tick((uint16_t)(pc + 6), 27);
+			pokeb(T.r[6], peekb((uint16_t)(0x0370 + k + T.r[0])));
+			tick((uint16_t)(pc + 10), 36);
 		};
-		if (flag)
+		b = (peek(FLAG) & 1) != 0;
+		tick(0x49D4, 33);                              // BIT #1,0x16(SP)
+		if (b)
 		{
-			send(0x49D6, 114, 0x0370);
-			send(0x49E4, 114, 0x0373);
-			send(0x49F2, 96 + 30, 0x0372);
+			tick(0x49D6, 12);
+			entry_byte(0, 0x49D6);
+			jsr(0x49E4, 0x8EA2);
+			entry_byte(3, 0x49E4);
+			jsr(0x49F2, 0x8EA2);
+			entry_byte(2, 0x49F2);
+			tick(0x4A16, 12);                          // BR
 		}
 		else
 		{
-			send(0x49FE, 114, 0x0372);
-			send(0x4A0C, 84 + 30, 0x0373);
+			tick(0x49FE, 12);                          // BEQ
+			entry_byte(2, 0x49FE);
+			jsr(0x4A0C, 0x8EA2);
+			entry_byte(3, 0x4A0C);
 		}
-		send(0x4A1A, 114, 0x0374);
-		send(0x4A28, 114, 0x0375);
-		send(0x4A36, 114, 0x0376);
-		blk(0x4A44, 30);
-		call(0x8F62, {});
-		blk(0x4A48, 30);
-		call(0x8E72, {});                              // clear_flag_01a4
-		blk(0x4A4C, 18);
-		pop2();
+		jsr(0x4A1A, 0x8EA2);
+		entry_byte(4, 0x4A1A);
+		jsr(0x4A28, 0x8EA2);
+		entry_byte(5, 0x4A28);
+		jsr(0x4A36, 0x8EA2);
+		entry_byte(6, 0x4A36);
+		jsr(0x4A44, 0x8EA2);
+		jsr(0x4A48, 0x8F62);
+		jsr(0x4A4C, 0x8E72);                           // clear_flag_01a4
+		T.r[6] = (uint16_t)(T.r[6] + 2);
+		tick(0x4A4E, 18);                              // TST (SP)+
 	}
-	}
-	blk(0x4A4E, 162 - 18);
 	poke(0x0184, 0x5AC8);
+	tick(0x4A54, 33);
 	T.r[0] = 0x3C00;
-	set_bank_b(0x3C00);
-	T.r[6] = (uint16_t)(T.r[6] + 0x0016 + 0x000C);
-	for (int i = 1; i <= 5; i++) T.r[i] = saved[i];
-	return 0x3C00;
+	tick(0x4A58, 18);
+	poke(0x01D4, T.r[0]);
+	tick(0x4A5C, 27);
+	poke(0x1402, T.r[0]);
+	tick(0x4A60, 27);
+	T.r[6] = (uint16_t)(T.r[6] + 0x0016);
+	tick(0x4A64, 18);
+	c_restore(4);
+	return T.r[0];
 }
 
 // A7:5BB8 (assembly)  game_over_states(): the game states (0x018F) after a game; the code
@@ -10259,7 +10571,7 @@ LOGIC_TABLE(banka,
 	c_routine("A5", 0x54CE, "trick_moves", trick_moves, 0, 0),
 	c_routine("A7", 0x4A66, "velocity_direction", velocity_direction, 0, 0),
 	asm_routine("A5", 0x4A2A, "skater_physics", skater_physics, 0),
-	wait_c_routine("A7", 0x45B0, "enter_high_score", enter_high_score, 111),
+	wait_c_routine("A7", 0x45B0, "enter_high_score", enter_high_score, 0),
 	wait_routine("A7", 0x5BB8, "game_over_states", game_over_states, 0),
 )
 
