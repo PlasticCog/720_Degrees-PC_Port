@@ -26,15 +26,19 @@ uint16_t sext8(uint8_t v) { return (uint16_t)(int16_t)(int8_t)v; }
 uint16_t install_selftest_interrupts(const Args &)
 {
 	push(T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0xF3AA, 24);
 	poke(0x1600, 0);
 	fl::clr();
 	tick(0xF3AE, 27);
 	poke(0x1580, 0);
+	fl::clr();
 	tick(0xF3B2, 27);
 	poke(0x15E0, 0);
+	fl::clr();
 	tick(0xF3B6, 27);
 	poke(0x15C0, 0);
+	fl::clr();
 	tick(0xF3BA, 27);
 	for (int i = 14; i >= 0; i -= 2)
 	{
@@ -52,14 +56,19 @@ uint16_t install_selftest_interrupts(const Args &)
 	T.r[0] = v;
 	tick(0xF3EE, 18 + 8 * (42 + 27 + 36 + 18 + 12) + 18 + 4 * (42 + 27 + 36 + 18 + 12));
 	poke(0x0038, 0x891E);
+	fl::mov(0x891E);
 	tick(0xF3F4, 33);
 	poke(0x003A, 0x00A0);
+	fl::mov(0x00A0);
 	tick(0xF3FA, 33);
 	poke(0x018C, 0x0008);
+	fl::mov(0x0008);
 	tick(0xF400, 33);
 	poke(0x1600, 0x0008);                              // the 32V interrupt on
+	fl::mov(0x0008);
 	tick(0xF406, 33);
 	T.r[1] = pop();
+	fl::mov(T.r[1]);
 	tick(0xF408, 18);
 	rts();
 	return v;
@@ -70,6 +79,7 @@ uint16_t install_selftest_interrupts(const Args &)
 void irq_32v_count()
 {
 	push(T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0x8926, 24);
 	T.r[0] = sext8(peekb(0x0191));
 	fl::movb((uint8_t)T.r[0]);
@@ -77,6 +87,7 @@ void irq_32v_count()
 	T.r[0] = fl::inc(T.r[0]);
 	tick(0x892C, 12);
 	pokeb(0x0191, (uint8_t)T.r[0]);
+	fl::movb((uint8_t)T.r[0]);
 	tick(0x8930, 27);
 	poke(0x15C0, 0);                                   // acknowledge
 	fl::clr();
@@ -91,6 +102,7 @@ void irq_32v_count()
 void wait_button_press()
 {
 	pokeb(0x0FE6, 0);
+	fl::clr();
 	tick(0x8D64, 27);
 	for (;;)
 	{
@@ -116,12 +128,16 @@ void init_display_b6()
 	jsr(0xF414, 0xDA74);
 	jsr(0xF418, 0xDB4E);
 	poke(0x0188, 0xE000);
+	fl::mov(0xE000);
 	tick(0xF41E, 33);
 	T.r[0] = 0x2800;
+	fl::mov(T.r[0]);
 	tick(0xF422, 18);
 	poke(0x01D4, 0x2800);
+	fl::mov(T.r[0]);
 	tick(0xF426, 27);
 	poke(0x1402, 0x2800);
+	fl::mov(T.r[0]);
 	tick(0xF42A, 27);
 	jsr(0xF42E, 0x69B2);
 	jsr(0xF432, 0x6F48);
@@ -156,11 +172,12 @@ uint16_t button_hold_timer(const Args &)
 	{
 		tick(0xF8F6, 12);
 		const bool running = peekb(0x0FE7) != 0;
+		fl::tstb(peekb(0x0FE7));
 		tick(0xF8FA, 24);
 		if (running)
 		{
 			tick(0xF8FC, 12);
-			pokeb(0x0FE7, (uint8_t)(peekb(0x0FE7) - 1));
+			pokeb(0x0FE7, fl::decb(peekb(0x0FE7)));
 			tick(0xF900, 27);
 			tick(0xF908, 12);                          // BR
 		}
@@ -196,6 +213,7 @@ uint16_t rotary_step(const Args &)
 	{
 		tick(0x8E3A, 12);
 		T.r[0] = 0xFFFF;
+		fl::mov(T.r[0]);
 		tick(0x8E3E, 18);
 		T.r[1] = (uint16_t)-T.r[1];
 		fl::neg((uint16_t)(-T.r[1]));
@@ -256,18 +274,23 @@ uint16_t rotary_step(const Args &)
 void selftest_colour_screen()
 {
 	poke(0x0188, 0);
+	fl::clr();
 	tick(0x72B4, 27);
 	pokeb(0x1800, 0);
+	fl::clr();
 	tick(0x72B8, 27);
 	jsr(0x72BC, 0x8068);                               // select_video_bank0
 	poke(0x1100, 0);
+	fl::clr();
 	tick(0x72C0, 27);
 	T.r[0] = 0x2000;
+	fl::mov(T.r[0]);
 	tick(0x72C4, 18);
 	for (;;)
 	{
 		poke(T.r[0], 0x0134);
 		T.r[0] += 2;
+		fl::mov(0x0134);
 		tick(0x72C8, 27);                              // MOV #0x0134,(R0)+
 		fl::cmp(T.r[0], 0x37FE);
 		tick(0x72CC, 18);
@@ -276,29 +299,34 @@ void selftest_colour_screen()
 	}
 	tick(0x72CE, 12);
 	T.r[0] = 0xFFFF;
+	fl::mov(T.r[0]);
 	tick(0x72D2, 18);
 	for (;;)                                           // the next colour
 	{
-		T.r[0]++;
+		T.r[0] = fl::inc(T.r[0]);
 		tick(0x72D4, 12);
+		fl::cmp(T.r[0], 0x0002);
 		tick(0x72D8, 18);                              // CMP R0,#2
 		if ((int16_t)T.r[0] > 2)
 		{
 			tick(0x72DA, 12);
 			T.r[0] = 0;
+			fl::clr();
 			tick(0x72DC, 12);
 		}
 		else
 			tick(0x72DC, 12);                          // BLE
 		T.r[1] = T.r[0];
+		fl::mov(T.r[1]);
 		tick(0x72DE, 12);
-		T.r[1] = (uint16_t)(T.r[1] << 1);
+		T.r[1] = fl::asl(T.r[1]);
 		tick(0x72E0, 12);
 		poke(0x1086, peek((uint16_t)(0x7050 + T.r[1])));
 		tick(0x72E6, 42);
 		for (;;)                                       // until bit 0x40 or the button
 		{
 			const bool held = (peekb(0x0193) & 0x40) != 0;
+			fl::logicb((uint8_t)(0x40 & peekb(0x0193)));
 			tick(0x72EC, 30);
 			if (held)
 			{
@@ -307,6 +335,7 @@ void selftest_colour_screen()
 			}
 			tick(0x72EE, 12);
 			const bool pressed = peekb(0x0FE6) != 0;
+			fl::tstb(peekb(0x0FE6));
 			tick(0x72F2, 24);
 			if (pressed)
 			{
@@ -356,18 +385,22 @@ uint16_t rotary_zone_step(const Args &a)
 	}
 	tick(0xF8A0, 12);
 	T.r[1] = peek(0x01C6);
+	fl::mov(T.r[1]);
 	tick(0xF8A4, 24);
 	{
 		const int16_t r = (int16_t)T.r[1];
 		const bool vertical = a.u(0) != 0;
+		fl::tst(peek((uint16_t)(T.r[6] + 4)));
 		tick(0xF8A8, 27);                              // TST 4(SP)
 		if (!vertical)
 		{
 			tick(0xF8AA, 12);
+			fl::cmp(T.r[1], 0x0009);
 			tick(0xF8AE, 18);                          // CMP R1,#0x09
 			if (r > 0x09)
 			{
 				tick(0xF8B0, 12);
+				fl::cmp(T.r[1], 0x003F);
 				tick(0xF8B4, 18);                      // CMP R1,#0x3F
 				if (r < 0x3F)
 				{
@@ -376,6 +409,7 @@ uint16_t rotary_zone_step(const Args &a)
 				}
 			}
 			tick(0xF8B6, 12);                          // BLE / BLT
+			fl::cmp(T.r[1], 0x0051);
 			tick(0xF8BA, 18);                          // CMP R1,#0x51
 			if (r <= 0x51)
 			{
@@ -383,6 +417,7 @@ uint16_t rotary_zone_step(const Args &a)
 				goto done;
 			}
 			tick(0xF8BC, 12);
+			fl::cmp(T.r[1], 0x0087);
 			tick(0xF8C0, 18);                          // CMP R1,#0x87
 			if (r >= 0x87)
 			{
@@ -394,10 +429,12 @@ uint16_t rotary_zone_step(const Args &a)
 			goto minus;
 		}
 		tick(0xF8C4, 12);                              // BNE
+		fl::cmp(T.r[1], 0x002D);
 		tick(0xF8C8, 18);                              // CMP R1,#0x2D
 		if (r > 0x2D)
 		{
 			tick(0xF8CA, 12);
+			fl::cmp(T.r[1], 0x0063);
 			tick(0xF8CE, 18);                          // CMP R1,#0x63
 			if (r < 0x63)
 			{
@@ -406,6 +443,7 @@ uint16_t rotary_zone_step(const Args &a)
 			}
 		}
 		tick(0xF8D6, 12);                              // BLE / BGE
+		fl::cmp(T.r[1], 0x001B);
 		tick(0xF8DA, 18);                              // CMP R1,#0x1B
 		if (r < 0x1B)
 		{
@@ -413,6 +451,7 @@ uint16_t rotary_zone_step(const Args &a)
 			goto plus;
 		}
 		tick(0xF8DC, 12);
+		fl::cmp(T.r[1], 0x0075);
 		tick(0xF8E0, 18);                              // CMP R1,#0x75
 		if (r <= 0x75)
 		{
@@ -432,6 +471,7 @@ plus:
 	tick(0xF8E6, 18);
 done:
 	T.r[1] = pop();
+	fl::mov(T.r[1]);
 	tick(0xF8E8, 18);
 	rts();
 	return T.r[0];
@@ -500,6 +540,7 @@ void irq_vblank_selftest()
 			fl::movb(0x01);
 			tick(0x897A, 33);
 			pokeb(0x0FE6, 1);
+			fl::movb(0x01);
 			tick(0x8980, 33);
 			tick(0x8986, 12);                          // BR
 		}
@@ -542,34 +583,48 @@ void selftest_scroll_screen()
 {
 	jsr(0xF912, 0x8CE8);                               // clear_playfield
 	pokeb(0x0F2D, 1);
+	fl::movb(0x01);
 	tick(0xF918, 33);
 	T.r[0] = 0x1800;
+	fl::mov(T.r[0]);
 	tick(0xF91C, 18);
 	poke(0x01D2, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xF920, 27);
 	poke(0x1400, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xF924, 27);
 	T.r[0] = 0x3C00;
+	fl::mov(T.r[0]);
 	tick(0xF928, 18);
 	poke(0x01D4, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xF92C, 27);
 	poke(0x1402, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xF930, 27);
 	push(0);
+	fl::clr();
 	tick(0xF932, 24);
 	push(0x000E);
+	fl::mov(0x000E);
 	tick(0xF936, 30);
 	push(0x0015);
+	fl::mov(0x0015);
 	tick(0xF93A, 30);
 	jsr(0xF93E, 0x4000);
 	poke(0x0184, 0x5BBC);
+	fl::mov(0x5BBC);
 	tick(0xF944, 33);
 	T.r[0] = 0x0020;
+	fl::mov(T.r[0]);
 	tick(0xF948, 18);
 	jsr(0xF94C, 0x8AB6);
 	poke(0x0184, 0x5C04);
+	fl::mov(0x5C04);
 	tick(0xF952, 33);
 	T.r[0] = 0x001F;
+	fl::mov(T.r[0]);
 	tick(0xF956, 18);
 	jsr(0xF95A, 0x8AB6);
 	for (;;)
@@ -586,11 +641,13 @@ void selftest_scroll_screen()
 		jsr(0xF964, 0x8D50);                           // wait_vblank
 		jsr(0xF968, 0xF8EA);                           // button_hold_timer
 		ww(T.r[6], 0);
+		fl::clr();
 		tick(0xF96A, 21);
 		jsr(0xF96E, 0xF896);                           // rotary_zone_step(0)
 		poke(0x01AE, fl::sub(peek(0x01AE), T.r[0]));
 		tick(0xF972, 27);
 		ww(T.r[6], 1);
+		fl::mov(0x0001);
 		tick(0xF976, 27);
 		jsr(0xF97A, 0xF896);                           // rotary_zone_step(1)
 		T.r[0] = fl::add(T.r[0], peek(0x01AC));
@@ -616,18 +673,22 @@ uint16_t selftest_items_screen(const Args &)
 	jsr(0xF99A, 0x8D2C);                               // clear_playfield_ram
 	jsr(0xF99E, 0x8CE8);                               // clear_playfield
 	poke(0x0184, 0x5C04);
+	fl::mov(0x5C04);
 	tick(0xF9A4, 33);
 	T.r[0] = 0x001F;
+	fl::mov(T.r[0]);
 	tick(0xF9A8, 18);
 	jsr(0xF9AC, 0x8AB6);
 	poke(0x0184, 0x5CD2);
 	fl::mov(0x5CD2);
 	tick(0xF9B2, 33);
 	T.r[2] = 0x000F;
+	fl::mov(T.r[2]);
 	tick(0xF9B6, 18);
 	for (;;)
 	{
 		T.r[0] = T.r[2];
+		fl::mov(T.r[0]);
 		tick(0xF9B8, 12);
 		for (uint16_t pc = 0xF9BA; pc <= 0xF9BE; pc += 2)
 		{
@@ -637,44 +698,54 @@ uint16_t selftest_items_screen(const Args &)
 		T.r[0] = fl::add(T.r[0], 0x7798);
 		tick(0xF9C2, 18);
 		T.r[1] = T.r[0];
+		fl::mov(T.r[1]);
 		tick(0xF9C4, 12);
 		T.r[0] = 0x3800;
+		fl::mov(T.r[0]);
 		tick(0xF9C8, 18);
 		poke(0x01D2, T.r[0]);
+		fl::mov(T.r[0]);
 		tick(0xF9CC, 27);
 		poke(0x1400, T.r[0]);
+		fl::mov(T.r[0]);
 		tick(0xF9D0, 27);
 		T.r[0] = 0x2800;
+		fl::mov(T.r[0]);
 		tick(0xF9D4, 18);
 		poke(0x01D4, T.r[0]);
+		fl::mov(T.r[0]);
 		tick(0xF9D8, 27);
 		poke(0x1402, T.r[0]);
+		fl::mov(T.r[0]);
 		tick(0xF9DC, 27);
 		push(T.r[1]);
+		fl::mov(T.r[1]);
 		tick(0xF9DE, 24);
 		push(0);
 		fl::clr();
 		tick(0xF9E0, 24);
 		jsr(0xF9E4, 0x4D30);
 		T.r[1] = peek(T.r[1]);
+		fl::mov(T.r[1]);
 		tick(0xF9E6, 18);
-		T.r[1] = (uint16_t)(T.r[1] + 0x2082);
+		T.r[1] = fl::add(T.r[1], 0x2082);
 		tick(0xF9EA, 18);
 		poke((uint16_t)(T.r[1] + 0x82), 0);
 		fl::clr();
 		tick(0xF9EE, 30);
 		poke((uint16_t)(T.r[1] + 0x80), 0);
+		fl::clr();
 		tick(0xF9F2, 30);
 		poke((uint16_t)(T.r[1] + 2), 0);
+		fl::clr();
 		tick(0xF9F6, 30);
 		poke(T.r[1], 0);
+		fl::clr();
 		tick(0xF9F8, 21);
 		T.r[6] += 4;
-		fl::cmp(peek((uint16_t)(T.r[6] - 2)), peek((uint16_t)(T.r[6] - 2)));
-		fl::cmp(peek((uint16_t)(T.r[6] - 2)), peek((uint16_t)(T.r[6] - 2)));
-		fl::cmp(peek((uint16_t)(T.r[6] - 2)), peek((uint16_t)(T.r[6] - 2)));
+		fl::cmp(peek((uint16_t)(T.r[6] - 4)), peek((uint16_t)(T.r[6] - 2)));
 		tick(0xF9FA, 24);                              // CMP (SP)+,(SP)+
-		T.r[2]--;
+		T.r[2] = fl::dec(T.r[2]);
 		tick(0xF9FC, 12);
 		if ((int16_t)T.r[2] < 0) break;
 		tick(0xF9B6, 12);                              // BGE

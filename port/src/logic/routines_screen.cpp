@@ -82,9 +82,9 @@ void draw_large_char()
 			T.r[0] = (uint16_t)(c - 0x30);
 			fl::sub((uint16_t)(T.r[0] + 0x0030), 0x0030);
 			tick(0x8C5E, 18);
-			T.r[0] = (uint16_t)(T.r[0] << 1);
+			T.r[0] = fl::asl(T.r[0]);
 			tick(0x8C60, 12);
-			T.r[0] = (uint16_t)(T.r[0] << 1);
+			T.r[0] = fl::asl(T.r[0]);
 			tick(0x8C62, 12);
 			T.r[0] = fl::logic((uint16_t)(T.r[0] | peek(0x0188)));
 			tick(0x8C66, 24);
@@ -95,26 +95,30 @@ void draw_large_char()
 			tick(0x8C6E, 24);
 			ww(T.r[1], T.r[0]);
 			T.r[1] += 2;
+			fl::mov(T.r[0]);
 			tick(0x8C70, 21);
-			T.r[0]++;
+			T.r[0] = fl::inc(T.r[0]);
 			tick(0x8C72, 12);
 			ww(T.r[1], T.r[0]);
 			T.r[1] += 2;
+			fl::mov(T.r[0]);
 			tick(0x8C74, 21);
 			poke(0x0186, T.r[1]);
 			fl::mov(T.r[1]);
 			tick(0x8C78, 27);
 			carry = T.r[1] + 0x007C > 0xFFFF;
-			T.r[1] = (uint16_t)(T.r[1] + 0x007C);
+			T.r[1] = fl::add(T.r[1], 0x007C);
 			tick(0x8C7C, 18);
 			T.r[0] = fl::inc(T.r[0]);
 			tick(0x8C7E, 12);
 			ww(T.r[1], T.r[0]);
 			T.r[1] += 2;
+			fl::mov(T.r[0]);
 			tick(0x8C80, 21);
-			T.r[0]++;
+			T.r[0] = fl::inc(T.r[0]);
 			tick(0x8C82, 12);
 			ww(T.r[1], T.r[0]);
+			fl::mov(T.r[0]);
 			tick(0x8C84, 21);
 			goto epilogue;
 		}
@@ -129,23 +133,27 @@ void draw_large_char()
 		fl::mov(T.r[1]);
 		tick(0x8B80, 24);
 		T.r[2] = 0x0087;
+		fl::mov(T.r[2]);
 		tick(0x8B84, 18);
 		T.r[2] = fl::logic((uint16_t)(T.r[2] | T.r[3]));
 		tick(0x8B86, 12);
 		ww(T.r[1], T.r[2]);
 		T.r[1] += 2;
+		fl::mov(T.r[2]);
 		tick(0x8B88, 21);
 		poke(0x0186, T.r[1]);
 		fl::mov(T.r[1]);
 		tick(0x8B8C, 27);
 		carry = T.r[1] + 0x007E > 0xFFFF;
-		T.r[1] = (uint16_t)(T.r[1] + 0x007E);
+		T.r[1] = fl::add(T.r[1], 0x007E);
 		tick(0x8B90, 18);
 		T.r[2] = 0x007D;
+		fl::mov(T.r[2]);
 		tick(0x8B94, 18);
 		T.r[2] = fl::logic((uint16_t)(T.r[2] | T.r[3]));
 		tick(0x8B96, 12);
 		ww(T.r[1], T.r[2]);
+		fl::mov(T.r[2]);
 		tick(0x8B98, 21);
 		goto epilogue;
 	}
@@ -156,6 +164,7 @@ void draw_large_char()
 	{
 		tick(0x8BA0, 12);                              // BNE
 		T.r[0] = 0x0074;
+		fl::mov(T.r[0]);
 		tick(0x8BA4, 18);
 		tick(0x8BE0, 12);                              // BR
 	}
@@ -168,9 +177,10 @@ void draw_large_char()
 		{
 			tick(0x8BAC, 12);                          // BNE
 			T.r[0] = 0x0084;
+			fl::mov(T.r[0]);
 			tick(0x8BB0, 18);
 			tick(0x8BBE, 12);                          // BR
-			T.r[3] |= 0x0100;
+			T.r[3] = fl::logic((uint16_t)(T.r[3] | 0x0100));
 			tick(0x8BC2, 18);
 			tick(0x8BE0, 12);                          // BR
 		}
@@ -182,7 +192,7 @@ void draw_large_char()
 			if (c == 0x3D)
 			{
 				tick(0x8BB8, 12);                      // BNE
-				T.r[3] |= 0x0100;
+				T.r[3] = fl::logic((uint16_t)(T.r[3] | 0x0100));
 				tick(0x8BBC, 18);
 			}
 			tick(0x8BC4, 12);                          // BNE / BR
@@ -194,9 +204,9 @@ void draw_large_char()
 				T.r[0] = (uint16_t)(c - 0x41);
 				fl::sub((uint16_t)(T.r[0] + 0x0041), 0x0041);
 				tick(0x8BDC, 18);
-				T.r[0] = (uint16_t)(T.r[0] << 1);
+				T.r[0] = fl::asl(T.r[0]);
 				tick(0x8BDE, 12);
-				T.r[0] = (uint16_t)(T.r[0] << 1);
+				T.r[0] = fl::asl(T.r[0]);
 				tick(0x8BE0, 12);
 			}
 			else
@@ -218,6 +228,7 @@ void draw_large_char()
 	T.r[0] = fl::add(T.r[0], 0x4000);
 	tick(0x8BE4, 18);
 	T.r[1] = peek(0x0186);
+	fl::mov(T.r[1]);
 	tick(0x8BE8, 24);
 	T.r[2] = 0;
 	fl::clr();
@@ -229,6 +240,7 @@ void draw_large_char()
 	tick(0x8BEE, 12);
 	ww(T.r[1], T.r[2]);
 	T.r[1] += 2;
+	fl::mov(T.r[2]);
 	tick(0x8BF0, 21);
 	T.r[2] &= 0xFF00;
 	fl::clr();
@@ -240,11 +252,12 @@ void draw_large_char()
 	tick(0x8BF6, 12);
 	ww(T.r[1], T.r[2]);
 	T.r[1] += 2;
+	fl::mov(T.r[2]);
 	tick(0x8BF8, 21);
 	poke(0x0186, T.r[1]);
 	fl::mov(T.r[1]);
 	tick(0x8BFC, 27);
-	T.r[1] = (uint16_t)(T.r[1] + 0x007C);
+	T.r[1] = fl::add(T.r[1], 0x007C);
 	tick(0x8C00, 18);
 	T.r[2] &= 0xFF00;                                  // CLRB R2 (C clear from here on)
 	fl::clr();
@@ -256,6 +269,7 @@ void draw_large_char()
 	tick(0x8C06, 12);
 	ww(T.r[1], T.r[2]);
 	T.r[1] += 2;
+	fl::mov(T.r[2]);
 	tick(0x8C08, 21);
 	T.r[2] &= 0xFF00;
 	fl::clr();
@@ -266,6 +280,7 @@ void draw_large_char()
 	T.r[2] = fl::logic((uint16_t)(T.r[2] | T.r[3]));
 	tick(0x8C0E, 12);
 	ww(T.r[1], T.r[2]);
+	fl::mov(T.r[2]);
 	tick(0x8C10, 21);
 
 epilogue:
@@ -346,6 +361,7 @@ void irq_32v_play()
 	T.check_irqs = true;
 	tick(0xB9EE, 30);
 	push(peek(0x01D0));
+	fl::mov(peek(T.r[6]));
 	tick(0xB9F2, 36);
 	jsr(0xB9F6, 0x8068);                               // select_video_bank0
 	const bool first = peekb(0x0191) == 1;
@@ -370,6 +386,7 @@ void irq_32v_play()
 		{
 			tick(0xBA0E, 12);
 			pokeb(0x0993, 0);
+			fl::clr();
 			tick(0xBA12, 27);
 			jsr(0xBA16, 0xB1C8);
 		}
@@ -381,6 +398,7 @@ void irq_32v_play()
 	tick(0xBA1A, 33);
 	jsr(0xBA1E, 0x8096);                               // reselect_video_bank
 	T.r[6] += 2;
+	fl::tst(peek((uint16_t)(T.r[6] - 2)));
 	tick(0xBA20, 18);                                  // TST (SP)+
 	T.r[5] = pop();
 	fl::mov(T.r[5]);
@@ -430,20 +448,25 @@ void flash_text_colours()
 	pokeb(0x0EA9, fl::decb(peekb(0x0EA9)));
 	tick(0xDD22, 27);
 	T.r[3] = 0;
+	fl::clr();
 	tick(0xDD24, 12);
 	T.r[3] = peekb(0x0EA9);
+	fl::logicb((uint8_t)T.r[3]);
 	tick(0xDD28, 24);
+	fl::tst(T.r[3]);
 	tick(0xDD2A, 12);                                  // TST R3
 	if (T.r[3] == 0)
 	{
 		tick(0xDD2C, 12);
 		T.r[1] = 3;
+		fl::mov(T.r[1]);
 		tick(0xDD30, 18);
 		for (;;)
 		{
 			T.r[0] = T.r[1];
+			fl::mov(T.r[0]);
 			tick(0xDD32, 12);
-			T.r[0] = (uint16_t)(T.r[0] << 1);
+			T.r[0] = fl::asl(T.r[0]);
 			tick(0xDD34, 12);
 			const uint16_t v = rw((uint16_t)(0x7E6C + T.r[0]));
 			poke((uint16_t)(0x11C0 + T.r[0]), v);
@@ -458,22 +481,25 @@ void flash_text_colours()
 	{
 		tick(0xDD3E, 12);                              // BNE
 		T.r[1] = 3;
+		fl::mov(T.r[1]);
 		tick(0xDD42, 18);
 		for (;;)
 		{
 			T.r[2] = T.r[1];
+			fl::mov(T.r[2]);
 			tick(0xDD44, 12);
-			T.r[2] = (uint16_t)(T.r[2] << 1);
+			T.r[2] = fl::asl(T.r[2]);
 			tick(0xDD46, 12);
 			T.r[0] = T.r[3];
+			fl::mov(T.r[0]);
 			tick(0xDD48, 12);
-			T.r[0] = (uint16_t)(T.r[0] + T.r[1]);
+			T.r[0] = fl::add(T.r[0], T.r[1]);
 			tick(0xDD4A, 12);
-			T.r[0]--;
+			T.r[0] = fl::dec(T.r[0]);
 			tick(0xDD4C, 12);
-			T.r[0] &= 0x0003;
+			T.r[0] = fl::logic((uint16_t)(T.r[0] & 0x0003));
 			tick(0xDD50, 18);
-			T.r[0] = (uint16_t)(T.r[0] << 1);
+			T.r[0] = fl::asl(T.r[0]);
 			tick(0xDD52, 12);
 			const uint16_t v = rw((uint16_t)(0x7A9A + T.r[0]));
 			poke((uint16_t)(0x11C0 + T.r[2]), v);

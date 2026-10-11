@@ -22,10 +22,12 @@ uint16_t sext8(uint8_t v) { return (uint16_t)(int16_t)(int8_t)v; }
 uint16_t clear_0fb4(const Args &)
 {
 	T.r[0] = 0x0024;
+	fl::mov(T.r[0]);
 	tick(0x7F84, 18);
 	for (;;)
 	{
 		pokeb((uint16_t)(0x0FB3 + T.r[0]), 0);
+		fl::clr();
 		tick(0x7F88, 30);
 		if (--T.r[0] == 0) break;
 		tick(0x7F84, 18);                              // SOB
@@ -50,7 +52,7 @@ uint16_t set_ticket_bits(const Args &)
 		if (positive)
 		{
 			tick(0x560C, 12);
-			pokeb(0x0ED7, peekb(0x0ED7) | m);
+			pokeb(0x0ED7, fl::logicb((uint8_t)(peekb(0x0ED7) | m)));
 			tick(0x5612, 42);
 			tick(0x561A, 12);                          // BR
 		}
@@ -79,6 +81,7 @@ uint16_t add_cash(const Args &a)
 	{
 		tick(0xF010, 12);
 		poke(0x0256, 0);
+		fl::clr();
 		tick(0xF014, 27);
 	}
 	else
@@ -90,6 +93,7 @@ uint16_t add_cash(const Args &a)
 	{
 		tick(0xF01C, 12);
 		poke(0x0256, 9999);
+		fl::mov(0x270F);
 		tick(0xF022, 33);
 	}
 	else
@@ -116,11 +120,12 @@ uint16_t add_park_counter(const Args &a)
 		tick(0x65F0, 27);
 		T.r[0] = fl::asl(T.r[0]);
 		tick(0x65F2, 12);
-		T.r[0] = (uint16_t)(T.r[0] << 1);
+		T.r[0] = fl::asl(T.r[0]);
 		tick(0x65F4, 12);
 		T.r[0] = fl::add(T.r[0], peek(0x0F20));
 		tick(0x65F8, 24);
 		poke(0x0F20, T.r[0]);
+		fl::mov(T.r[0]);
 		tick(0x65FC, 27);
 	}
 	else
@@ -132,6 +137,7 @@ uint16_t add_park_counter(const Args &a)
 		T.r[0] = fl::add(T.r[0], a.u(0));
 		tick(0x65E6, 27);
 		poke(0x0F1C, T.r[0]);
+		fl::mov(T.r[0]);
 		tick(0x65EA, 27);
 	}
 	rts();
@@ -173,6 +179,7 @@ uint16_t park_at_gate(const Args &)
 		{
 			tick(0x5382, 12);
 			T.r[0] = 2;
+			fl::mov(T.r[0]);
 			tick(0x5386, 18);
 		}
 		else
@@ -200,6 +207,7 @@ uint16_t park_at_area(const Args &)
 	{
 		tick(0x5330, 12);
 		T.r[0] = 0;
+		fl::clr();
 		tick(0x5332, 12);
 		rts();
 		return 0;
@@ -211,12 +219,14 @@ uint16_t park_at_area(const Args &)
 	{
 		tick(0x533A, 12);
 		T.r[0] = 3;
+		fl::mov(T.r[0]);
 		tick(0x533E, 18);
 		rts();
 		return 3;
 	}
 	tick(0x5340, 12);                                  // BLE
 	const bool north = (int16_t)peek(0x099A) > 6;
+	fl::cmp(peek(0x099A), 0x0006);
 	tick(0x5346, 30);
 	bool two;
 	if (north)
@@ -238,6 +248,7 @@ uint16_t park_at_area(const Args &)
 		else
 		{
 			tick(0x534E, 12);
+			fl::cmp(T.r[0], 0x00D0);
 			tick(0x5352, 18);                          // CMP R0,#0xD0
 			two = x > 0x00D0;
 			tick((uint16_t)(two ? 0x5354 : 0x535A), 12);   // BLE
@@ -265,6 +276,7 @@ uint16_t find_slot_with(const Args &)
 	fl::mov(T.r[1]);
 	tick(0xCDD2, 24);
 	T.r[1] = peek(0x09AE);
+	fl::mov(T.r[1]);
 	tick(0xCDD6, 24);
 	bool found = false;
 	if ((int16_t)T.r[1] < 0)
@@ -275,6 +287,7 @@ uint16_t find_slot_with(const Args &)
 		for (;;)
 		{
 			T.r[0] = T.r[1];
+			fl::mov(T.r[0]);
 			tick(0xCDDA, 12);
 			T.r[0] = fl::asl(T.r[0]);
 			tick(0xCDDC, 12);
@@ -285,11 +298,13 @@ uint16_t find_slot_with(const Args &)
 			{
 				tick(0xCDE4, 12);
 				const bool except = T.r[1] == rw((uint16_t)(T.r[6] + 4));
+				fl::cmp(T.r[1], peek((uint16_t)(T.r[6] + 4)));
 				tick(0xCDE8, 27);
 				if (!except)
 				{
 					tick(0xCDEA, 12);
 					T.r[0] = T.r[1];
+					fl::mov(T.r[0]);
 					tick(0xCDEC, 12);
 					tick(0xCDF6, 12);                  // BR
 					found = true;
@@ -326,8 +341,10 @@ uint16_t call_cf5e_keep_banks(const Args &)
 {
 	c_save(1, 0xE10A);
 	T.r[1] = peek(0x01D2);
+	fl::mov(T.r[1]);
 	tick(0xE10E, 24);
 	T.r[2] = peek(0x01D4);
+	fl::mov(T.r[2]);
 	tick(0xE112, 24);
 	const bool on = peekb(0x0377) != 0;
 	fl::tstb(peekb(0x0377));
@@ -336,11 +353,14 @@ uint16_t call_cf5e_keep_banks(const Args &)
 	{
 		tick(0xE118, 12);
 		push(0);
+		fl::clr();
 		tick(0xE11A, 24);
 		pokeb(T.r[6], peekb(0x0397));
+		fl::movb(peekb(T.r[6]));
 		tick(0xE11E, 33);
 		jsr(0xE122, 0xCF5E);
 		pop();
+		fl::tst(peek((uint16_t)(T.r[6] - 2)));
 		tick(0xE124, 18);
 	}
 	else
@@ -349,10 +369,13 @@ uint16_t call_cf5e_keep_banks(const Args &)
 	fl::mov(T.r[1]);
 	tick(0xE128, 27);
 	poke(0x01D4, T.r[2]);
+	fl::mov(T.r[2]);
 	tick(0xE12C, 27);
 	poke(0x1400, peek(0x01D2));
+	fl::mov(peek(0x01D2));
 	tick(0xE132, 39);
 	poke(0x1402, peek(0x01D4));
+	fl::mov(peek(0x01D4));
 	tick(0xE138, 39);
 	c_restore(1);
 	return T.r[0];
@@ -362,6 +385,7 @@ uint16_t call_cf5e_keep_banks(const Args &)
 uint16_t a7_50c8(const Args &)
 {
 	push(T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0x50CA, 24);
 	const bool on = peekb(0x0377) != 0;
 	fl::tstb(peekb(0x0377));
@@ -371,23 +395,31 @@ uint16_t a7_50c8(const Args &)
 		tick(0x50D0, 12);
 		jsr(0x50D4, 0x4F98);
 		T.r[1] = T.r[0];
+		fl::mov(T.r[1]);
 		tick(0x50D6, 12);
 		T.r[0] = 0x0008;
+		fl::mov(T.r[0]);
 		tick(0x50DA, 18);
 		T.r[1] ^= T.r[0];
+		fl::logic(T.r[1]);
 		tick(0x50DC, 12);
 		push(T.r[1]);
+		fl::mov(T.r[1]);
 		tick(0x50DE, 24);
 		push(0x0002);
+		fl::mov(0x0002);
 		tick(0x50E2, 30);
 		push(0);
+		fl::clr();
 		tick(0x50E4, 24);
 		push(0);
+		fl::clr();
 		tick(0x50E6, 24);
 		jsr(0x50EA, 0xE13A);
 		poke(0x0EB4, 0x00FA);
+		fl::mov(0x00FA);
 		tick(0x50F0, 33);
-		T.r[6] += 8;
+		T.r[6] = fl::add(T.r[6], 8);
 		tick(0x50F4, 18);                              // ADD #8,SP
 	}
 	else
@@ -407,35 +439,45 @@ uint16_t open_park_gate(const Args &)
 {
 	c_save(2, 0xDA06);
 	T.r[2] = peek(0x01D2);
+	fl::mov(T.r[2]);
 	tick(0xDA0A, 24);
 	T.r[3] = peek(0x01D4);
+	fl::mov(T.r[3]);
 	tick(0xDA0E, 24);
 	poke(0x01D2, 0);
 	fl::clr();
 	tick(0xDA12, 27);
 	poke(0x1400, 0);
+	fl::clr();
 	tick(0xDA16, 27);
 	T.r[0] = 0x0400;
 	fl::mov(T.r[0]);
 	tick(0xDA1A, 18);
 	poke(0x01D4, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xDA1E, 27);
 	poke(0x1402, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xDA22, 27);
 	push(0x0062);
+	fl::mov(0x0062);
 	tick(0xDA26, 30);
 	jsr(0xDA2A, 0x8E78);                               // queue_sound
 	T.r[1] = rw((uint16_t)(T.r[6] + 0x0C));            // the park
+	fl::mov(T.r[1]);
 	tick(0xDA2E, 27);
 	T.r[0] = T.r[1];
+	fl::mov(T.r[0]);
 	tick(0xDA30, 12);
-	T.r[0] = (uint16_t)(T.r[0] << 1);
+	T.r[0] = fl::asl(T.r[0]);
 	tick(0xDA32, 12);
 	ww(T.r[6], peek((uint16_t)(0x70E8 + T.r[0])));
+	fl::mov(peek(T.r[6]));
 	tick(0xDA36, 36);
 	ww(T.r[6], fl::logic((uint16_t)(rw(T.r[6]) | 0x8000)));
 	tick(0xDA3A, 27);
 	push(0xFFFF);
+	fl::mov(0xFFFF);
 	tick(0xDA3E, 30);
 	jsr(0xDA42, 0xCDD0);                               // find_slot_with
 	fl::tst(T.r[0]);
@@ -446,25 +488,32 @@ uint16_t open_park_gate(const Args &)
 	{
 		tick(0xDA46, 12);
 		T.r[0] = sext8(peekb((uint16_t)(0x09B8 + T.r[0])));
+		fl::movb((uint8_t)T.r[0]);
 		tick(0xDA4A, 27);
-		T.r[0] &= 0x003F;
+		T.r[0] = fl::logic((uint16_t)(T.r[0] & 0x003F));
 		tick(0xDA4E, 18);
-		T.r[0] = (uint16_t)(T.r[0] << 1);
+		T.r[0] = fl::asl(T.r[0]);
 		tick(0xDA50, 12);
 		poke((uint16_t)(0x0430 + T.r[0]), 0x0001);
+		fl::mov(0x0001);
 		tick(0xDA56, 36);
 	}
 	pokeb(0x0EA4, fl::logicb((uint8_t)(peekb(0x0EA4) | rb((uint16_t)(0xFC74 + T.r[1])))));
 	tick(0xDA5C, 42);
 	poke(0x01D2, T.r[2]);
+	fl::mov(T.r[2]);
 	tick(0xDA60, 27);
 	poke(0x01D4, T.r[3]);
+	fl::mov(T.r[3]);
 	tick(0xDA64, 27);
 	poke(0x1400, peek(0x01D2));
+	fl::mov(peek(0x01D2));
 	tick(0xDA6A, 39);
 	poke(0x1402, peek(0x01D4));
+	fl::mov(peek(0x01D4));
 	tick(0xDA70, 39);
 	T.r[6] += 4;
+	fl::cmp(peek((uint16_t)(T.r[6] - 4)), peek((uint16_t)(T.r[6] - 2)));
 	tick(0xDA72, 24);                                  // CMP (SP)+,(SP)+
 	c_restore(2);
 	return T.r[0];
@@ -483,6 +532,7 @@ uint16_t set_medal_level(const Args &)
 	{
 		tick(0x6E42, 12);
 		T.r[2] = 3;
+		fl::mov(T.r[2]);
 		tick(0x6E46, 18);
 		for (;;)
 		{
@@ -498,10 +548,13 @@ uint16_t set_medal_level(const Args &)
 			{
 				tick(0x6E50, 12);
 				T.r[0] = 0;
+				fl::clr();
 				tick(0x6E52, 12);
 				T.r[0] = peekb(0x0F31);
+				fl::logicb((uint8_t)T.r[0]);
 				tick(0x6E56, 24);
 				T.r[1] = T.r[2];
+				fl::mov(T.r[1]);
 				tick(0x6E58, 12);
 				for (uint16_t pc = 0x6E5A; pc <= 0x6E5E; pc += 2)
 				{
@@ -518,10 +571,13 @@ uint16_t set_medal_level(const Args &)
 				pokeb((uint16_t)(0x0262 + T.r[0]), (uint8_t)T.r[4]);
 				tick(0x6E6A, 30);
 				T.r[1] = 0x3800;
+				fl::mov(T.r[1]);
 				tick(0x6E6E, 18);
 				poke(0x01D2, T.r[1]);
+				fl::mov(T.r[1]);
 				tick(0x6E72, 27);
 				poke(0x1400, T.r[1]);
+				fl::mov(T.r[1]);
 				tick(0x6E76, 27);
 				c_restore(3);
 				return T.r[0];
@@ -538,15 +594,19 @@ uint16_t set_medal_level(const Args &)
 	fl::clr();
 	tick(0x6E7C, 12);
 	T.r[0] = peekb(0x0F31);
+	fl::logicb((uint8_t)T.r[0]);
 	tick(0x6E80, 24);
 	pokeb((uint16_t)(0x0262 + T.r[0]), 0);
+	fl::clr();
 	tick(0x6E84, 30);
 	T.r[0] = 0x3800;
 	fl::mov(T.r[0]);
 	tick(0x6E88, 18);
 	poke(0x01D2, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0x6E8C, 27);
 	poke(0x1400, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0x6E90, 27);
 	c_restore(3);
 	return T.r[0];
@@ -561,30 +621,38 @@ uint16_t set_gate_animation(const Args &)
 {
 	c_save(2, 0xD980);
 	T.r[2] = peek(0x01D2);
+	fl::mov(T.r[2]);
 	tick(0xD984, 24);
 	T.r[3] = peek(0x01D4);
+	fl::mov(T.r[3]);
 	tick(0xD988, 24);
 	poke(0x01D2, 0);
 	fl::clr();
 	tick(0xD98C, 27);
 	poke(0x1400, 0);
+	fl::clr();
 	tick(0xD990, 27);
 	T.r[0] = 0x0400;
 	fl::mov(T.r[0]);
 	tick(0xD994, 18);
 	poke(0x01D4, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xD998, 27);
 	poke(0x1402, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xD99C, 27);
 	T.r[0] = rw((uint16_t)(T.r[6] + 0x0C));            // the gate
+	fl::mov(T.r[0]);
 	tick(0xD9A0, 27);
-	T.r[0] = (uint16_t)(T.r[0] << 1);
+	T.r[0] = fl::asl(T.r[0]);
 	tick(0xD9A2, 12);
 	push(peek((uint16_t)(0x70AC + T.r[0])));
+	fl::mov(peek(T.r[6]));
 	tick(0xD9A6, 39);
 	ww(T.r[6], fl::logic((uint16_t)(rw(T.r[6]) | 0x8000)));
 	tick(0xD9AA, 27);
 	push(0xFFFF);
+	fl::mov(0xFFFF);
 	tick(0xD9AE, 30);
 	jsr(0xD9B2, 0xCDFA);                               // find_other_slot
 	T.r[1] = T.r[0];
@@ -596,8 +664,9 @@ uint16_t set_gate_animation(const Args &)
 	{
 		tick(0xD9B6, 12);
 		T.r[1] = sext8(peekb((uint16_t)(0x09B8 + T.r[1])));
+		fl::movb((uint8_t)T.r[1]);
 		tick(0xD9BA, 27);
-		T.r[1] &= 0x003F;
+		T.r[1] = fl::logic((uint16_t)(T.r[1] & 0x003F));
 		tick(0xD9BE, 18);
 		jsr(0xD9C2, 0x9152);                           // next_random
 		const bool odd = T.r[0] & 1;
@@ -607,22 +676,25 @@ uint16_t set_gate_animation(const Args &)
 		{
 			tick(0xD9CA, 12);                          // BCS
 			T.r[0] = 0x0008;
+			fl::mov(T.r[0]);
 			tick(0xD9CE, 18);
 		}
 		else
 		{
 			tick(0xD9C6, 12);
 			T.r[0] = 0;
+			fl::clr();
 			tick(0xD9C8, 12);
 			tick(0xD9CE, 12);                          // BR
 		}
-		T.r[0] = (uint16_t)(T.r[0] + rw((uint16_t)(T.r[6] + 0x10)));
+		T.r[0] = fl::add(T.r[0], rw((uint16_t)(T.r[6] + 0x10)));
 		tick(0xD9D2, 27);
-		T.r[1] = (uint16_t)(T.r[1] << 1);
+		T.r[1] = fl::asl(T.r[1]);
 		tick(0xD9D4, 12);
-		T.r[0] = (uint16_t)(T.r[0] << 1);
+		T.r[0] = fl::asl(T.r[0]);
 		tick(0xD9D6, 12);
 		const bool closing = rw((uint16_t)(T.r[6] + 0x0E)) != 0;
+		fl::tst(peek((uint16_t)(T.r[6] + 0x0E)));
 		tick(0xD9DA, 27);
 		if (!closing)
 		{
@@ -642,15 +714,16 @@ uint16_t set_gate_animation(const Args &)
 	fl::mov(T.r[2]);
 	tick(0xD9EE, 27);
 	poke(0x01D4, T.r[3]);
+	fl::mov(T.r[3]);
 	tick(0xD9F2, 27);
 	poke(0x1400, peek(0x01D2));
+	fl::mov(peek(0x01D2));
 	tick(0xD9F8, 39);
 	poke(0x1402, peek(0x01D4));
+	fl::mov(peek(0x01D4));
 	tick(0xD9FE, 39);
 	T.r[6] += 4;
-	fl::cmp(peek((uint16_t)(T.r[6] - 2)), peek((uint16_t)(T.r[6] - 2)));
-	fl::cmp(peek((uint16_t)(T.r[6] - 2)), peek((uint16_t)(T.r[6] - 2)));
-	fl::cmp(peek((uint16_t)(T.r[6] - 2)), peek((uint16_t)(T.r[6] - 2)));
+	fl::cmp(peek((uint16_t)(T.r[6] - 4)), peek((uint16_t)(T.r[6] - 2)));
 	tick(0xDA00, 24);                                  // CMP (SP)+,(SP)+
 	c_restore(2);
 	return T.r[0];

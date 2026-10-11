@@ -85,6 +85,7 @@ void send_queued_sound()
 	T.r[0] = fl::inc(T.r[0]);
 	tick(0x434A, 12);
 	T.r[1] = T.r[0];
+	fl::mov(T.r[1]);
 	tick(0x434C, 12);
 	T.r[1] = fl::logic((uint16_t)(T.r[1] & 7));
 	tick(0x4350, 18);
@@ -110,10 +111,13 @@ uint16_t queue_effect_sound(const Args &a)
 	fl::mov(T.r[0]);
 	tick(0x5CC6, 18);
 	poke(0x01D4, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0x5CCA, 27);
 	poke(0x1402, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0x5CCE, 27);
 	T.r[0] = a.u(0);
+	fl::mov(T.r[0]);
 	tick(0x5CD2, 27);
 	T.r[1] = 0;
 	fl::clr();
@@ -121,6 +125,7 @@ uint16_t queue_effect_sound(const Args &a)
 	T.r[1] = peekb((uint16_t)(0x6567 + T.r[0]));
 	fl::logicb((uint8_t)T.r[1]);
 	tick(0x5CD8, 27);
+	fl::tst(T.r[1]);
 	tick(0x5CDA, 12);                                  // TST R1
 	if (T.r[1] == 0)
 		tick(0x5D04, 12);                              // BEQ
@@ -174,6 +179,7 @@ uint16_t queue_effect_sound(const Args &a)
 		{
 			jsr(0x5D02, 0x8E78);                       // queue_sound
 			pop();
+			fl::tst(peek((uint16_t)(T.r[6] - 2)));
 			tick(0x5D04, 18);                          // TST (SP)+
 		}
 	}
@@ -228,6 +234,7 @@ void step_sound_level()
 	}
 	tick(0x5D94, 12);
 	T.r[1] = 0;
+	fl::clr();
 	tick(0x5D96, 12);
 	T.r[1] = peekb(0x01E9);
 	fl::logicb((uint8_t)T.r[1]);
@@ -309,14 +316,19 @@ uint16_t install_interrupts_a(const Args &)
 	pokeb(0x0196, 0);
 	tick(0x81F0, 27);
 	pokeb(0x0191, 0x4D);
+	fl::movb(0x4D);
 	tick(0x81F6, 33);
 	pokeb(0x0197, 1);
+	fl::movb(0x01);
 	tick(0x81FC, 33);
 	poke(0x018C, 0x000C);
+	fl::mov(0x000C);
 	tick(0x8202, 33);
 	poke(0x1600, 0x000C);                              // interrupts on
+	fl::mov(0x000C);
 	tick(0x8208, 33);
 	T.r[1] = pop();
+	fl::mov(T.r[1]);
 	tick(0x820A, 18);
 	rts();
 	return r0;
@@ -328,15 +340,20 @@ uint16_t install_interrupts_b(const Args &)
 	pokeb(0x0196, 0);
 	tick(0x8252, 27);
 	pokeb(0x0197, 0);
+	fl::clr();
 	tick(0x8256, 27);
 	pokeb(0x0191, 0x4D);
+	fl::movb(0x4D);
 	tick(0x825C, 33);
 	poke(0x018C, 0x000C);
+	fl::mov(0x000C);
 	tick(0x8262, 33);
 	poke(0x1600, 0x000C);                              // interrupts on
+	fl::mov(0x000C);
 	tick(0x8268, 33);
 	jsr(0x826C, 0xBA5E);                               // clear_object_dy
 	T.r[1] = pop();
+	fl::mov(T.r[1]);
 	tick(0x826E, 18);
 	rts();
 	return T.r[0];
@@ -350,18 +367,25 @@ void fade_playfield_palette()
 	fl::mov(T.r[5]);
 	tick(0xDB04, 24);
 	push(peek(0x01D4));
+	fl::mov(peek(T.r[6]));
 	tick(0xDB08, 36);
 	T.r[0] = 0x1800;
+	fl::mov(T.r[0]);
 	tick(0xDB0C, 18);
 	poke(0x01D2, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xDB10, 27);
 	poke(0x1400, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xDB14, 27);
 	T.r[0] = 0x1C00;
+	fl::mov(T.r[0]);
 	tick(0xDB18, 18);
 	poke(0x01D4, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xDB1C, 27);
 	poke(0x1402, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xDB20, 27);
 	T.r[1] = sext8(peekb(0x0EA7));
 	fl::movb((uint8_t)T.r[1]);
@@ -370,8 +394,10 @@ void fade_playfield_palette()
 	fl::mov(T.r[3]);
 	tick(0xDB28, 18);
 	T.r[2] = 0x11A0;
+	fl::mov(T.r[2]);
 	tick(0xDB2C, 18);
 	T.r[4] = 0x0050;
+	fl::mov(T.r[4]);
 	tick(0xDB30, 18);
 	for (;;)
 	{
@@ -383,17 +409,21 @@ void fade_playfield_palette()
 		tick(0xDB34, 12);
 		T.r[2] -= 2;
 		poke(T.r[2], T.r[0]);
+		fl::mov(T.r[0]);
 		tick(0xDB36, 24);
 		if (--T.r[4] == 0) break;
 		tick(0xDB30, 18);                              // SOB
 	}
 	tick(0xDB38, 18);
 	poke(0x01D2, T.r[5]);
+	fl::mov(T.r[5]);
 	tick(0xDB3C, 27);
 	const uint16_t saved_b = pop();
 	poke(0x01D4, saved_b);
+	fl::mov(peek(0x01D4));
 	tick(0xDB40, 33);
 	poke(0x1400, peek(0x01D2));
+	fl::mov(peek(0x01D2));
 	tick(0xDB46, 39);
 	poke(0x1402, peek(0x01D4));
 	fl::mov(saved_b);                                  // C from the last SUB
@@ -423,6 +453,7 @@ void put_small_char()
 	tick(0x8C20, 24);
 	T.r[0] = fl::logic((uint16_t)(T.r[0] & 0x007F));
 	tick(0x8C24, 18);
+	fl::cmp(T.r[0], 0x0000);
 	tick(0x8C28, 18);                                  // CMP R0,#0
 	bool carry = false;                                // C as the end leaves it
 	if (T.r[0] == 0)
@@ -435,7 +466,7 @@ void put_small_char()
 		if ((int16_t)T.r[0] > 0x40)
 		{
 			tick(0x8C40, 12);                          // BGT
-			T.r[0] = (uint16_t)(T.r[0] + 0x0099);
+			T.r[0] = fl::add(T.r[0], 0x0099);
 			tick(0x8C44, 18);
 		}
 		else
@@ -444,7 +475,7 @@ void put_small_char()
 			T.r[0] = fl::sub(T.r[0], 0x0020);
 			tick(0x8C34, 18);
 			carry = (T.r[0] & 0x8000) != 0;
-			T.r[0] = (uint16_t)(T.r[0] << 1);
+			T.r[0] = fl::asl(T.r[0]);
 			tick(0x8C36, 12);                          // ASL R0
 			T.r[0] = peek((uint16_t)(0x8CA6 + T.r[0]));
 			fl::mov(T.r[0]);

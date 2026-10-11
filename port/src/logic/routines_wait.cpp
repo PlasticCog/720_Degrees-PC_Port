@@ -26,6 +26,7 @@ uint16_t sext8(uint8_t v) { return (uint16_t)(int16_t)(int8_t)v; }
 void wait_vblank()
 {
 	pokeb(0x0192, 0);
+	fl::clr();
 	tick(0x8D54, 27);                                  // CLRB @#0x0192
 	for (;;)
 	{
@@ -116,12 +117,13 @@ uint16_t send_sound_command(const Args &a)
 				break;
 			}
 			tick(0x8EB6, 12);
-			T.r[1]--;
+			T.r[1] = fl::dec(T.r[1]);
 			tick(0x8EB8, 12);                          // DEC R1
 			if (T.r[1] == 0)
 			{
 				tick(0x8EBA, 12);
 				pokeb(0x01A2, 5);
+				fl::movb(0x05);
 				tick(0x8EC0, 33);                      // MOVB #5,@#0x01A2
 				tick(0x8ECE, 12);                      // BR
 				break;
@@ -161,6 +163,7 @@ uint16_t read_sound_response(const Args &)
 		for (;;)
 		{
 			const bool ready = (peek(0x1800) & 0x0010) != 0;
+			fl::logic((uint16_t)(0x0010 & peek(0x1800)));
 			tick(0x8EE8, 30);                          // BIT #0x10,@#IN0
 			if (ready)
 			{
@@ -179,8 +182,9 @@ uint16_t read_sound_response(const Args &)
 			}
 			tick(0x8EF4, 12);                          // BEQ
 			jsr(0x8EF8, 0x917C);                       // feed_watchdog
-			T.r[1]--;
+			T.r[1] = fl::dec(T.r[1]);
 			tick(0x8EFA, 12);                          // DEC R1
+			fl::cmp(T.r[1], 0x0001);
 			tick(0x8EFE, 18);                          // CMP R1,#1
 			if (T.r[1] != 1)
 			{
@@ -195,6 +199,7 @@ uint16_t read_sound_response(const Args &)
 			}
 			tick(0x8F02, 18);
 			pokeb(0x01A2, 2);
+			fl::movb(0x02);
 			tick(0x8F08, 33);                          // MOVB #2,@#0x01A2
 			break;
 		}

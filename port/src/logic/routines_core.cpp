@@ -113,6 +113,7 @@ void select_video_bank()
 	{
 		tick(0x8084, 12);                              // BNE
 		T.r[0] = 0x003C;
+		fl::mov(T.r[0]);
 		tick(0x8088, 18);
 	}
 	else
@@ -124,6 +125,7 @@ void select_video_bank()
 		tick(0x8088, 12);                              // BR
 	}
 	ww(0x01D0, T.r[0]);                                // current bank, as seen by the game
+	fl::mov(T.r[0]);
 	tick(0x808C, 27);
 	rw(0x8000);
 	fl::tst(peek(0x8000));
@@ -193,8 +195,10 @@ uint16_t mul32(const Args &a)
 	fl::clr();
 	tick(0x8100, 12);
 	T.r[3] = 0;
+	fl::clr();
 	tick(0x8102, 12);
 	T.r[4] = 0;
+	fl::clr();
 	tick(0x8104, 12);
 	T.r[1] = a.u(1);
 	fl::mov(T.r[1]);
@@ -203,6 +207,7 @@ uint16_t mul32(const Args &a)
 	{
 		tick(0x810A, 12);
 		T.r[4]--;                                      // the high word of b
+		fl::dec((uint16_t)(T.r[4] + 1));
 		tick(0x810C, 12);
 	}
 	else
@@ -217,11 +222,9 @@ uint16_t mul32(const Args &a)
 		if (T.r[0] & 1)
 		{
 			tick(0x8116, 12);
-			const uint32_t s = (uint32_t)T.r[2] + T.r[1];
-			T.r[2] = (uint16_t)s;
-			fl::add((uint16_t)(T.r[2] - T.r[1]), T.r[1]);
+			T.r[2] = fl::add(T.r[2], T.r[1]);
 			tick(0x8118, 12);                          // ADD R1,R2
-			T.r[3] = (uint16_t)(T.r[3] + (s >> 16));
+			T.r[3] = fl::adc(T.r[3]);
 			tick(0x811A, 12);                          // ADC R3
 			T.r[3] = fl::add(T.r[3], T.r[4]);
 			tick(0x811C, 12);
@@ -236,10 +239,9 @@ uint16_t mul32(const Args &a)
 			break;
 		}
 		tick(0x8120, 12);
-		const uint16_t carry = T.r[1] >> 15;
 		T.r[1] = fl::asl(T.r[1]);
 		tick(0x8122, 12);                              // ASL R1
-		T.r[4] = (uint16_t)((T.r[4] << 1) | carry);
+		T.r[4] = fl::rol(T.r[4]);
 		tick(0x8124, 12);                              // ROL R4
 		if (T.r[4])
 		{
@@ -294,6 +296,7 @@ uint16_t queue_sound(const Args &a)
 		T.r[0] = fl::inc(T.r[0]);
 		tick(0x8E90, 12);
 		T.r[1] = T.r[0];
+		fl::mov(T.r[1]);
 		tick(0x8E92, 12);
 		T.r[1] = fl::logic((uint16_t)(T.r[1] & 7));
 		tick(0x8E96, 18);
@@ -323,10 +326,11 @@ uint16_t set_tile_bank(const Args &a)
 	tick(0xEEEE, 42);
 	for (uint16_t pc = 0xEEF2; pc <= 0xEEFA; pc += 4)
 	{
-		poke(0x01CE, (uint16_t)((int16_t)peek(0x01CE) >> 1));
+		poke(0x01CE, fl::asr(peek(0x01CE)));
 		tick(pc, 27);                                  // ASR @#0x01CE
 	}
 	T.r[1] = peek(0x01CE);
+	fl::mov(T.r[1]);
 	tick(0xEEFE, 24);
 	T.r[1] = fl::asl(T.r[1]);
 	tick(0xEF00, 12);
@@ -344,11 +348,12 @@ uint16_t set_tile_bank(const Args &a)
 		T.r[0] = fl::asl(T.r[0]);
 		tick(0xEF0E, 12);
 		poke(0x01D6, peek((uint16_t)(0xFED2 + T.r[0])));
+		fl::mov(peek(0x01D6));
 		tick(0xEF14, 42);
 		poke(0x01D8, peek((uint16_t)(0xFED2 + T.r[1])));
 		fl::mov(peek(0x01D8));
 		tick(0xEF1A, 42);
-		poke(0x0236, (uint16_t)(peek(0x0236) + 1));
+		poke(0x0236, fl::inc(peek(0x0236)));
 		tick(0xEF1E, 27);
 	}
 	T.r[1] = pop();

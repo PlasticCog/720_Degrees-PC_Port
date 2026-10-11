@@ -220,6 +220,7 @@ void apply_queued_piece_counts()
 	}
 	tick(0xB042, 12);
 	T.r[2] = 0x0004;
+	fl::mov(T.r[2]);
 	tick(0xB046, 18);
 	for (;;)
 	{
@@ -234,6 +235,7 @@ void apply_queued_piece_counts()
 			pokeb((uint16_t)(0x04D0 + T.r[1]), peekb((uint16_t)(0x098D + T.r[2])));
 			tick(0xB052, 45);
 			T.r[4] = 0x0490;
+			fl::mov(T.r[4]);
 			tick(0xB056, 18);
 			T.r[4] = fl::add(T.r[4], T.r[1]);
 			tick(0xB058, 12);
@@ -245,17 +247,22 @@ void apply_queued_piece_counts()
 			{
 				tick(0xB05E, 12);
 				push(0x0001);
+				fl::mov(0x0001);
 				tick(0xB062, 30);
 				T.r[3] = T.r[1];
+				fl::mov(T.r[3]);
 				tick(0xB064, 12);
 				T.r[3] = fl::add(T.r[3], 0x0020);
 				tick(0xB068, 18);
 				push(T.r[3]);
+				fl::mov(T.r[3]);
 				tick(0xB06A, 24);
 				jsr(0xB06E, 0xACE6);
 				poke(T.r[6], 0x0001);
+				fl::mov(0x0001);
 				tick(0xB072, 27);
 				push(T.r[3]);
+				fl::mov(T.r[3]);
 				tick(0xB074, 24);
 				jsr(0xB078, 0xAE02);
 				T.r[6] = fl::add(T.r[6], 0x0006);
@@ -665,19 +672,23 @@ void build_sprite_pieces()
 	fl::movb((uint8_t)T.r[0]);
 	tick(0xB1EE, 24);
 	push(T.r[0]);                                      // the list is kept on the stack
+	fl::mov(T.r[0]);
 	tick(0xB1F0, 24);
 	T.r[1] = T.r[0];
+	fl::mov(T.r[1]);
 	tick(0xB1F2, 12);
 	T.r[0] = sext8(peekb((uint16_t)(0x0988 + T.r[1])));
 	fl::movb((uint8_t)T.r[0]);
 	tick(0xB1F6, 27);
 	poke(0x0FEE, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xB1FA, 27);
 	uint16_t link = T.r[0];
 	while ((int16_t)link >= 0)
 	{
 		tick(0xB200, 12);                              // BGE
 		T.r[3] = peek(0x0FEE);
+		fl::mov(T.r[3]);
 		tick(0xB204, 24);
 		T.r[3] = fl::logic((uint16_t)(T.r[3] & 0x001F));
 		tick(0xB208, 18);
@@ -702,6 +713,7 @@ void build_sprite_pieces()
 		{
 			tick(0xB21A, 12);
 			T.r[5] = 0;
+			fl::clr();
 			tick(0xB21C, 12);
 			push(peek(T.r[6]));
 			fl::mov(peek(T.r[6]));
@@ -733,7 +745,7 @@ void build_sprite_pieces()
 			T.r[5] = T.r[3];
 			fl::mov(T.r[5]);
 			tick(0xB23A, 12);
-			T.r[5] = (uint16_t)(T.r[5] << 1);
+			T.r[5] = fl::asl(T.r[5]);
 			tick(0xB23C, 12);
 			fl::tst(T.r[2]);
 			tick(0xB23E, 12);                          // TST R2
@@ -758,6 +770,7 @@ void build_sprite_pieces()
 				fl::mov(0x3000);
 				tick(0xB260, 33);
 				poke(0x1402, 0x3400);
+				fl::mov(0x3400);
 				tick(0xB266, 33);
 				poke(0x0FF8, 0);
 				fl::clr();
@@ -766,10 +779,11 @@ void build_sprite_pieces()
 				fl::movb(peekb(0x0FF9));
 				tick(0xB26E, 33);
 				T.r[2] = peek(0x0FF8);
+				fl::mov(T.r[2]);
 				tick(0xB272, 24);
 				T.r[2] = fl::asr(T.r[2]);
 				tick(0xB274, 12);
-				T.r[2] = asr(T.r[2], 1);
+				T.r[2] = fl::asr(T.r[2]);
 				tick(0xB276, 12);
 				poke((uint16_t)(0x0530 + T.r[5]), T.r[2]);
 				fl::mov(T.r[2]);
@@ -782,17 +796,19 @@ void build_sprite_pieces()
 				fl::movb((uint8_t)T.r[2]);
 				tick(0xB286, 18);
 				poke(0x0FF6, T.r[2]);
+				fl::mov(T.r[2]);
 				tick(0xB28A, 27);
 				T.r[2] = fl::logic((uint16_t)(T.r[2] & 0x0007));
 				tick(0xB28E, 18);
 				poke(0x0FF4, peek((uint16_t)(0x0670 + T.r[5])));
 				fl::mov(peek(0x0FF4));
 				tick(0xB294, 42);
-				poke(0x0FF4, peek(0x0FF4) & ~0x0007);
+				poke(0x0FF4, fl::logic((uint16_t)(peek(0x0FF4) & ~0x0007)));
 				tick(0xB29A, 33);
-				poke(0x0FF4, peek(0x0FF4) | T.r[2]);
+				poke(0x0FF4, fl::logic((uint16_t)(peek(0x0FF4) | T.r[2])));
 				tick(0xB29E, 27);
 				poke(0x0FF8, peek(0x0FF4));
+				fl::mov(peek(0x0FF8));
 				tick(0xB2A4, 39);
 				const bool rows2 = (int16_t)peek(0x0FF6) < 0;
 				fl::tst(peek(0x0FF6));
@@ -813,6 +829,7 @@ void build_sprite_pieces()
 				fl::clr();
 				tick(0xB2CE, 27);
 				T.r[2] = 0;
+				fl::clr();
 				tick(0xB2D0, 12);
 				for (;;)
 				{
@@ -881,16 +898,19 @@ void build_sprite_pieces()
 						T.r[2] = fl::logic((uint16_t)(T.r[2] | peek(0x0FFA)));
 						tick(0xB326, 24);
 						poke(T.r[4], T.r[2]);
+						fl::mov(T.r[2]);
 						tick(0xB328, 21);
 						tick(0xB332, 12);              // BR
 					}
 					T.r[5] = T.r[2];
+					fl::mov(T.r[5]);
 					tick(0xB334, 12);
 					T.r[5] = fl::logic((uint16_t)(T.r[5] & 0x07F8));
 					tick(0xB338, 18);
 					T.r[4] = T.r[5];
+					fl::mov(T.r[4]);
 					tick(0xB33A, 12);
-					T.r[4] = (uint16_t)(T.r[4] + 0x3800);
+					T.r[4] = fl::add(T.r[4], 0x3800);
 					tick(0xB33E, 18);
 					T.r[0] = fl::dec(T.r[0]);
 					tick(0xB340, 12);
@@ -944,6 +964,7 @@ void build_sprite_pieces()
 		fl::movb((uint8_t)T.r[5]);
 		tick(0xB36C, 24);
 		poke(0x0FEE, T.r[5]);
+		fl::mov(T.r[5]);
 		tick(0xB370, 27);
 		tick(0xB1FA, 18);                              // JMP
 		link = T.r[5];
@@ -990,10 +1011,7 @@ void frame_velocity(uint16_t pc, int k)
 void move_objects()
 {
 	T.r[6] = (uint16_t)(T.r[6] - 4);                    // CMP -(SP),-(SP): the rate pointer, scratch
-	fl::cmp(peek(T.r[6]), peek(T.r[6]));
-	fl::cmp(peek(T.r[6]), peek(T.r[6]));
-	fl::cmp(peek(T.r[6]), peek(T.r[6]));
-	fl::cmp(peek(T.r[6]), peek(T.r[6]));
+	fl::cmp(peek((uint16_t)(T.r[6] + 2)), peek(T.r[6]));
 	tick(0xB37A, 30);
 	const uint16_t at_rate = T.r[6];
 	T.r[5] = sext8(peekb(0x0994));
@@ -1024,7 +1042,7 @@ void move_objects()
 				T.r[4] = T.r[5];
 				fl::mov(T.r[4]);
 				tick(0xB390, 12);
-				T.r[4] = (uint16_t)(T.r[4] << 1);
+				T.r[4] = fl::asl(T.r[4]);
 				tick(0xB392, 12);
 				const uint16_t w = T.r[4];
 				T.r[3] = peek((uint16_t)(0x04F0 + w));
@@ -1036,7 +1054,7 @@ void move_objects()
 				poke(at_rate, 0x0770);
 				fl::mov(0x0770);
 				tick(0xB39E, 27);
-				poke(at_rate, (uint16_t)(peek(at_rate) + T.r[5]));
+				poke(at_rate, fl::add(peek(at_rate), T.r[5]));
 				tick(0xB3A0, 21);
 				const uint8_t rate = peekb(peek(at_rate));
 				tick(0xB3A4, 33);                      // TSTB @0(SP)
@@ -1057,8 +1075,9 @@ void move_objects()
 				if (animated)
 				{
 					T.r[0] = 0x0790;
+					fl::mov(T.r[0]);
 					tick(0xB3AC, 18);
-					T.r[0] = (uint16_t)(T.r[0] + T.r[5]);
+					T.r[0] = fl::add(T.r[0], T.r[5]);
 					tick(0xB3AE, 12);
 					const bool counting = peekb(T.r[0]) != 0;
 					fl::tstb(peekb(T.r[0]));
@@ -1076,10 +1095,11 @@ void move_objects()
 						pokeb(T.r[0], peekb(peek(at_rate)));
 						tick(0xB3B6, 42);
 						T.r[1] = peek((uint16_t)(0x03B0 + w));
+						fl::mov(T.r[1]);
 						tick(0xB3BA, 27);
-						T.r[1] = (uint16_t)(T.r[1] + 2);
+						T.r[1] = fl::add(T.r[1], 2);
 						tick(0xB3BE, 18);
-						pokeb((uint16_t)(0x07B0 + i), (uint8_t)(peekb((uint16_t)(0x07B0 + i)) + 1));
+						pokeb((uint16_t)(0x07B0 + i), fl::incb(peekb((uint16_t)(0x07B0 + i))));
 						tick(0xB3C2, 30);
 						const bool end = (int16_t)peek(T.r[1]) < 0;
 						fl::tst(peek(T.r[1]));
@@ -1088,6 +1108,7 @@ void move_objects()
 						{
 							tick(0xB3C6, 12);
 							T.r[1] = peek(T.r[1]);
+							fl::mov(T.r[1]);
 							tick(0xB3C8, 18);
 							T.r[1] = fl::logic((uint16_t)(T.r[1] & 0x7FFF));
 							tick(0xB3CC, 18);
@@ -1095,11 +1116,13 @@ void move_objects()
 							fl::clr();
 							tick(0xB3D0, 30);
 							const bool once = (peekb((uint16_t)(0x04B0 + i)) & 0x20) != 0;
+							fl::logicb((uint8_t)(0x20 & peekb((uint16_t)(T.r[5] + 0x04B0))));
 							tick(0xB3D6, 33);
 							if (once)
 							{
 								tick(0xB3D8, 12);
 								pokeb(peek(at_rate), 0);
+								fl::clr();
 								tick(0xB3DC, 36);
 							}
 							else
@@ -1115,12 +1138,15 @@ void move_objects()
 							// the velocity from the frame data (bank 0x3000 / 0x3400)
 							tick(0xB3E4, 12);
 							T.r[0] = peek(T.r[1]);
+							fl::mov(T.r[0]);
 							tick(0xB3E6, 18);
-							T.r[0] = (uint16_t)(T.r[0] + 0x3FFD);
+							T.r[0] = fl::add(T.r[0], 0x3FFD);
 							tick(0xB3EA, 18);
 							poke(0x1400, 0x3000);
+							fl::mov(0x3000);
 							tick(0xB3F0, 33);
 							poke(0x1402, 0x3400);
+							fl::mov(0x3400);
 							tick(0xB3F6, 33);
 							frame_velocity(0xB3F6, 3);
 							frame_velocity(0xB412, 2);
@@ -1132,22 +1158,27 @@ void move_objects()
 								tick(0xB432, 12);
 								T.r[6] = (uint16_t)(T.r[6] - 2);
 								pokeb(T.r[6], peekb(T.r[0]));
+								fl::movb(peekb(T.r[6]));
 								tick(0xB434, 30);
 								pokeb((uint16_t)(T.r[6] + 1), 0);
+								fl::clr();
 								tick(0xB438, 30);
 								const uint16_t v = pop();
-								poke((uint16_t)(0x0430 + w), (uint16_t)(peek((uint16_t)(0x0430 + w)) - v));
+								poke((uint16_t)(0x0430 + w), fl::sub(peek((uint16_t)(0x0430 + w)), v));
 								tick(0xB43C, 36);
 								T.r[0] = 0;
+								fl::clr();
 								tick(0xB43E, 12);
 								T.r[0] |= peekb(peek(T.r[6]));
+								fl::logicb((uint8_t)T.r[0]);
 								tick(0xB442, 33);
-								poke((uint16_t)(0x0430 + w), (uint16_t)(peek((uint16_t)(0x0430 + w)) + T.r[0]));
+								poke((uint16_t)(0x0430 + w), fl::add(peek((uint16_t)(0x0430 + w)), T.r[0]));
 								tick(0xB446, 30);
 							}
 							else
 								tick(0xB446, 12);      // BEQ
 							poke(0x1400, 0);
+							fl::clr();
 							tick(0xB44A, 27);
 							poke(0x1402, 0x0400);
 							fl::mov(0x0400);
@@ -1254,18 +1285,21 @@ uint16_t show_object(const Args &)
 	fl::clr();
 	tick(0xB4C6, 27);
 	poke(0x1400, 0);
+	fl::clr();
 	tick(0xB4CA, 27);
 	T.r[0] = 0x0400;
 	fl::mov(T.r[0]);
 	tick(0xB4CE, 18);
 	poke(0x01D4, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xB4D2, 27);
 	poke(0x1402, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xB4D6, 27);
 	T.r[1] = peek((uint16_t)(T.r[6] + 0x0C));
 	fl::mov(T.r[1]);
 	tick(0xB4DA, 27);
-	T.r[1] &= ~0x0080;
+	T.r[1] = fl::logic((uint16_t)(T.r[1] & ~0x0080));
 	tick(0xB4DE, 18);
 	T.r[0] = sext8(peekb(0x0994));
 	fl::movb((uint8_t)T.r[0]);
@@ -1306,6 +1340,7 @@ uint16_t show_object(const Args &)
 				{
 					tick(0xB4F8, 12);
 					top = (peekb((uint16_t)(0x0490 + T.r[0])) & 0x86) != 0;
+					fl::logicb((uint8_t)(0x86 & peekb((uint16_t)(T.r[0] + 0x0490))));
 					tick(0xB4FE, 33);
 					tick(top ? 0xB500 : 0xB506, 12);   // BEQ
 				}
@@ -1334,6 +1369,7 @@ uint16_t show_object(const Args &)
 	{
 		tick(0xB510, 12);
 		T.r[0] = 0;
+		fl::clr();
 		tick(0xB512, 12);
 		T.r[0] |= peekb((uint16_t)(0x0370 + T.r[1]));
 		fl::logicb((uint8_t)T.r[0]);
@@ -1352,7 +1388,7 @@ uint16_t show_object(const Args &)
 	T.r[0] = T.r[1];
 	fl::mov(T.r[0]);
 	tick(0xB524, 12);
-	T.r[0] = (uint16_t)(T.r[0] << 1);
+	T.r[0] = fl::asl(T.r[0]);
 	tick(0xB526, 12);
 	T.r[4] = peek((uint16_t)(0x06F0 + T.r[0]));
 	fl::mov(T.r[4]);
@@ -1375,12 +1411,14 @@ uint16_t show_object(const Args &)
 	T.r[1] = sext8(T.psw);                             // MFPS R1
 	tick(0xB54C, 12);
 	const bool masked = (T.r[1] & 0x00E0) != 0;
+	fl::logic((uint16_t)(0x00E0 & T.r[1]));
 	tick(0xB550, 18);
 	if (!masked)
 	{
 		// interrupts on: the sprite lists are rebuilt
 		tick(0xB552, 12);
 		pokeb(0x0FFC, 0xFF);
+		fl::movb(0xFF);
 		tick(0xB558, 33);
 	}
 	else
@@ -1417,19 +1455,24 @@ uint16_t queue_piece_count(const Args &)
 	fl::clr();
 	tick(0xB612, 27);
 	poke(0x1400, 0);
+	fl::clr();
 	tick(0xB616, 27);
 	T.r[0] = 0x0400;
 	fl::mov(T.r[0]);
 	tick(0xB61A, 18);
 	poke(0x01D4, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xB61E, 27);
 	poke(0x1402, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xB622, 27);
 	T.r[3] = 0x00E0;
+	fl::mov(T.r[3]);
 	tick(0xB626, 18);
 	mtps((uint8_t)T.r[3]);                             // interrupts off
 	tick(0xB628, 24);
 	T.r[2] = 0x0004;
+	fl::mov(T.r[2]);
 	tick(0xB62C, 18);
 	for (;;)
 	{
@@ -1443,8 +1486,10 @@ uint16_t queue_piece_count(const Args &)
 			fl::mov(T.r[0]);
 			tick(0xB636, 27);
 			pokeb((uint16_t)(0x0989 + T.r[2]), (uint8_t)T.r[0]);
+			fl::movb((uint8_t)T.r[0]);
 			tick(0xB63A, 30);
 			T.r[1] = peek((uint16_t)(T.r[6] + 0x0E));
+			fl::mov(T.r[1]);
 			tick(0xB63E, 27);
 			pokeb((uint16_t)(0x098D + T.r[2]), peekb((uint16_t)(0x5C96 + T.r[1])));
 			tick(0xB644, 45);
@@ -1500,6 +1545,7 @@ uint16_t clear_objects_and_text(const Args &)
 	jsr(0xBA3A, 0x8068);
 	jsr(0xBA3E, 0x8D3E);
 	T.r[0] = 0x0370;
+	fl::mov(T.r[0]);
 	tick(0xBA42, 18);
 	for (;;)
 	{
@@ -1704,7 +1750,7 @@ uint16_t locate_map_object(const Args &)
 	T.r[0] = peek(0x09AA);
 	fl::mov(T.r[0]);
 	tick(0xBE18, 24);
-	T.r[0] = (uint16_t)(T.r[0] << 1);
+	T.r[0] = fl::asl(T.r[0]);
 	tick(0xBE1A, 12);
 	T.r[1] = peek((uint16_t)(0x0AF8 + T.r[0]));
 	fl::mov(T.r[1]);
@@ -1712,16 +1758,18 @@ uint16_t locate_map_object(const Args &)
 	T.r[1] = fl::logic((uint16_t)(T.r[1] & 0x7FFF));
 	tick(0xBE22, 18);
 	T.r[0] = T.r[1];
+	fl::mov(T.r[0]);
 	tick(0xBE24, 12);
-	T.r[0] &= 0x01FF;
+	T.r[0] = fl::logic((uint16_t)(T.r[0] & 0x01FF));
 	tick(0xBE28, 18);
-	T.r[0] = (uint16_t)(T.r[0] << 1);
+	T.r[0] = fl::asl(T.r[0]);
 	tick(0xBE2A, 12);
 	cell_entry(0xBE2C, 0);
 	cell_offset(0xBE4A, T.r[1]);
 	T.r[2] = fl::add(T.r[2], peek(T.r[0]));
 	tick(0xBE56, 18);
 	T.r[1] = T.r[2];
+	fl::mov(T.r[1]);
 	tick(0xBE58, 12);
 	T.r[3] = fl_ror(T.r[3]);
 	tick(0xBE5A, 12);
@@ -1741,15 +1789,16 @@ uint16_t locate_map_object(const Args &)
 		poke(0x09B6, T.r[1]);
 		fl::mov(T.r[1]);
 		tick(0xBE6C, 27);
-		T.r[1] = (uint16_t)(T.r[1] << 1);
+		T.r[1] = fl::asl(T.r[1]);
 		tick(0xBE6E, 12);
-		T.r[1] = (uint16_t)(T.r[1] << 1);
+		T.r[1] = fl::asl(T.r[1]);
 		tick(0xBE70, 12);
-		T.r[1] = (uint16_t)(T.r[1] << 1);
+		T.r[1] = fl::asl(T.r[1]);
 		tick(0xBE72, 12);
 		T.r[1] = fl::add(T.r[1], 0x6040);
 		tick(0xBE76, 18);
 		poke(0x09B2, T.r[1]);
+		fl::mov(T.r[1]);
 		tick(0xBE7A, 27);
 	}
 	c_restore(2);
@@ -1767,10 +1816,11 @@ uint16_t map_object_state(const Args &)
 	fl::mov(T.r[0]);
 	tick(0xBE84, 33);
 	T.r[1] = T.r[0];
+	fl::mov(T.r[1]);
 	tick(0xBE86, 12);
 	T.r[1] = fl::logic((uint16_t)(T.r[1] & 0x01FF));
 	tick(0xBE8A, 18);
-	T.r[1] = (uint16_t)(T.r[1] << 1);
+	T.r[1] = fl::asl(T.r[1]);
 	tick(0xBE8C, 12);
 	cell_entry(0xBE8E, 1);
 	T.r[1] = peek(T.r[1]);
@@ -1785,6 +1835,7 @@ uint16_t map_object_state(const Args &)
 		T.r[2] = fl::add(T.r[2], T.r[1]);
 		tick(0xBEBC, 12);
 		T.r[0] = T.r[2];
+		fl::mov(T.r[0]);
 		tick(0xBEBE, 12);
 		T.r[3] = fl_ror(T.r[3]);
 		tick(0xBEC0, 12);
@@ -1826,6 +1877,7 @@ uint16_t map_object_state(const Args &)
 			{
 				tick(0xBEE4, 12);
 				T.r[0] = peek(0x09AA);
+				fl::mov(T.r[0]);
 				tick(0xBEE8, 24);
 				T.r[0] = fl::inc(T.r[0]);
 				tick(0xBEEA, 12);
@@ -1893,7 +1945,7 @@ uint16_t map_object_position(const Args &)
 	T.r[0] = peek(0x09AA);
 	fl::mov(T.r[0]);
 	tick(0xBF66, 24);
-	T.r[0] = (uint16_t)(T.r[0] << 1);
+	T.r[0] = fl::asl(T.r[0]);
 	tick(0xBF68, 12);
 	T.r[0] = peek((uint16_t)(0x0AF8 + T.r[0]));
 	fl::mov(T.r[0]);
@@ -1907,15 +1959,16 @@ uint16_t map_object_position(const Args &)
 	fl::mov(T.r[3]);
 	tick(0xBF78, 24);
 	T.r[2] = T.r[0];
+	fl::mov(T.r[2]);
 	tick(0xBF7A, 12);
-	T.r[2] &= 0x000F;
+	T.r[2] = fl::logic((uint16_t)(T.r[2] & 0x000F));
 	tick(0xBF7E, 18);
 	fl::cmp(T.r[2], T.r[3]);
 	tick(0xBF80, 12);                                  // CMP R2,R3
 	if (T.r[2] > T.r[3])
 	{
 		tick(0xBF82, 12);                              // BLOS not taken: the next row
-		T.r[1]++;
+		T.r[1] = fl::inc(T.r[1]);
 		tick(0xBF84, 12);
 	}
 	else
@@ -1932,12 +1985,12 @@ uint16_t map_object_position(const Args &)
 	tick(0xBF90, 12);
 	T.r[2] = fl::logic((uint16_t)(T.r[2] & 0x0003));
 	tick(0xBF94, 18);
-	T.r[2] = (uint16_t)(T.r[2] << 1);
+	T.r[2] = fl::asl(T.r[2]);
 	tick(0xBF96, 12);
 	T.r[1] = peek(0x09B6);
 	fl::mov(T.r[1]);
 	tick(0xBF9A, 24);
-	T.r[1] = (uint16_t)(T.r[1] << 1);
+	T.r[1] = fl::asl(T.r[1]);
 	tick(0xBF9C, 12);
 	T.r[3] = peek((uint16_t)(0xFDB2 + T.r[2]));
 	fl::mov(T.r[3]);
@@ -1945,10 +1998,11 @@ uint16_t map_object_position(const Args &)
 	T.r[3] = fl::add(T.r[3], peek((uint16_t)(0x4AC0 + T.r[1])));
 	tick(0xBFA4, 27);
 	poke(peek((uint16_t)(T.r[6] + 0x0C)), T.r[3]);     // *y
+	fl::mov(T.r[3]);
 	tick(0xBFA8, 36);
 	T.r[0] = fl::logic((uint16_t)(T.r[0] & 0x0003));
 	tick(0xBFAC, 18);
-	T.r[0] = (uint16_t)(T.r[0] << 1);
+	T.r[0] = fl::asl(T.r[0]);
 	tick(0xBFAE, 12);
 	T.r[2] = peek((uint16_t)(0xFDAA + T.r[0]));
 	fl::mov(T.r[2]);
@@ -1982,10 +2036,12 @@ void map_object_enters()
 	fl::mov(T.r[4]);
 	tick(0xBD82, 27);
 	T.r[2] = T.r[4];
+	fl::mov(T.r[2]);
 	tick(0xBD84, 12);
-	T.r[2] &= 0x01FF;
+	T.r[2] = fl::logic((uint16_t)(T.r[2] & 0x01FF));
 	tick(0xBD88, 18);
 	T.r[1] = T.r[2];
+	fl::mov(T.r[1]);
 	tick(0xBD8A, 12);
 	T.r[1] = fl::logic((uint16_t)(T.r[1] & 0x000F));
 	tick(0xBD8E, 18);
@@ -2000,7 +2056,7 @@ void map_object_enters()
 	T.r[0] = T.r[2];
 	fl::mov(T.r[0]);
 	tick(0xBD9C, 12);
-	T.r[0] &= 0x01F0;
+	T.r[0] = fl::logic((uint16_t)(T.r[0] & 0x01F0));
 	tick(0xBDA0, 18);
 	fl::cmp(T.r[0], peek(0x0228));
 	tick(0xBDA4, 24);
@@ -2015,6 +2071,7 @@ void map_object_enters()
 	T.r[2] = fl::asl(T.r[2]);
 	tick(0xBDB2, 12);
 	T.r[3] = T.r[4];
+	fl::mov(T.r[3]);
 	tick(0xBDB4, 12);
 	T.r[3] = fl::asr(T.r[3]);
 	tick(0xBDB6, 12);
@@ -2024,10 +2081,12 @@ void map_object_enters()
 	T.r[3] = (uint16_t)((T.r[3] << 8) | (T.r[3] >> 8));
 	tick(0xBDBA, 12);
 	T.r[3] = sext8((uint8_t)T.r[3]);
+	fl::movb((uint8_t)T.r[3]);
 	tick(0xBDBC, 12);
 	T.r[3] = fl::add(T.r[3], peek((uint16_t)(0x7A00 + T.r[2])));
 	tick(0xBDC0, 27);
 	T.r[4] = T.r[3];
+	fl::mov(T.r[4]);
 	tick(0xBDC2, 12);
 	// on the window's edges the definition's position must be past the scroll fraction
 	fl::cmp(T.r[1], peek(0x0224));
@@ -2040,7 +2099,7 @@ void map_object_enters()
 		T.r[2] = T.r[4];
 		fl::mov(T.r[2]);
 		tick(0xBDCA, 12);
-		T.r[2] = (uint16_t)(T.r[2] << 1);
+		T.r[2] = fl::asl(T.r[2]);
 		tick(0xBDCC, 12);
 		fl::cmp(peek((uint16_t)(0x5580 + T.r[2])), peek(0x09A6));
 		tick(0xBDD2, 39);
@@ -2074,7 +2133,7 @@ void map_object_enters()
 		T.r[2] = T.r[4];
 		fl::mov(T.r[2]);
 		tick(0xBDEE, 12);
-		T.r[2] = (uint16_t)(T.r[2] << 1);
+		T.r[2] = fl::asl(T.r[2]);
 		tick(0xBDF0, 12);
 		fl::cmp(peek((uint16_t)(0x4AC0 + T.r[2])), peek(0x09A4));
 		tick(0xBDF6, 39);
@@ -2091,7 +2150,7 @@ void map_object_enters()
 		T.r[2] = T.r[4];
 		fl::mov(T.r[2]);
 		tick(0xBE00, 12);
-		T.r[2] = (uint16_t)(T.r[2] << 1);
+		T.r[2] = fl::asl(T.r[2]);
 		tick(0xBE02, 12);
 		fl::cmp(peek((uint16_t)(0x4AC0 + T.r[2])), peek(0x09A4));
 		tick(0xBE08, 39);
@@ -2125,6 +2184,7 @@ uint16_t release_map_definition(const Args &)
 	{
 		tick(0xBF44, 12);                              // the group is free again
 		pokeb((uint16_t)(0x0E6D + T.r[0]), 0);
+		fl::clr();
 		tick(0xBF48, 30);
 	}
 	else
@@ -2162,24 +2222,30 @@ uint16_t turn_map_object(const Args &)
 	T.r[6] = fl::sub(T.r[6], 0x0C);
 	tick(0xC11C, 18);
 	T.r[0] = peek(0x09B2);
+	fl::mov(T.r[0]);
 	tick(0xC120, 24);
 	T.r[0] = sext8(peekb((uint16_t)(T.r[0] + 2)));      // the direction
+	fl::movb((uint8_t)T.r[0]);
 	tick(0xC124, 27);
-	T.r[0] &= 0x00FF;
+	T.r[0] = fl::logic((uint16_t)(T.r[0] & 0x00FF));
 	tick(0xC128, 18);
 	poke(0x01D2, 0);
 	fl::clr();
 	tick(0xC12C, 27);
 	poke(0x1400, 0);
+	fl::clr();
 	tick(0xC130, 27);
 	T.r[1] = 0x0400;
 	fl::mov(T.r[1]);
 	tick(0xC134, 18);
 	poke(0x01D4, T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0xC138, 27);
 	poke(0x1402, T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0xC13C, 27);
 	T.r[1] = peek(0x09AA);
+	fl::mov(T.r[1]);
 	tick(0xC140, 24);
 	T.r[3] = sext8(peekb((uint16_t)(0x09B8 + T.r[1])));
 	fl::movb((uint8_t)T.r[3]);
@@ -2211,15 +2277,19 @@ uint16_t turn_map_object(const Args &)
 	T.r[2] = peek(T.r[6]);
 	fl::mov(T.r[2]);
 	tick(0xC15C, 18);
-	T.r[1] = (uint16_t)(T.r[1] + peek((uint16_t)(0x5F7C + T.r[2])));
+	T.r[1] = fl::add(T.r[1], peek((uint16_t)(0x5F7C + T.r[2])));
 	tick(0xC160, 27);
 	T.r[1] = peek(T.r[1]);                             // the target frame
+	fl::mov(T.r[1]);
 	tick(0xC162, 18);
 	T.r[2] = sext8(peekb((uint16_t)(0x07D0 + T.r[3])));
+	fl::movb((uint8_t)T.r[2]);
 	tick(0xC166, 27);
 	poke(sp_at(6), T.r[2]);                            // the current direction
+	fl::mov(T.r[2]);
 	tick(0xC16A, 30);
 	T.r[2] = T.r[0];
+	fl::mov(T.r[2]);
 	tick(0xC16C, 12);
 	T.r[2] = fl::sub(T.r[2], peek(sp_at(6)));
 	tick(0xC170, 27);
@@ -2232,6 +2302,7 @@ uint16_t turn_map_object(const Args &)
 		{
 			tick(0xC17E, 12);                          // BPL
 			poke(sp_at(0x0A), 0x0002);
+			fl::mov(0x0002);
 			tick(0xC184, 36);
 		}
 		else
@@ -2268,6 +2339,7 @@ uint16_t turn_map_object(const Args &)
 		{
 			tick(0xC1A0, 12);
 			T.r[5] = 0;
+			fl::clr();
 			tick(0xC1A2, 12);
 			push(peek(sp_at(6)));
 			fl::mov(peek(T.r[6]));
@@ -2280,11 +2352,12 @@ uint16_t turn_map_object(const Args &)
 			push(peek(T.r[6]));
 			fl::mov(peek(T.r[6]));
 			tick(0xC1AE, 30);
-			poke(T.r[6], (uint16_t)(peek(T.r[6]) + 0x5F7C));
+			poke(T.r[6], fl::add(peek(T.r[6]), 0x5F7C));
 			tick(0xC1B2, 27);
-			T.r[5] = (uint16_t)(T.r[5] + peek(pop()));
+			T.r[5] = fl::add(T.r[5], peek(pop()));
 			tick(0xC1B4, 24);
 			T.r[2] = peek(T.r[5]);
+			fl::mov(T.r[2]);
 			tick(0xC1B6, 18);
 			tick(0xC1C0, 12);                          // BR
 		}
@@ -2292,10 +2365,12 @@ uint16_t turn_map_object(const Args &)
 		{
 			tick(0xC1B8, 12);                          // BNE
 			T.r[5] = T.r[3];
+			fl::mov(T.r[5]);
 			tick(0xC1BA, 12);
-			T.r[5] = (uint16_t)(T.r[5] << 1);
+			T.r[5] = fl::asl(T.r[5]);
 			tick(0xC1BC, 12);
 			T.r[2] = peek((uint16_t)(0x03B0 + T.r[5]));
+			fl::mov(T.r[2]);
 			tick(0xC1C0, 27);
 		}
 		T.r[2] = fl::add(T.r[2], peek(sp_at(0x0A)));
@@ -2306,6 +2381,7 @@ uint16_t turn_map_object(const Args &)
 		{
 			tick(0xC1C8, 12);
 			T.r[2] = peek(T.r[2]);
+			fl::mov(T.r[2]);
 			tick(0xC1CA, 18);
 			T.r[2] = fl::logic((uint16_t)(T.r[2] & 0x7FFF));
 			tick(0xC1CE, 18);
@@ -2339,7 +2415,7 @@ uint16_t turn_map_object(const Args &)
 			T.r[5] = (uint16_t)((T.r[5] & 0xFF00) | (uint8_t)~T.r[5]);
 			fl::comb((uint8_t)(~(uint8_t)T.r[5]));
 			tick(0xC1E4, 12);
-			pokeb(peek(sp_at(8)), (uint8_t)(peekb(peek(sp_at(8))) & ~T.r[5]));
+			pokeb(peek(sp_at(8)), fl::logicb((uint8_t)(peekb(peek(sp_at(8))) & ~T.r[5])));
 			tick(0xC1E8, 36);
 			tick(0xC1F0, 12);                          // BR
 		}
@@ -2350,6 +2426,7 @@ uint16_t turn_map_object(const Args &)
 			fl::mov(T.r[1]);
 			tick(0xC1EC, 12);
 			poke(sp_at(2), (uint16_t)(peek(sp_at(2)) + 1));   // turned
+			fl::inc((uint16_t)(peek((uint16_t)(T.r[6] + 2)) - 1));
 			tick(0xC1F0, 30);
 		}
 		const bool after = peekb((uint16_t)(0x6502 + T.r[4])) != 0;
@@ -2393,8 +2470,9 @@ uint16_t turn_map_object(const Args &)
 					{
 						tick(0xC20C, 12);
 						T.r[1] = peek(T.r[1]);
+						fl::mov(T.r[1]);
 						tick(0xC20E, 18);
-						T.r[1] &= 0x7FFF;
+						T.r[1] = fl::logic((uint16_t)(T.r[1] & 0x7FFF));
 						tick(0xC212, 18);
 						tick(0xC216, 12);              // BR
 					}
@@ -2404,7 +2482,7 @@ uint16_t turn_map_object(const Args &)
 		T.r[5] = T.r[3];
 		fl::mov(T.r[5]);
 		tick(0xC218, 12);
-		T.r[5] = (uint16_t)(T.r[5] << 1);
+		T.r[5] = fl::asl(T.r[5]);
 		tick(0xC21A, 12);
 		const bool same = T.r[1] == peek((uint16_t)(0x03B0 + T.r[5]));
 		fl::cmp(T.r[1], peek((uint16_t)(T.r[5] + 0x03B0)));
@@ -2425,6 +2503,7 @@ uint16_t turn_map_object(const Args &)
 			poke(T.r[6], fl::add(peek(T.r[6]), 0x6110));
 			tick(0xC230, 27);
 			T.r[2] = peek(pop());
+			fl::mov(T.r[2]);
 			tick(0xC232, 24);
 			if (!T.r[2])
 				tick(0xC248, 12);                      // BEQ
@@ -2448,23 +2527,27 @@ uint16_t turn_map_object(const Args &)
 	poke(sp_at(6), 0x0770);
 	fl::mov(0x0770);
 	tick(0xC24E, 36);
-	poke(sp_at(6), (uint16_t)(peek(sp_at(6)) + T.r[3]));
+	poke(sp_at(6), fl::add(peek(sp_at(6)), T.r[3]));
 	tick(0xC252, 30);
 	T.r[5] = T.r[3];
+	fl::mov(T.r[5]);
 	tick(0xC254, 12);
-	T.r[5] = (uint16_t)(T.r[5] << 1);
+	T.r[5] = fl::asl(T.r[5]);
 	tick(0xC256, 12);
 	poke(sp_at(8), 0x04F0);
+	fl::mov(0x04F0);
 	tick(0xC25C, 36);
-	poke(sp_at(8), (uint16_t)(peek(sp_at(8)) + T.r[5]));
+	poke(sp_at(8), fl::add(peek(sp_at(8)), T.r[5]));
 	tick(0xC260, 30);
 	poke(sp_at(0x0A), 0x0570);
+	fl::mov(0x0570);
 	tick(0xC266, 36);
-	poke(sp_at(0x0A), (uint16_t)(peek(sp_at(0x0A)) + T.r[5]));
+	poke(sp_at(0x0A), fl::add(peek(sp_at(0x0A)), T.r[5]));
 	tick(0xC26A, 30);
 	poke(sp_at(4), 0x0430);
+	fl::mov(0x0430);
 	tick(0xC270, 36);
-	poke(sp_at(4), (uint16_t)(peek(sp_at(4)) + T.r[5]));
+	poke(sp_at(4), fl::add(peek(sp_at(4)), T.r[5]));
 	tick(0xC274, 30);
 	const bool turned = peek(sp_at(2)) != 0;
 	fl::tst(peek((uint16_t)(T.r[6] + 2)));
@@ -2484,6 +2567,7 @@ uint16_t turn_map_object(const Args &)
 		else
 		{
 			tick(0xC284, 12);
+			fl::logic((uint16_t)(0x0001 & T.r[0]));
 			tick(0xC288, 18);                          // BIT #1,R0
 			if (!(T.r[0] & 0x0001))
 				tick(0xC292, 12);                      // BEQ
@@ -2491,8 +2575,9 @@ uint16_t turn_map_object(const Args &)
 			{
 				tick(0xC28A, 12);
 				T.r[2] = 0;
+				fl::clr();
 				tick(0xC28C, 12);
-				pokeb((uint16_t)(0x0490 + T.r[3]), peekb((uint16_t)(0x0490 + T.r[3])) & ~0x01);
+				pokeb((uint16_t)(0x0490 + T.r[3]), fl::logicb((uint8_t)(peekb((uint16_t)(0x0490 + T.r[3])) & ~0x01)));
 				tick(0xC292, 36);
 			}
 		}
@@ -2522,16 +2607,22 @@ uint16_t turn_map_object(const Args &)
 		fl::mov(0x1000);
 		tick(0xC2AC, 36);
 		poke(0x01D2, 0x1000);
+		fl::mov(0x1000);
 		tick(0xC2B2, 33);
 		poke(0x1400, peek(sp_at(2)));
+		fl::mov(peek((uint16_t)(T.r[6] + 2)));
 		tick(0xC2B8, 42);
 		poke(sp_at(2), 0x1400);
+		fl::mov(0x1400);
 		tick(0xC2BE, 36);
 		poke(0x01D4, 0x1400);
+		fl::mov(0x1400);
 		tick(0xC2C4, 33);
 		poke(0x1402, peek(sp_at(2)));
+		fl::mov(peek((uint16_t)(T.r[6] + 2)));
 		tick(0xC2CA, 42);
 		poke(sp_at(2), peek(0x09B2));
+		fl::mov(peek((uint16_t)(T.r[6] + 2)));
 		tick(0xC2D0, 42);
 		T.r[1] = 0;
 		fl::clr();
@@ -2540,6 +2631,7 @@ uint16_t turn_map_object(const Args &)
 		fl::mov(T.r[5]);
 		tick(0xC2D6, 27);
 		T.r[1] |= peekb((uint16_t)(T.r[5] + 3));       // the record's speed
+		fl::logicb((uint8_t)T.r[1]);
 		tick(0xC2DA, 27);
 		fl::tst(T.r[2]);
 		tick(0xC2DC, 12);                              // TST R2
@@ -2547,20 +2639,25 @@ uint16_t turn_map_object(const Args &)
 		{
 			tick(0xC328, 12);                          // BNE: standing
 			T.r[5] = 0x2400;
+			fl::mov(T.r[5]);
 			tick(0xC32C, 18);
 			poke(0x01D2, T.r[5]);
+			fl::mov(T.r[5]);
 			tick(0xC330, 27);
 			poke(0x1400, T.r[5]);
+			fl::mov(T.r[5]);
 			tick(0xC334, 27);
-			T.r[1] = (uint16_t)(T.r[1] << 1);
+			T.r[1] = fl::asl(T.r[1]);
 			tick(0xC336, 12);
-			poke(peek(sp_at(4)), (uint16_t)(peek(peek(sp_at(4))) + peek((uint16_t)(0x40F8 + T.r[1]))));
+			poke(peek(sp_at(4)), fl::add(peek(peek(sp_at(4))), peek((uint16_t)(0x40F8 + T.r[1]))));
 			tick(0xC33C, 51);
 			poke(peek(sp_at(8)), 0);
+			fl::clr();
 			tick(0xC340, 36);
 			poke(peek(sp_at(0x0A)), 0);
+			fl::clr();
 			tick(0xC344, 36);
-			pokeb((uint16_t)(0x0490 + T.r[3]), peekb((uint16_t)(0x0490 + T.r[3])) | 0x01);
+			pokeb((uint16_t)(0x0490 + T.r[3]), fl::logicb((uint8_t)(peekb((uint16_t)(0x0490 + T.r[3])) | 0x01)));
 			tick(0xC34A, 36);
 		}
 		else
@@ -2570,10 +2667,13 @@ uint16_t turn_map_object(const Args &)
 			fl::mov(T.r[5]);
 			tick(0xC2E2, 18);
 			poke(0x01D2, T.r[5]);
+			fl::mov(T.r[5]);
 			tick(0xC2E6, 27);
 			poke(0x1400, T.r[5]);
+			fl::mov(T.r[5]);
 			tick(0xC2EA, 27);
 			T.r[5] = T.r[0];
+			fl::mov(T.r[5]);
 			tick(0xC2EC, 12);
 			for (uint16_t pc = 0xC2EE; pc <= 0xC2F2; pc += 2)
 			{
@@ -2583,8 +2683,9 @@ uint16_t turn_map_object(const Args &)
 			T.r[5] = (uint16_t)(T.r[5] + T.r[4]);
 			tick(0xC2F4, 12);
 			T.r[2] = T.r[5];
+			fl::mov(T.r[2]);
 			tick(0xC2F6, 12);
-			T.r[2] = (uint16_t)(T.r[2] << 1);
+			T.r[2] = fl::asl(T.r[2]);
 			tick(0xC2F8, 12);
 			poke(peek(sp_at(8)), peek((uint16_t)(0x4138 + T.r[2])));
 			tick(0xC2FE, 51);
@@ -2612,11 +2713,12 @@ uint16_t turn_map_object(const Args &)
 				pokeb(peek(sp_at(4)), peekb((uint16_t)(0x3FF8 + T.r[1])));
 				tick(0xC320, 51);
 			}
-			poke(peek(sp_at(4)), peek(peek(sp_at(4))) & 0x00FF);
+			poke(peek(sp_at(4)), fl::logic((uint16_t)(peek(peek(sp_at(4))) & 0x00FF)));
 			tick(0xC326, 42);
 			tick(0xC34A, 12);                          // BR
 		}
 		pokeb((uint16_t)(0x07D0 + T.r[3]), (uint8_t)T.r[0]);
+		fl::movb((uint8_t)T.r[0]);
 		tick(0xC34E, 30);
 		T.r[0] = 0;
 		fl::clr();
@@ -2631,33 +2733,40 @@ uint16_t turn_map_object(const Args &)
 		bank_b(0xC35E, 0x1400);
 		push(0x000E);
 		tick(0xC36E, 30);
-		poke(T.r[6], (uint16_t)(peek(T.r[6]) + T.r[6]));
+		poke(T.r[6], fl::add(peek(T.r[6]), T.r[6]));
 		tick(0xC370, 21);
 		push(0x0012);
+		fl::mov(0x0012);
 		tick(0xC374, 30);
-		poke(T.r[6], (uint16_t)(peek(T.r[6]) + T.r[6]));
+		poke(T.r[6], fl::add(peek(T.r[6]), T.r[6]));
 		tick(0xC376, 21);
 		jsr(0xC37A, 0xBF5E);
 		poke(0x01D2, 0);
 		fl::clr();
 		tick(0xC37E, 27);
 		poke(0x1400, 0);
+		fl::clr();
 		tick(0xC382, 27);
 		T.r[0] = 0x0400;
 		fl::mov(T.r[0]);
 		tick(0xC386, 18);
 		poke(0x01D4, T.r[0]);
+		fl::mov(T.r[0]);
 		tick(0xC38A, 27);
 		poke(0x1402, T.r[0]);
+		fl::mov(T.r[0]);
 		tick(0xC38E, 27);
 		T.r[0] = peek(sp_at(4));
+		fl::mov(T.r[0]);
 		tick(0xC392, 27);
 		T.r[2] = peek((uint16_t)(0x62A4 + T.r[0]));
 		fl::mov(T.r[2]);
 		tick(0xC396, 27);
 		T.r[1] = peek((uint16_t)(0x636E + T.r[0]));
+		fl::mov(T.r[1]);
 		tick(0xC39A, 27);
 		T.r[0] = T.r[2];
+		fl::mov(T.r[0]);
 		tick(0xC39C, 12);
 		T.r[0] = fl::sub(T.r[0], peek((uint16_t)(0x06F0 + T.r[5])));
 		tick(0xC3A0, 27);
@@ -2696,11 +2805,10 @@ uint16_t turn_map_object(const Args &)
 		pokeb((uint16_t)(0x04B0 + T.r[3]), fl::logicb((uint8_t)(peekb((uint16_t)(0x04B0 + T.r[3])) | 0x01)));
 		tick(0xC3DA, 36);
 		T.r[6] = (uint16_t)(T.r[6] + 4);                // CMP (SP)+,(SP)+
-		fl::cmp(peek((uint16_t)(T.r[6] - 2)), peek((uint16_t)(T.r[6] - 2)));
-		fl::cmp(peek((uint16_t)(T.r[6] - 2)), peek((uint16_t)(T.r[6] - 2)));
-		fl::cmp(peek((uint16_t)(T.r[6] - 2)), peek((uint16_t)(T.r[6] - 2)));
+		fl::cmp(peek((uint16_t)(T.r[6] - 4)), peek((uint16_t)(T.r[6] - 2)));
 		tick(0xC3DC, 24);
 		T.r[0] = 0x0001;
+		fl::mov(T.r[0]);
 		tick(0xC3E0, 18);
 	}
 	T.r[6] = fl::add(T.r[6], 0x0010);
@@ -2724,7 +2832,7 @@ uint16_t move_map_object(const Args &)
 	T.r[0] = peek(0x09AA);
 	fl::mov(T.r[0]);
 	tick(0xBFC6, 24);
-	T.r[0] = (uint16_t)(T.r[0] << 1);
+	T.r[0] = fl::asl(T.r[0]);
 	tick(0xBFC8, 12);
 	const uint16_t d = peek((uint16_t)(0x0AF8 + T.r[0]));
 	fl::tst(peek((uint16_t)(T.r[0] + 0x0AF8)));
@@ -2768,6 +2876,7 @@ uint16_t move_map_object(const Args &)
 			T.r[1] = fl::logic((uint16_t)(T.r[1] & 0x000F));
 			tick(0xC008, 18);
 			T.r[0] = peek(0x09B4);
+			fl::mov(T.r[0]);
 			tick(0xC00C, 24);
 			const bool kept = (peekb((uint16_t)(0x4560 + T.r[0])) & 0x0F) != 0;
 			fl::logicb((uint8_t)(0x0F & peekb((uint16_t)(T.r[0] + 0x4560))));
@@ -2778,6 +2887,7 @@ uint16_t move_map_object(const Args &)
 			{
 				tick(0xC014, 12);
 				pokeb((uint16_t)(0x0E6D + T.r[1]), 0);
+				fl::clr();
 				tick(0xC018, 30);
 				tick(0xC032, 12);                      // BR
 			}
@@ -2807,10 +2917,12 @@ uint16_t move_map_object(const Args &)
 		fl::mov(T.r[4]);
 		tick(0xC036, 24);
 		T.r[1] = T.r[4];
+		fl::mov(T.r[1]);
 		tick(0xC038, 12);
 		T.r[5] = peek(0x09AA);
+		fl::mov(T.r[5]);
 		tick(0xC03C, 24);
-		T.r[5] = (uint16_t)(T.r[5] << 1);
+		T.r[5] = fl::asl(T.r[5]);
 		tick(0xC03E, 12);
 		const uint16_t desc = peek((uint16_t)(0x0AF8 + T.r[5]));
 		poke(T.r[6], desc);
@@ -2829,8 +2941,9 @@ uint16_t move_map_object(const Args &)
 			T.r[2] = fl::logic((uint16_t)(T.r[2] & 0x003F));
 			tick(0xC050, 18);
 			T.r[3] = 0x0470;
+			fl::mov(T.r[3]);
 			tick(0xC054, 18);
-			T.r[3] = (uint16_t)(T.r[3] + T.r[2]);
+			T.r[3] = fl::add(T.r[3], T.r[2]);
 			tick(0xC056, 12);
 			const bool bit5 = (peekb((uint16_t)(0x4560 + T.r[1])) & 0x20) != 0;
 			fl::logicb((uint8_t)(0x20 & peekb((uint16_t)(T.r[1] + 0x4560))));
@@ -2890,10 +3003,12 @@ uint16_t move_map_object(const Args &)
 			T.r[1] = fl::logic((uint16_t)(T.r[1] & 0x000F));
 			tick(0xC086, 18);
 			T.r[2] = peek(0x09AA);
+			fl::mov(T.r[2]);
 			tick(0xC08A, 24);
-			T.r[2]++;
+			T.r[2] = fl::inc(T.r[2]);
 			tick(0xC08C, 12);
 			pokeb((uint16_t)(0x0E6D + T.r[1]), (uint8_t)T.r[2]);
+			fl::movb((uint8_t)T.r[2]);
 			tick(0xC090, 30);
 			tick(0xC0A8, 12);                          // BR
 		}
@@ -3223,8 +3338,10 @@ uint16_t add_map_object(const Args &)
 		fl::mov(T.r[3]);
 		tick(0xCED8, 18);
 		poke(0x01D4, T.r[3]);
+		fl::mov(T.r[3]);
 		tick(0xCEDC, 27);
 		poke(0x1402, T.r[3]);
+		fl::mov(T.r[3]);
 		tick(0xCEE0, 27);
 		T.r[3] = rw(sp_at(0x16));                      // the type
 		fl::mov(T.r[3]);
@@ -3284,8 +3401,10 @@ uint16_t add_map_object(const Args &)
 		fl::mov(T.r[0]);
 		tick(0xCF1E, 18);
 		poke(0x01D4, T.r[0]);
+		fl::mov(T.r[0]);
 		tick(0xCF22, 27);
 		poke(0x1402, T.r[0]);
+		fl::mov(T.r[0]);
 		tick(0xCF26, 27);
 		poke(0x09AA, T.r[2]);
 		fl::mov(T.r[2]);
@@ -3412,8 +3531,10 @@ uint16_t init_map_objects(const Args &)
 	fl::mov(T.r[0]);
 	tick(0xD012, 18);
 	poke(0x01D4, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xD016, 27);
 	poke(0x1402, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xD01A, 27);
 	T.r[1] = 0x6696;                                   // the level's list (type, descriptor)
 	fl::mov(T.r[1]);
@@ -3479,20 +3600,25 @@ uint16_t map_object_leaves(const Args &)
 {
 	c_save(4, 0xC3EA);
 	T.r[4] = peek(0x01D2);
+	fl::mov(T.r[4]);
 	tick(0xC3EE, 24);
 	T.r[5] = peek(0x01D4);
+	fl::mov(T.r[5]);
 	tick(0xC3F2, 24);
 	poke(0x01D2, 0);
 	fl::clr();
 	tick(0xC3F6, 27);
 	poke(0x1400, 0);
+	fl::clr();
 	tick(0xC3FA, 27);
 	T.r[0] = 0x0400;
 	fl::mov(T.r[0]);
 	tick(0xC3FE, 18);
 	poke(0x01D4, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xC402, 27);
 	poke(0x1402, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xC406, 27);
 	T.r[1] = peek(0x09AA);
 	fl::mov(T.r[1]);
@@ -3518,10 +3644,13 @@ uint16_t map_object_leaves(const Args &)
 		fl::mov(T.r[4]);
 		tick(0xC422, 27);
 		poke(0x01D4, T.r[5]);
+		fl::mov(T.r[5]);
 		tick(0xC426, 27);
 		poke(0x1400, peek(0x01D2));
+		fl::mov(peek(0x01D2));
 		tick(0xC42C, 39);
 		poke(0x1402, peek(0x01D4));
+		fl::mov(peek(0x01D4));
 		tick(0xC432, 39);
 		c_restore(4);
 		return T.r[0];
@@ -3539,6 +3668,7 @@ uint16_t map_object_leaves(const Args &)
 		T.r[0] = fl::inc(T.r[0]);
 		tick(0xC442, 12);
 		pokeb(0x0E97, (uint8_t)T.r[0]);
+		fl::movb((uint8_t)T.r[0]);
 		tick(0xC446, 27);
 	}
 	else
@@ -3550,10 +3680,12 @@ uint16_t map_object_leaves(const Args &)
 	{
 		tick(0xC44E, 12);
 		T.r[0] = sext8(peekb(0x0E96));
+		fl::movb((uint8_t)T.r[0]);
 		tick(0xC452, 24);
-		T.r[0]++;
+		T.r[0] = fl::inc(T.r[0]);
 		tick(0xC454, 12);
 		pokeb(0x0E96, (uint8_t)T.r[0]);
+		fl::movb((uint8_t)T.r[0]);
 		tick(0xC458, 27);
 	}
 	else
@@ -3565,6 +3697,7 @@ uint16_t map_object_leaves(const Args &)
 	{
 		tick(0xC460, 12);                              // gone for good
 		push(peek(0x09AA));
+		fl::mov(peek(T.r[6]));
 		tick(0xC464, 36);
 		jsr(0xC468, 0xCF5E);
 		tick(0xC4CC, 12);                              // BR
@@ -3579,10 +3712,12 @@ uint16_t map_object_leaves(const Args &)
 		fl::logicb((uint8_t)T.r[2]);
 		tick(0xC470, 27);
 		pokeb((uint16_t)(0x09B8 + T.r[1]), (uint8_t)T.r[2]);   // the map object keeps the type
+		fl::movb((uint8_t)T.r[2]);
 		tick(0xC474, 30);
 		T.r[0] = T.r[3];
+		fl::mov(T.r[0]);
 		tick(0xC476, 12);
-		T.r[0] = (uint16_t)(T.r[0] << 1);
+		T.r[0] = fl::asl(T.r[0]);
 		tick(0xC478, 12);
 		T.r[1] = peek((uint16_t)(0x0430 + T.r[0]));    // the animation counter
 		fl::mov(T.r[1]);
@@ -3607,8 +3742,9 @@ uint16_t map_object_leaves(const Args &)
 		fl::mov(T.r[3]);
 		tick(0xC494, 24);
 		T.r[0] = T.r[3];
+		fl::mov(T.r[0]);
 		tick(0xC496, 12);
-		T.r[0] = (uint16_t)(T.r[0] << 1);
+		T.r[0] = fl::asl(T.r[0]);
 		tick(0xC498, 12);
 		poke((uint16_t)(0x0AF8 + T.r[0]), fl::logic((uint16_t)(peek((uint16_t)(0x0AF8 + T.r[0])) & 0x7FFF)));
 		tick(0xC49E, 36);
@@ -3654,10 +3790,13 @@ uint16_t map_object_leaves(const Args &)
 	fl::mov(T.r[4]);
 	tick(0xC4D0, 27);
 	poke(0x01D4, T.r[5]);
+	fl::mov(T.r[5]);
 	tick(0xC4D4, 27);
 	poke(0x1400, peek(0x01D2));
+	fl::mov(peek(0x01D2));
 	tick(0xC4DA, 39);
 	poke(0x1402, peek(0x01D4));
+	fl::mov(peek(0x01D4));
 	tick(0xC4E0, 39);
 	fl::tst(pop());
 	tick(0xC4E2, 18);
@@ -3679,20 +3818,25 @@ uint16_t create_map_object(const Args &)
 	T.r[6] = fl::sub(T.r[6], 0x0E);
 	tick(0xC4EC, 18);
 	push(peek(0x01D2));                                // banks: 2(SP) A, (SP) B
+	fl::mov(peek(T.r[6]));
 	tick(0xC4F0, 36);
 	push(peek(0x01D4));
+	fl::mov(peek(T.r[6]));
 	tick(0xC4F4, 36);
 	poke(0x01D2, 0);
 	fl::clr();
 	tick(0xC4F8, 27);
 	poke(0x1400, 0);
+	fl::clr();
 	tick(0xC4FC, 27);
 	T.r[0] = 0x0400;
 	fl::mov(T.r[0]);
 	tick(0xC500, 18);
 	poke(0x01D4, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xC504, 27);
 	poke(0x1402, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xC508, 27);
 	T.r[0] = peek(0x09AA);
 	fl::mov(T.r[0]);
@@ -3717,6 +3861,7 @@ uint16_t create_map_object(const Args &)
 		{
 			tick(0xC51E, 12);
 			T.r[0] = sext8(peekb(0x0E96));
+			fl::movb((uint8_t)T.r[0]);
 			tick(0xC522, 24);
 			if (!T.r[0])
 			{
@@ -3727,10 +3872,12 @@ uint16_t create_map_object(const Args &)
 			{
 				tick(0xC524, 12);
 				T.r[1] = T.r[0];
+				fl::mov(T.r[1]);
 				tick(0xC526, 12);
-				T.r[1]--;
+				T.r[1] = fl::dec(T.r[1]);
 				tick(0xC528, 12);
 				pokeb(0x0E96, (uint8_t)T.r[1]);
+				fl::movb((uint8_t)T.r[1]);
 				tick(0xC52C, 27);
 				tick(0xC592, 12);                      // BR
 			}
@@ -3760,12 +3907,14 @@ uint16_t create_map_object(const Args &)
 				{
 					tick(0xC550, 12);
 					T.r[4] = T.r[2];
+					fl::mov(T.r[4]);
 					tick(0xC552, 12);
-					T.r[4] = (uint16_t)(T.r[4] - 0x002F);
+					T.r[4] = fl::sub(T.r[4], 0x002F);
 					tick(0xC556, 18);
 					T.r[1] = T.r[4];
+					fl::mov(T.r[1]);
 					tick(0xC558, 12);
-					T.r[1] = (uint16_t)(T.r[1] + 0x0012);
+					T.r[1] = fl::add(T.r[1], 0x0012);
 					tick(0xC55C, 18);
 				}
 				else
@@ -3777,15 +3926,18 @@ uint16_t create_map_object(const Args &)
 					T.r[0] = fl::sub(T.r[0], 0x000A);
 					tick(0xC548, 18);
 					T.r[1] = T.r[0];
+					fl::mov(T.r[1]);
 					tick(0xC54A, 12);
-					T.r[1] = (uint16_t)(T.r[1] + 0x000B);
+					T.r[1] = fl::add(T.r[1], 0x000B);
 					tick(0xC54E, 18);
 					tick(0xC55C, 12);                  // BR
 				}
 				push(T.r[1]);
+				fl::mov(T.r[1]);
 				tick(0xC55E, 24);
 				jsr(0xC562, 0xD348);
 				poke(T.r[6], peek(0x09AA));
+				fl::mov(peek(T.r[6]));
 				tick(0xC566, 33);
 				jsr(0xC56A, 0xCF5E);
 				tick(0xC830, 18);                      // JMP
@@ -3795,10 +3947,12 @@ uint16_t create_map_object(const Args &)
 			{
 				tick(0xC56E, 12);                      // BNE
 				T.r[1] = T.r[0];
+				fl::mov(T.r[1]);
 				tick(0xC570, 12);
 				T.r[1] = fl::dec(T.r[1]);
 				tick(0xC572, 12);
 				pokeb(0x0E97, (uint8_t)T.r[1]);
+				fl::movb((uint8_t)T.r[1]);
 				tick(0xC576, 27);
 				bank_a(0xC576, 0x1800);
 				push(T.r[2]);
@@ -3808,6 +3962,7 @@ uint16_t create_map_object(const Args &)
 				fl::clr();
 				tick(0xC58C, 27);
 				poke(0x1400, 0);
+				fl::clr();
 				tick(0xC590, 27);
 				pop();
 				fl::tst(peek((uint16_t)(T.r[6] - 2)));
@@ -3825,6 +3980,7 @@ uint16_t create_map_object(const Args &)
 		{
 			tick(0xC5AE, 12);                          // BEQ
 			const bool taken = peekb(0x0375) != 0;
+			fl::tstb(peekb(0x0375));
 			tick(0xC5B2, 24);
 			if (taken)
 			{
@@ -3878,12 +4034,16 @@ uint16_t create_map_object(const Args &)
 	if (exit_now)
 	{
 		poke(0x01D2, peek((uint16_t)(T.r[6] + 2)));
+		fl::mov(peek(0x01D2));
 		tick(0xC5BA, 42);
 		poke(0x01D4, peek(T.r[6]));
+		fl::mov(peek(0x01D4));
 		tick(0xC5BE, 33);
 		poke(0x1400, peek(0x01D2));
+		fl::mov(peek(0x01D2));
 		tick(0xC5C4, 39);
 		poke(0x1402, peek(0x01D4));
+		fl::mov(peek(0x01D4));
 		tick(0xC5CA, 39);
 		tick(0xC84A, 18);                              // JMP
 		T.r[6] = fl::add(T.r[6], 0x0012);
@@ -3901,11 +4061,12 @@ uint16_t create_map_object(const Args &)
 		poke(sp_at(4), 0x0470);
 		fl::mov(0x0470);
 		tick(0xC5E2, 36);
-		poke(sp_at(4), (uint16_t)(peek(sp_at(4)) + T.r[3]));
+		poke(sp_at(4), fl::add(peek(sp_at(4)), T.r[3]));
 		tick(0xC5E6, 30);
 		poke(sp_at(0x0C), 0x6438);
+		fl::mov(0x6438);
 		tick(0xC5EC, 36);
-		poke(sp_at(0x0C), (uint16_t)(peek(sp_at(0x0C)) + T.r[2]));
+		poke(sp_at(0x0C), fl::add(peek(sp_at(0x0C)), T.r[2]));
 		tick(0xC5F0, 30);
 		pokeb(peek(sp_at(4)), peekb(peek(sp_at(0x0C))));   // palette byte from 0x6438[type]
 		tick(0xC5F6, 57);
@@ -3920,14 +4081,16 @@ uint16_t create_map_object(const Args &)
 			push(0x0010);
 			fl::mov(0x0010);
 			tick(0xC606, 30);
-			poke(T.r[6], (uint16_t)(peek(T.r[6]) + T.r[6]));
+			poke(T.r[6], fl::add(peek(T.r[6]), T.r[6]));
 			tick(0xC608, 21);
 			push(0x0014);
+			fl::mov(0x0014);
 			tick(0xC60C, 30);
-			poke(T.r[6], (uint16_t)(peek(T.r[6]) + T.r[6]));
+			poke(T.r[6], fl::add(peek(T.r[6]), T.r[6]));
 			tick(0xC60E, 21);
 			jsr(0xC612, 0xDF40);
 			pop();
+			fl::tst(peek((uint16_t)(T.r[6] - 2)));
 			tick(0xC614, 18);                          // TST (SP)+
 			tick(0xC7B2, 18);                          // JMP
 		}
@@ -3935,28 +4098,33 @@ uint16_t create_map_object(const Args &)
 		{
 			tick(0xC618, 12);                          // BNE
 			T.r[5] = T.r[3];
+			fl::mov(T.r[5]);
 			tick(0xC61A, 12);
-			T.r[5] = (uint16_t)(T.r[5] << 1);
+			T.r[5] = fl::asl(T.r[5]);
 			tick(0xC61C, 12);
 			poke(sp_at(6), 0x06F0);
+			fl::mov(0x06F0);
 			tick(0xC622, 36);
-			poke(sp_at(6), (uint16_t)(peek(sp_at(6)) + T.r[5]));
+			poke(sp_at(6), fl::add(peek(sp_at(6)), T.r[5]));
 			tick(0xC626, 30);
 			T.r[4] = T.r[2];
+			fl::mov(T.r[4]);
 			tick(0xC628, 12);
-			T.r[4] = (uint16_t)(T.r[4] << 1);
+			T.r[4] = fl::asl(T.r[4]);
 			tick(0xC62A, 12);
 			poke(peek(sp_at(6)), peek((uint16_t)(0x62A4 + T.r[4])));
 			tick(0xC630, 51);
 			poke(sp_at(0x0A), 0x0730);
+			fl::mov(0x0730);
 			tick(0xC636, 36);
-			poke(sp_at(0x0A), (uint16_t)(peek(sp_at(0x0A)) + T.r[5]));
+			poke(sp_at(0x0A), fl::add(peek(sp_at(0x0A)), T.r[5]));
 			tick(0xC63A, 30);
 			poke(peek(sp_at(0x0A)), peek((uint16_t)(0x636E + T.r[4])));
 			tick(0xC640, 51);
 			poke(sp_at(8), 0x0770);
+			fl::mov(0x0770);
 			tick(0xC646, 36);
-			poke(sp_at(8), (uint16_t)(peek(sp_at(8)) + T.r[3]));
+			poke(sp_at(8), fl::add(peek(sp_at(8)), T.r[3]));
 			tick(0xC64A, 30);
 			pokeb(peek(sp_at(8)), peekb((uint16_t)(0x6502 + T.r[2])));
 			tick(0xC650, 51);
@@ -4005,12 +4173,14 @@ uint16_t create_map_object(const Args &)
 				// at the definition's position (F:BF5E) facing the record's direction
 				tick(0xC690, 12);
 				push(0x0010);
+				fl::mov(0x0010);
 				tick(0xC694, 30);
-				poke(T.r[6], (uint16_t)(peek(T.r[6]) + T.r[6]));
+				poke(T.r[6], fl::add(peek(T.r[6]), T.r[6]));
 				tick(0xC696, 21);
 				push(0x0014);
+				fl::mov(0x0014);
 				tick(0xC69A, 30);
-				poke(T.r[6], (uint16_t)(peek(T.r[6]) + T.r[6]));
+				poke(T.r[6], fl::add(peek(T.r[6]), T.r[6]));
 				tick(0xC69C, 21);
 				jsr(0xC6A0, 0xBF5E);
 				poke(peek(sp_at(0x0A)), fl::add(peek(peek(sp_at(0x0A))), peek(sp_at(0x12))));
@@ -4037,13 +4207,16 @@ uint16_t create_map_object(const Args &)
 			fl::clr();
 			tick(0xC6DA, 27);
 			poke(0x1400, 0);
+			fl::clr();
 			tick(0xC6DE, 27);
 			poke(sp_at(0x0C), 0x0400);
 			fl::mov(0x0400);
 			tick(0xC6E4, 36);
 			poke(0x01D4, 0x0400);
+			fl::mov(0x0400);
 			tick(0xC6EA, 33);
 			poke(0x1402, peek(sp_at(0x0C)));
+			fl::mov(peek((uint16_t)(T.r[6] + 0x0C)));
 			tick(0xC6F0, 42);
 			const bool fixed_frame = (peekb(peek(sp_at(0x0E))) & 0x80) != 0;
 			tick(0xC6F4, 33);
@@ -4060,7 +4233,7 @@ uint16_t create_map_object(const Args &)
 				if (once)
 				{
 					tick(0xC70A, 12);
-					pokeb((uint16_t)(0x04B0 + T.r[3]), peekb((uint16_t)(0x04B0 + T.r[3])) | 0x20);
+					pokeb((uint16_t)(0x04B0 + T.r[3]), fl::logicb((uint8_t)(peekb((uint16_t)(0x04B0 + T.r[3])) | 0x20)));
 					tick(0xC710, 36);
 				}
 				else
@@ -4089,8 +4262,10 @@ uint16_t create_map_object(const Args &)
 					poke(sp_at(0x0C), 0x0005);
 					tick(0xC722, 36);
 					pokeb((uint16_t)(0x0790 + T.r[3]), 0x05);
+					fl::movb(0x05);
 					tick(0xC728, 36);
 					pokeb(peek(sp_at(0x0A)), 0x05);
+					fl::movb(0x05);
 					tick(0xC72E, 42);
 					tick(0xC768, 12);                  // BR
 				}
@@ -4115,8 +4290,10 @@ uint16_t create_map_object(const Args &)
 					const uint16_t v = pop();
 					poke(sp_at(0x0C), v);
 				}
+				fl::mov(peek((uint16_t)(T.r[6] + 0x0C)));
 				tick(0xC740, 36);
 				T.r[1] = peek(peek(sp_at(0x0C)));
+				fl::mov(T.r[1]);
 				tick(0xC744, 33);
 				const bool after = peekb((uint16_t)(0x6502 + T.r[2])) != 0;
 				fl::tstb(peekb((uint16_t)(T.r[2] + 0x6502)));
@@ -4125,6 +4302,7 @@ uint16_t create_map_object(const Args &)
 				{
 					tick(0xC74A, 12);
 					T.r[1] = peek(T.r[1]);
+					fl::mov(T.r[1]);
 					tick(0xC74C, 18);
 					pokeb(peek(sp_at(0x0A)), fl::logicb((uint8_t)(peekb(peek(sp_at(0x0A))) | 0x80)));
 					tick(0xC752, 42);
@@ -4135,6 +4313,7 @@ uint16_t create_map_object(const Args &)
 				fl::mov(T.r[1]);
 				tick(0xC756, 30);
 				T.r[4] = peek((uint16_t)(0x6110 + T.r[4]));
+				fl::mov(T.r[4]);
 				tick(0xC75A, 27);
 				{
 					const uint8_t b = peekb((uint16_t)(0xFDBA + T.r[0]));
@@ -4157,7 +4336,7 @@ uint16_t create_map_object(const Args &)
 			tick(0xC76C, 27);
 			T.r[0] = fl::logic((uint16_t)(T.r[0] & 0x0001));
 			tick(0xC770, 18);
-			pokeb((uint16_t)(0x0490 + T.r[3]), (uint8_t)(peekb((uint16_t)(0x0490 + T.r[3])) | T.r[0]));
+			pokeb((uint16_t)(0x0490 + T.r[3]), fl::logicb((uint8_t)(peekb((uint16_t)(0x0490 + T.r[3])) | T.r[0])));
 			tick(0xC774, 30);
 			T.r[0] = 0;
 			fl::clr();
@@ -4165,6 +4344,7 @@ uint16_t create_map_object(const Args &)
 			T.r[0] |= peekb((uint16_t)(0x623F + T.r[2]));
 			fl::logicb((uint8_t)T.r[0]);
 			tick(0xC77A, 27);
+			fl::tst(T.r[0]);
 			tick(0xC77C, 12);                          // TST R0
 			if (!T.r[0])
 				tick(0xC7B2, 12);                      // BEQ
@@ -4188,6 +4368,7 @@ uint16_t create_map_object(const Args &)
 					{
 						tick(0xC7AA, 12);              // BGE
 						T.r[1] = 0x0010;
+						fl::mov(T.r[1]);
 						tick(0xC7AE, 18);
 					}
 					else
@@ -4215,7 +4396,7 @@ uint16_t create_map_object(const Args &)
 						tick(0xC7A0, 12);
 						T.r[1] = fl::asl(T.r[1]);
 						tick(0xC7A2, 12);
-						T.r[1] = (uint16_t)(T.r[1] << 1);
+						T.r[1] = fl::asl(T.r[1]);
 						tick(0xC7A4, 12);
 						pokeb((uint16_t)(0x0AB8 + T.r[0]), 0);
 						fl::clr();
@@ -4233,13 +4414,16 @@ uint16_t create_map_object(const Args &)
 		fl::clr();
 		tick(0xC7B6, 27);
 		poke(0x1400, 0);
+		fl::clr();
 		tick(0xC7BA, 27);
 		T.r[0] = 0x0400;
 		fl::mov(T.r[0]);
 		tick(0xC7BE, 18);
 		poke(0x01D4, T.r[0]);
+		fl::mov(T.r[0]);
 		tick(0xC7C2, 27);
 		poke(0x1402, T.r[0]);
+		fl::mov(T.r[0]);
 		tick(0xC7C6, 27);
 		const bool flag10 = (peekb(peek(sp_at(0x0E))) & 0x08) != 0;
 		fl::logicb((uint8_t)(0x08 & peekb(rw((uint16_t)(T.r[6] + 0x000E)))));
@@ -4247,7 +4431,7 @@ uint16_t create_map_object(const Args &)
 		if (flag10)
 		{
 			tick(0xC7CE, 12);
-			pokeb((uint16_t)(0x04B0 + T.r[3]), peekb((uint16_t)(0x04B0 + T.r[3])) | 0x10);
+			pokeb((uint16_t)(0x04B0 + T.r[3]), fl::logicb((uint8_t)(peekb((uint16_t)(0x04B0 + T.r[3])) | 0x10)));
 			tick(0xC7D4, 36);
 		}
 		else
@@ -4267,8 +4451,9 @@ uint16_t create_map_object(const Args &)
 		{
 			tick(0xC7E0, 12);                          // BNE
 			poke(T.r[6], T.r[3]);
+			fl::mov(T.r[3]);
 			tick(0xC7E2, 21);
-			poke(T.r[6], peek(T.r[6]) | 0x0080);
+			poke(T.r[6], fl::logic((uint16_t)(peek(T.r[6]) | 0x0080)));
 			tick(0xC7E6, 27);
 		}
 		jsr(0xC7EA, 0xB4B6);
@@ -4281,12 +4466,14 @@ uint16_t create_map_object(const Args &)
 		T.r[4] = fl::add(T.r[4], T.r[0]);
 		tick(0xC7F4, 12);
 		pokeb(T.r[4], (uint8_t)T.r[3]);
+		fl::movb((uint8_t)T.r[3]);
 		tick(0xC7F6, 21);
 		T.r[0] = fl::asl(T.r[0]);
 		tick(0xC7F8, 12);
 		poke((uint16_t)(0x0AF8 + T.r[0]), fl::logic((uint16_t)(peek((uint16_t)(0x0AF8 + T.r[0])) | 0x8000)));
 		tick(0xC7FE, 36);
 		T.r[3] = peek((uint16_t)(0x0AF8 + T.r[0]));
+		fl::mov(T.r[3]);
 		tick(0xC802, 27);
 		T.r[3] = fl::logic((uint16_t)(T.r[3] & 0x01F0));
 		tick(0xC806, 18);
@@ -4311,6 +4498,7 @@ uint16_t create_map_object(const Args &)
 		T.r[2] = fl::add(T.r[2], 0x0002);
 		tick(0xC81E, 18);
 		T.r[3] = T.r[2];
+		fl::mov(T.r[3]);
 		tick(0xC820, 12);
 		T.r[1] = sext8(peekb((uint16_t)(0x0AF8 + T.r[0])));
 		fl::movb((uint8_t)T.r[1]);
@@ -4332,10 +4520,13 @@ uint16_t create_map_object(const Args &)
 	fl::mov(peek(0x01D2));
 	tick(0xC836, 42);
 	poke(0x01D4, peek(sp_at(2)));
+	fl::mov(peek(0x01D4));
 	tick(0xC83C, 42);
 	poke(0x1400, peek(0x01D2));
+	fl::mov(peek(0x01D2));
 	tick(0xC842, 39);
 	poke(0x1402, peek(0x01D4));
+	fl::mov(peek(0x01D4));
 	tick(0xC848, 39);
 	pop();
 	fl::tst(peek((uint16_t)(T.r[6] - 2)));
@@ -4356,6 +4547,7 @@ void check_map_object_view()
 	fl::mov(T.r[1]);
 	tick(0xBCBC, 24);
 	T.r[0] = T.r[1];
+	fl::mov(T.r[0]);
 	tick(0xBCBE, 12);
 	T.r[0] = fl::asl(T.r[0]);
 	tick(0xBCC0, 12);
@@ -4383,6 +4575,7 @@ void check_map_object_view()
 			tick(0xBD5A, 33);
 			jsr(0xBD5E, 0xBD78);
 			poke(0x0224, peek(0x099A));
+			fl::mov(peek(0x0224));
 			tick(0xBD64, 39);
 			poke(0x0226, peek(0x099C));
 			fl::mov(peek(0x0226));
@@ -4408,8 +4601,9 @@ void check_map_object_view()
 	T.r[0] = fl::logic((uint16_t)(T.r[0] & 0x003F));
 	tick(0xBCD0, 18);
 	T.r[2] = T.r[0];
+	fl::mov(T.r[2]);
 	tick(0xBCD2, 12);
-	T.r[2] = (uint16_t)(T.r[2] << 1);
+	T.r[2] = fl::asl(T.r[2]);
 	tick(0xBCD4, 12);
 	T.r[0] = peek((uint16_t)(0x0630 + T.r[2]));
 	fl::mov(T.r[0]);
@@ -4561,6 +4755,7 @@ void try_map_object_move()
 uint16_t try_next_map_definition(const Args &)
 {
 	push(T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0xC86A, 24);
 	poke(0x09B2, fl::add(peek(0x09B2), 0x0004));      // the record's next entry
 	tick(0xC870, 33);
@@ -4851,10 +5046,13 @@ void check_map_objects_in_view()
 	fl::mov(peek(0x0226));
 	tick(0xBC76, 39);
 	poke(0x0228, peek(0x0996));
+	fl::mov(peek(0x0228));
 	tick(0xBC7C, 39);
 	poke(0x022A, peek(0x0998));
+	fl::mov(peek(0x022A));
 	tick(0xBC82, 39);
 	push(0x0004);
+	fl::mov(0x0004);
 	tick(0xBC86, 30);
 	for (;;)
 	{
@@ -5237,8 +5435,10 @@ void update_objects()
 			fl::mov(T.r[1]);
 			tick(0xCB90, 18);
 			poke(0x01D4, T.r[1]);
+			fl::mov(T.r[1]);
 			tick(0xCB94, 27);
 			poke(0x1402, T.r[1]);
+			fl::mov(T.r[1]);
 			tick(0xCB98, 27);
 			T.r[1] = 0;
 			fl::clr();
@@ -5258,15 +5458,19 @@ void update_objects()
 			fl::mov(T.r[1]);
 			tick(0xCBAA, 18);
 			poke(0x01D2, T.r[1]);
+			fl::mov(T.r[1]);
 			tick(0xCBAE, 27);
 			poke(0x1400, T.r[1]);
+			fl::mov(T.r[1]);
 			tick(0xCBB2, 27);
 			T.r[1] = 0x1400;
 			fl::mov(T.r[1]);
 			tick(0xCBB6, 18);
 			poke(0x01D4, T.r[1]);
+			fl::mov(T.r[1]);
 			tick(0xCBBA, 27);
 			poke(0x1402, T.r[1]);
+			fl::mov(T.r[1]);
 			tick(0xCBBE, 27);
 			{
 				const uint8_t n = peekb((uint16_t)(0x0390 + T.r[0]));   // its map object
@@ -5348,8 +5552,10 @@ void update_objects()
 				fl::mov(T.r[0]);
 				tick(0xCC28, 18);
 				poke(0x01D4, T.r[0]);
+				fl::mov(T.r[0]);
 				tick(0xCC2C, 27);
 				poke(0x1402, T.r[0]);
+				fl::mov(T.r[0]);
 				tick(0xCC30, 27);
 				T.r[0] = peek(0x022C);
 				fl::mov(T.r[0]);
@@ -5466,8 +5672,10 @@ void update_objects()
 					fl::mov(T.r[0]);
 					tick(0xCCAA, 18);
 					poke(0x01D4, T.r[0]);
+					fl::mov(T.r[0]);
 					tick(0xCCAE, 27);
 					poke(0x1402, T.r[0]);
+					fl::mov(T.r[0]);
 					tick(0xCCB2, 27);
 					T.r[0] = peek(0x022C);
 					fl::mov(T.r[0]);
@@ -5614,6 +5822,7 @@ void update_objects()
 					}
 					jsr(0xCD66, 0xCA4C);               // update_map_object_slot
 					slot2();
+					fl::mov(T.r[0]);
 					tick(0xCD6A, 24);
 					const uint8_t still = fl_logicb((uint8_t)(peekb((uint16_t)(0x04B0 + T.r[0])) & 0x01));
 					tick(0xCD70, 33);
@@ -5647,6 +5856,7 @@ void update_objects()
 				{
 					tick(0xCDB8, 12);                  // BNE
 					slot2();
+					fl::mov(T.r[0]);
 					tick(0xCDBC, 24);
 					T.r[0] = fl_asl(T.r[0]);
 					tick(0xCDBE, 12);
@@ -5667,8 +5877,10 @@ void update_objects()
 					fl::mov(T.r[0]);
 					tick(0xCD9A, 18);
 					poke(0x01D4, T.r[0]);
+					fl::mov(T.r[0]);
 					tick(0xCD9E, 27);
 					poke(0x1402, T.r[0]);
+					fl::mov(T.r[0]);
 					tick(0xCDA2, 27);
 					{
 						const uint16_t n = peek(0x09AA);
@@ -5900,10 +6112,12 @@ void irq_32v_sprites()
 		{
 			tick(0xB984, 12);
 			pokeb(0x0993, 0);
+			fl::clr();
 			tick(0xB988, 27);
 			jsr(0xB98C, 0xB1C8);
 			jsr(0xB990, 0xB1EA);
 			poke(0x1400, 0);
+			fl::clr();
 			tick(0xB994, 27);
 			poke(0x1402, 0x0400);
 			fl::mov(0x0400);
@@ -5950,17 +6164,21 @@ void irq_32v_game()
 			// test switch: sprites paused (0x0995), bit 2 steps them every 0x3C frames
 			tick(0xB6D2, 12);
 			poke(0x0180, 0x0001);
+			fl::mov(0x0001);
 			tick(0xB6D8, 33);
 			pokeb(0x0995, 1);
+			fl::movb(0x01);
 			tick(0xB6DE, 33);
 			const bool step = (peekb(0x0193) & 0x04) != 0;
+			fl::logicb((uint8_t)(0x04 & peekb(0x0193)));
 			tick(0xB6E4, 30);
 			if (step)
 			{
 				tick(0xB6E6, 12);
-				pokeb(0x0FEB, (uint8_t)(peekb(0x0FEB) - 1));
+				pokeb(0x0FEB, fl::decb(peekb(0x0FEB)));
 				tick(0xB6EA, 27);
 				const bool stepping = peekb(0x0FEA) != 0;
+				fl::tstb(peekb(0x0FEA));
 				tick(0xB6EE, 24);
 				bool go = true;
 				if (!stepping)
@@ -5969,6 +6187,7 @@ void irq_32v_game()
 				{
 					tick(0xB6F0, 12);
 					const bool wait = peekb(0x0FEB) != 0;
+					fl::tstb(peekb(0x0FEB));
 					tick(0xB6F4, 24);
 					if (wait)
 					{
@@ -5981,10 +6200,13 @@ void irq_32v_game()
 				if (go)
 				{
 					pokeb(0x0FEA, 1);
+					fl::movb(0x01);
 					tick(0xB6FC, 33);
 					pokeb(0x0995, 0);
+					fl::clr();
 					tick(0xB700, 27);
 					const bool wait = peekb(0x0FEB) != 0;
+					fl::tstb(peekb(0x0FEB));
 					tick(0xB704, 24);
 					if (wait)
 						tick(0xB71E, 12);              // BNE
@@ -5992,6 +6214,7 @@ void irq_32v_game()
 					{
 						tick(0xB706, 12);
 						pokeb(0x0FEB, 2);
+						fl::movb(0x02);
 						tick(0xB70C, 33);
 						tick(0xB71E, 12);              // BR
 					}
@@ -6001,8 +6224,10 @@ void irq_32v_game()
 			{
 				tick(0xB70E, 12);                      // BEQ
 				pokeb(0x0FEB, 0x3C);
+				fl::movb(0x3C);
 				tick(0xB714, 33);
 				pokeb(0x0FEA, 0);
+				fl::clr();
 				tick(0xB718, 27);
 				tick(0xB71E, 12);                      // BR
 			}
@@ -6011,6 +6236,7 @@ void irq_32v_game()
 		{
 			tick(0xB71A, 12);                          // BEQ
 			pokeb(0x0995, 0);
+			fl::clr();
 			tick(0xB71E, 27);
 		}
 		jsr(0xB722, 0xB1C8);
@@ -6117,6 +6343,7 @@ void irq_32v_game()
 		{
 			tick(0xB7BE, 12);
 			pokeb(0x0993, 0);
+			fl::clr();
 			tick(0xB7C2, 27);
 			jsr(0xB7C6, 0xB1C8);
 			const bool paused = peekb(0x0995) != 0;
@@ -6130,14 +6357,16 @@ void irq_32v_game()
 				jsr(0xB7D0, 0xAFF0);
 				jsr(0xB7D4, 0xB1EA);
 				poke(0x1400, 0);
+				fl::clr();
 				tick(0xB7D8, 27);
 				poke(0x1402, 0x0400);
 				fl::mov(0x0400);
 				tick(0xB7DE, 33);
 			}
 			T.r[0] = peek(0x01C4);
+			fl::mov(T.r[0]);
 			tick(0xB7E2, 24);
-			T.r[0]++;
+			T.r[0] = fl::inc(T.r[0]);
 			tick(0xB7E4, 12);
 			fl::logic((uint16_t)(0x0001 & T.r[0]));
 			tick(0xB7E8, 18);                          // BIT #1,R0
@@ -6198,6 +6427,7 @@ void irq_32v_game()
 							tick(0xB816, 12);          // just reached the object
 							jsr(0xB81A, 0xD566);
 							contact = peekb(0x0EA0);
+							fl::tstb(peekb(0x0EA0));
 							tick(0xB81E, 24);
 						}
 						else
@@ -6746,16 +6976,20 @@ void check_some_map_slots()
 	poke(0x0224, peek(0x099A));
 	tick(0xBC0A, 39);
 	poke(0x0226, peek(0x099C));
+	fl::mov(peek(0x0226));
 	tick(0xBC10, 39);
 	poke(0x0228, peek(0x0996));
+	fl::mov(peek(0x0228));
 	tick(0xBC16, 39);
 	poke(0x022A, peek(0x0998));
+	fl::mov(peek(0x022A));
 	tick(0xBC1C, 39);
 	push(0x0008);
+	fl::mov(0x0008);
 	tick(0xBC20, 30);
 	for (;;)
 	{
-		poke(0x09AC, (uint16_t)(peek(0x09AC) + 1));
+		poke(0x09AC, fl::inc(peek(0x09AC)));
 		tick(0xBC24, 27);
 		const bool wrap = (int16_t)peek(0x09AC) > (int16_t)peek(0x09B0);
 		fl::cmp(peek(0x09AC), peek(0x09B0));
@@ -6776,6 +7010,7 @@ void check_some_map_slots()
 		fl::mov(peek(0x09AA));
 		tick(0xBC3C, 39);
 		T.r[0] = peek(0x09AA);
+		fl::mov(T.r[0]);
 		tick(0xBC40, 24);
 		const bool typed = peekb((uint16_t)(0x09B8 + T.r[0])) != 0;
 		fl::tstb(peekb((uint16_t)(T.r[0] + 0x09B8)));

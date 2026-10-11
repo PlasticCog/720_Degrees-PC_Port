@@ -238,6 +238,7 @@ void reset_skater_state()
 	fl::clr();
 	tick(0xE23C, 27);
 	pokeb(0x0330, 0);
+	fl::clr();
 	tick(0xE240, 27);
 	pokeb(0x0320, 1);
 	fl::movb(0x01);
@@ -246,6 +247,7 @@ void reset_skater_state()
 	fl::clr();
 	tick(0xE24A, 27);
 	pokeb(0x0791, 0);
+	fl::clr();
 	tick(0xE24E, 27);
 	pokeb(0x0772, 0);
 	fl::clr();

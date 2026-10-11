@@ -685,6 +685,7 @@ uint16_t run_object_scripts(const Args &)
 			pokeb(T.r[5], fl::decb(peekb(T.r[5])));
 			tick(0xDE5C, 21);
 			counter_word();
+			fl::movb(peekb(T.r[6]));
 			tick(0xDE5E, 27);
 			pokeb((uint16_t)(T.r[6] + 1), 0);
 			fl::clr();
@@ -882,6 +883,7 @@ uint16_t run_object_scripts(const Args &)
 			break;
 		case 0xDF00:
 			counter_word();
+			fl::movb(peekb(T.r[6]));
 			tick(0xDF02, 27);
 			pokeb((uint16_t)(T.r[6] + 1), 0);
 			fl::clr();
@@ -917,15 +919,19 @@ uint16_t run_object_scripts(const Args &)
 	fl::mov(T.r[0]);
 	tick(0xDF16, 24);
 	poke(0x06FA, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xDF1A, 27);
 	poke(0x06FC, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xDF1E, 27);
 	T.r[0] = peek(0x0226);
 	fl::mov(T.r[0]);
 	tick(0xDF22, 24);
 	poke(0x073A, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xDF26, 27);
 	poke(0x073C, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xDF2A, 27);
 	pokeb(0x0495, fl_logicb((uint8_t)(peekb(0x0495) | 0x18)));
 	tick(0xDF30, 33);
@@ -961,15 +967,19 @@ uint16_t start_object_scripts(const Args &)
 	fl::mov(T.r[1]);
 	tick(0xDF70, 18);
 	poke(0x01D2, T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0xDF74, 27);
 	poke(0x1400, T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0xDF78, 27);
 	T.r[1] = 0x2800;
 	fl::mov(T.r[1]);
 	tick(0xDF7C, 18);
 	poke(0x01D4, T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0xDF80, 27);
 	poke(0x1402, T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0xDF84, 27);
 	T.r[1] = T.r[0];
 	fl::mov(T.r[1]);
@@ -1057,15 +1067,19 @@ uint16_t start_object_scripts(const Args &)
 	T.r[1] = fl::add(T.r[1], peek((uint16_t)(0xFDB2 + T.r[0])));   // x on its lane
 	tick(0xDFE0, 27);
 	poke(0x06FA, T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0xDFE4, 27);
 	poke(0x06FC, T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0xDFE8, 27);
 	T.r[0] = peek(0x0226);
 	fl::mov(T.r[0]);
 	tick(0xDFEC, 24);
 	poke(0x073A, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xDFF0, 27);
 	poke(0x073C, T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xDFF4, 27);
 	poke(rw(sp_at(0x0C)), T.r[1]);                     // *x
 	fl::mov(T.r[1]);
@@ -3259,15 +3273,19 @@ void load_palette_block()
 	fl::mov(T.r[2]);
 	tick(0xDC50, 18);
 	poke(0x01D2, T.r[2]);
+	fl::mov(T.r[2]);
 	tick(0xDC54, 27);
 	poke(0x1400, T.r[2]);
+	fl::mov(T.r[2]);
 	tick(0xDC58, 27);
 	T.r[2] = 0x1C00;
 	fl::mov(T.r[2]);
 	tick(0xDC5C, 18);
 	poke(0x01D4, T.r[2]);
+	fl::mov(T.r[2]);
 	tick(0xDC60, 27);
 	poke(0x1402, T.r[2]);
+	fl::mov(T.r[2]);
 	tick(0xDC64, 27);
 	fl::cmp(T.r[1], 0x0007);
 	tick(0xDC68, 18);
@@ -3883,8 +3901,10 @@ void update_skater_phase()
 			fl::mov(T.r[0]);
 			tick(0xE5A0, 18);
 			poke(0x01D2, T.r[0]);
+			fl::mov(T.r[0]);
 			tick(0xE5A4, 27);
 			poke(0x1400, T.r[0]);
+			fl::mov(T.r[0]);
 			tick(0xE5A8, 27);
 			jsr(0xE5AC, 0x54CE);                       // trick_moves
 		}
@@ -6082,8 +6102,10 @@ uint16_t slope_of_object_0ea0(const Args &)
 		fl::mov(T.r[1]);
 		tick(0xD6F2, 18);
 		poke(0x01D4, T.r[1]);
+		fl::mov(T.r[1]);
 		tick(0xD6F6, 27);
 		poke(0x1402, T.r[1]);
+		fl::mov(T.r[1]);
 		tick(0xD6FA, 27);
 		T.r[1] = sext8(peekb(0x0327));                 // the terrain's slope type
 		fl::movb((uint8_t)T.r[1]);
