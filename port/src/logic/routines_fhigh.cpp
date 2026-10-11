@@ -53,8 +53,10 @@ void bank_a(uint16_t pc, uint16_t a)
 	fl::mov(a);
 	tick((uint16_t)(pc + 4), 18);
 	poke(0x01D2, T.r[0]);
+	fl::mov(T.r[0]);
 	tick((uint16_t)(pc + 8), 27);
 	poke(0x1400, T.r[0]);
+	fl::mov(T.r[0]);
 	tick((uint16_t)(pc + 0x0C), 27);
 }
 void bank_b(uint16_t pc, uint16_t b)
@@ -63,8 +65,10 @@ void bank_b(uint16_t pc, uint16_t b)
 	fl::mov(b);
 	tick((uint16_t)(pc + 4), 18);
 	poke(0x01D4, T.r[0]);
+	fl::mov(T.r[0]);
 	tick((uint16_t)(pc + 8), 27);
 	poke(0x1402, T.r[0]);
+	fl::mov(T.r[0]);
 	tick((uint16_t)(pc + 0x0C), 27);
 }
 // CLR @#0x01D2; CLR @#BANK_A; MOV #0x0400,Rr; MOV Rr,@#0x01D4; MOV Rr,@#BANK_B at pc (the
@@ -81,8 +85,10 @@ void type_banks(uint16_t pc, int r)
 	fl::mov(T.r[r]);
 	tick((uint16_t)(pc + 0x0C), 18);
 	poke(0x01D4, T.r[r]);
+	fl::mov(T.r[r]);
 	tick((uint16_t)(pc + 0x10), 27);
 	poke(0x1402, T.r[r]);
+	fl::mov(T.r[r]);
 	tick((uint16_t)(pc + 0x14), 27);
 }
 // MOV Ra,@#0x01D2; MOV Rb,@#0x01D4; MOV @#0x01D2,@#BANK_A; MOV @#0x01D4,@#BANK_B at pc: the

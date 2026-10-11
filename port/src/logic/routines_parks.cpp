@@ -264,6 +264,7 @@ uint16_t park_at_area(const Args &)
 	else
 	{
 		T.r[0] = 1;
+		fl::mov(T.r[0]);
 		tick(0x535E, 18);
 	}
 	rts();
@@ -329,6 +330,7 @@ uint16_t find_slot_with(const Args &)
 	if (!found)
 	{
 		T.r[0] = 0xFFFF;
+		fl::mov(T.r[0]);
 		tick(0xCDF6, 18);
 	}
 	T.r[1] = pop();

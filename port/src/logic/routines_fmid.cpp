@@ -4307,6 +4307,7 @@ uint16_t create_map_object(const Args &)
 				if (fast)
 				{
 					poke(sp_at(0x0C), 0x0005);
+					fl::mov(0x0005);
 					tick(0xC722, 36);
 					pokeb((uint16_t)(0x0790 + T.r[3]), 0x05);
 					fl::movb(0x05);
@@ -6632,13 +6633,16 @@ uint16_t print_number()
 	{
 		tick(0xBABC, 12);                              // at most ten digits
 		T.r[4] &= 0xFF00;
+		fl::clr();
 		tick(0xBABE, 12);
 		T.r[4] |= 0x000A;
+		fl::logicb((uint8_t)T.r[4]);
 		tick(0xBAC2, 18);
 	}
 	else
 		tick(0xBAC2, 12);                              // BCC
 	T.r[5] = sext8((uint8_t)T.r[4]);
+	fl::movb((uint8_t)T.r[4]);
 	tick(0xBAC4, 12);
 	T.r[0] = sext8((uint8_t)arg(0x10));
 	fl::movb((uint8_t)T.r[0]);
@@ -6928,6 +6932,7 @@ uint16_t print_number()
 			{
 				tick(0xBB8C, 12);
 				T.r[0] = 0x002C;
+				fl::mov(T.r[0]);
 				tick(0xBB90, 18);
 			}
 		}

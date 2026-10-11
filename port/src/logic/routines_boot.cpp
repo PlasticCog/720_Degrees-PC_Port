@@ -446,11 +446,13 @@ uint16_t rotary_zone_step(const Args &a)
 	}
 minus:
 	T.r[0] = 0xFFC0;
+	fl::mov(T.r[0]);
 	tick(0xF8D4, 18);
 	tick(0xF8E6, 12);                                  // BR
 	goto done;
 plus:
 	T.r[0] = 0x0040;
+	fl::mov(T.r[0]);
 	tick(0xF8E6, 18);
 done:
 	T.r[1] = pop();
@@ -641,6 +643,7 @@ void selftest_scroll_screen()
 		tick(0xF95A, 12);                              // BR
 	}
 	pokeb(0x0FE6, 0);
+	fl::clr();
 	tick(0xF988, 27);
 	T.r[6] = fl::add(T.r[6], 6);
 	tick(0xF98C, 18);

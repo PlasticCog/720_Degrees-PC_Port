@@ -768,6 +768,7 @@ void find_other_slot()
 	if (!found)
 	{
 		T.r[0] = 0xFFFF;
+		fl::mov(T.r[0]);
 		tick(0xCE20, 18);
 	}
 	T.r[1] = pop();
