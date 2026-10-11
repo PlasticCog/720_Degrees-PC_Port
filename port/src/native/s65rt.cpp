@@ -117,6 +117,8 @@ public:
 		if (s && !S.nmi_line) S.nmi_pending = true;
 		S.nmi_line = s;
 	}
+	void nmi_state(bool &line, bool &pending) const override { line = S.nmi_line; pending = S.nmi_pending; }
+	void restore_nmi(bool line, bool pending) override { S.nmi_line = line; S.nmi_pending = pending; }
 	void set_irq(bool s) override { S.irq = s; }
 	void set_reset(bool held) override
 	{

@@ -318,3 +318,5 @@ B6:6CFC selftest_switches_screen
 B6:69B2 selftest_statistics_screen
 B3:6E92 end_of_park_screen
 B3:6A6E load_park
+F:8512  attract_frame
+F:84D4  irq_vblank_attract

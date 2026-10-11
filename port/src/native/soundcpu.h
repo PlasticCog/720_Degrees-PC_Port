@@ -13,6 +13,8 @@ public:
 	virtual int run(int cycles) = 0;          // returns cycles consumed
 	virtual int progress() const = 0;         // cycles consumed so far in the current run()
 	virtual void set_nmi(bool state) = 0;
+	virtual void nmi_state(bool &line, bool &pending) const = 0;   // for snapshots
+	virtual void restore_nmi(bool line, bool pending) = 0;
 	virtual void set_irq(bool state) = 0;
 	virtual void set_reset(bool held) = 0;
 	virtual uint16_t pc() const = 0;

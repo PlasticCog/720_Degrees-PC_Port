@@ -1556,6 +1556,239 @@ void irq_vblank_play()
 	k.flush();                                         // the RTI (in the table)
 }
 
+// F:8512 (assembly; from the attract mode vertical blank F:84D4): the frame's work outside
+// the game: scroll registers, the banked palette animation and timers, watchdog, input, the
+// sound queue, the bee timer 0x0F22, the town's zone scan, the controller / sound exchange
+// (F:8D86, F:5BD2 every 32 frames, F:910C 16 frames later), and unless the sprites are held
+// (0x0995) the map objects, scroll blocks, demo contacts and the skater's animation.  The
+// video window, banks, text pointer and 0x09B2-0x09B6 are kept on the stack and put back;
+// 0x0196 counts the nesting meanwhile.
+void attract_frame()
+{
+	Clock k;
+	k.at(0x8512); pokeb(0x0196, fl::incb(peekb(0x0196))); k.add(27);
+	static const uint16_t kept[7] = { 0x01D0, 0x01D2, 0x01D4, 0x0186, 0x09B2, 0x09B6, 0x09B4 };
+	for (int i = 0; i < 7; i++)
+	{
+		k.at((uint16_t)(0x8516 + 4 * i));
+		const uint16_t v = peek(kept[i]);
+		fl::mov(v);
+		push(v);
+		k.add(36);
+	}
+	k.at(0x8532);
+	{
+		const uint16_t v = peek(0x09AA);
+		fl::mov(v);
+		poke(0x09A8, v);
+	}
+	k.add(39);
+	k.call(0x8036, 0x853C);                            // load_scroll_registers
+	sel_ab(k, 0x853C, 0x1800, 0x1C00);
+	k.call(0x7BBC, 0x8558);                            // animate_palette
+	k.at(0x8558);
+	const uint8_t level = peekb(0x0F59);
+	fl::cmpb(level, 4);
+	k.add(30, 12);
+	if (level == 4) k.call(0xDD10, 0x8564);            // flash_text_colours
+	k.at(0x8564);
+	{
+		const uint8_t state = peekb(0x018F);
+		fl::tstb(state);
+		k.add(24, 12);
+		if (!state)
+		{
+			sel_b(k, 0x856A, 0x3C00);
+			k.call(0x7F52, 0x857A);                    // tick_game_timer
+		}
+	}
+	sel_ab(k, 0x857A, 0x3800, 0x3C00);
+	k.call(0x7A3A, 0x8596);
+	k.call(0x917C, 0x859A);                            // feed_watchdog
+	k.call(0x80A4, 0x859E);                            // read_input_edges
+	k.at(0x859E);
+	{
+		const uint8_t locked = peekb(0x01A4);
+		fl::tstb(locked);
+		k.add(24, 12);
+		if (!locked)
+		{
+			sel_ab(k, 0x85A4, 0x3800, 0x3C00);
+			k.call(0x4314, 0x85C0);                    // send_queued_sound
+		}
+	}
+	k.at(0x85C0);
+	{
+		const uint16_t bees = peek(0x0F22);
+		fl::tst(bees);
+		k.add(24, 12);
+		if ((int16_t)bees > 0)
+		{
+			k.at(0x85C6);
+			const uint16_t held = peek(0x0180);
+			fl::tst(held);
+			k.add(24, 12);
+			if (!held)
+			{
+				k.at(0x85CC); poke(0x0F22, fl::dec(peek(0x0F22))); k.add(27);
+			}
+		}
+	}
+	k.at(0x85D0);
+	{
+		const uint8_t lv = peekb(0x0F59);
+		fl::tstb(lv);
+		k.add(24, 12);
+		if (!lv)
+		{
+			sel_ab(k, 0x85D6, 0x1800, 0x1C00);
+			k.call(0x454A, 0x85F2);                    // scan_zone_switches
+		}
+	}
+	k.at(0x85F2);
+	{
+		const uint8_t locked = peekb(0x01A4);
+		fl::tstb(locked);
+		k.add(24, 12);
+		if (!locked)
+		{
+			k.call(0x8D86, 0x85FC);                    // read_controller
+			k.at(0x85FC);
+			const uint16_t frame = peek(0x01C4);
+			f_nzv(nzw(frame & 0x001F));
+			k.add(30, 12);
+			if (!(frame & 0x001F))
+			{
+				sel_ab(k, 0x8604, 0x1800, 0x1C00);
+				k.call(0x5BD2, 0x8620);                // poll_sound_status
+				k.add(12);                             // BR
+			}
+			else
+			{
+				k.at(0x8622); T.r[0] = peek(0x01C4); fl::mov(T.r[0]); k.add(24);
+				T.r[0] = fl::add(T.r[0], 0x0010); k.add(18);
+				f_nzv(nzw(T.r[0] & 0x001F)); k.add(18, 12);
+				if (!(T.r[0] & 0x001F)) k.call(0x910C, 0x8634);   // read_sound_status
+			}
+		}
+	}
+	k.at(0x8634);
+	const uint8_t held = peekb(0x0995);
+	fl::tstb(held);
+	k.add(24, 12);
+	if (!held)
+	{
+		k.at(0x863A);
+		const uint8_t lv = peekb(0x0F59);
+		fl::tstb(lv);
+		k.add(24, 12);
+		if (!lv) k.call(0xBC52, 0x8644);               // check_map_objects_in_view
+		k.at(0x8644);
+		const uint8_t lv2 = peekb(0x0F59);
+		fl::cmpb(lv2, 1);
+		k.add(30, 12);
+		if (lv2 <= 1) k.call(0xCB24, 0x8650);          // update_objects
+		sel_ab(k, 0x8650, 0x2400, 0x2800);
+		k.call(0x7B82, 0x866C);                        // track_scroll_blocks
+		k.call(0xA510, 0x8670);                        // object_contact
+		k.at(0x8670);
+		const uint8_t skater = peekb(0x0374);
+		fl::tstb(skater);
+		k.add(24, 12);
+		if (skater)
+		{
+			sel_ab(k, 0x8676, 0x1800, 0x1C00);
+			k.call(0x7AA2, 0x8692);
+		}
+		k.at(0x8692);
+		const uint8_t state = peekb(0x018F);
+		fl::cmpb(state, 4);
+		k.add(30, 12);
+		if (state != 4)
+		{
+			sel_ab(k, 0x869A, 0x3800, 0x3C00);
+			k.call(0x538E, 0x86B6);                    // terrain_event
+			k.call(0x50F8, 0x86BA);                    // fallen_skater
+			k.call(0xE036, 0x86BE);
+			k.add(12);                                 // BR
+		}
+		else
+		{
+			k.at(0x86C0);
+			const uint16_t t = peek(0x0F18);
+			fl::cmp(t, 0xFFFF);
+			k.add(30, 12);
+			if (t != 0xFFFF)
+			{
+				k.at(0x86C8); poke(0x0F18, fl::dec(peek(0x0F18))); k.add(27);
+			}
+		}
+	}
+	k.at(0x86CC);
+	{
+		const uint16_t v = peek(0x09A8);
+		fl::mov(v);
+		poke(0x09AA, v);
+	}
+	k.add(39);
+	const uint16_t sp = T.r[6];
+	struct Back { uint16_t pc; uint16_t off; uint16_t to; int cycles; };
+	static const Back back[5] = {
+		{0x86D2, 0x0, 0x09B4, 33}, {0x86D6, 0x2, 0x09B6, 42}, {0x86DC, 0x4, 0x09B2, 42},
+		{0x86E2, 0x6, 0x0186, 42}, {0x86E8, 0xA, 0x01D2, 42}};
+	for (const Back &b : back)
+	{
+		k.at(b.pc);
+		const uint16_t v = rw((uint16_t)(sp + b.off));
+		fl::mov(v);
+		poke(b.to, v);
+		k.add(b.cycles);
+	}
+	k.at(0x86EE); { const uint16_t v = peek(0x01D2); fl::mov(v); poke(0x1400, v); } k.add(39);
+	k.at(0x86F4); { const uint16_t v = rw((uint16_t)(sp + 8)); fl::mov(v); poke(0x01D4, v); } k.add(42);
+	k.at(0x86FA); { const uint16_t v = peek(0x01D4); fl::mov(v); poke(0x1402, v); } k.add(39);
+	k.at(0x8700); { const uint16_t v = rw((uint16_t)(sp + 0xC)); fl::mov(v); poke(0x01D0, v); } k.add(42);
+	k.call(0x8096, 0x870A);                            // reselect_video_bank
+	k.at(0x870A); pokeb(0x0196, fl::decb(peekb(0x0196))); k.add(27);
+	T.r[6] = fl::add(T.r[6], 0x000E); k.add(18);
+	k.leave();
+}
+
+// F:84D4 (interrupt, vertical blank in attract mode): count the frame (0x01C4, 0x0192),
+// acknowledge both display interrupts, restart the quarter-frame count 0x0191 and, with
+// interrupts allowed again, do the frame's work (F:8512) unless it is still running
+void irq_vblank_attract()
+{
+	Clock k;
+	for (int i = 0; i <= 5; i++)
+	{
+		k.at((uint16_t)(0x84D4 + 2 * i));
+		fl::mov(T.r[i]);
+		push(T.r[i]);
+		k.add(24);
+	}
+	k.at(0x84E0); poke(0x01C4, fl::inc(peek(0x01C4))); k.add(27);
+	k.at(0x84E4); pokeb(0x0192, fl::incb(peekb(0x0192))); k.add(27);
+	k.at(0x84E8); poke(0x15C0, 0); fl::clr(); k.add(27);
+	k.at(0x84EC); pokeb(0x0191, 0); fl::clr(); k.add(27);
+	k.at(0x84F0); poke(0x15E0, 0); fl::clr(); k.add(27);
+	T.r[0] = 0; fl::clr(); k.add(12);
+	mtps(0); k.step(30, 0x84FA);                       // a pending interrupt is taken here
+	k.at(0x84FA);
+	const uint8_t busy = peekb(0x0196);
+	fl::tstb(busy);
+	k.add(24, 12);
+	if (!busy) k.call(0x8512, 0x8504);                 // attract_frame
+	for (int i = 5; i >= 0; i--)
+	{
+		k.at((uint16_t)(0x8504 + 2 * (5 - i)));
+		T.r[i] = pop();
+		fl::mov(T.r[i]);
+		k.add(18);
+	}
+	k.flush();                                         // the RTI (in the table)
+}
+
 // F:A2F0  skater_land(): back on the ground (mode 0x031F = 1): kick state reset, ground
 // friction 0x02FA from the equipment (0x7CAC), push / boost / 0x01DC cleared, speed made
 // positive (direction reversed instead); at the speed limit of the board (0x7C90) on flat
@@ -4769,6 +5002,8 @@ LOGIC_TABLE(flow,
 	asm_routine("F", 0x9182, "queue_four_sounds", queue_four_sounds, 0),
 	c_routine("F", 0xA8D2, "partner_object", partner_object, 0, 0),
 	c_routine("F", 0x9DE4, "drop_to_level", drop_to_level, 0, 0),
+	wait_routine("F", 0x8512, "attract_frame", attract_frame, 0),
+	irq_wait_routine("F", 0x84D4, "irq_vblank_attract", irq_vblank_attract, 24),
 )
 
 }

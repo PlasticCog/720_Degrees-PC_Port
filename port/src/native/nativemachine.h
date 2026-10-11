@@ -24,6 +24,8 @@ public:
 	void main_end_timeslice() override;
 	void sound_set_nmi(bool s) override { sound->set_nmi(s); }
 	void sound_set_irq(bool s) override { sound->set_irq(s); }
+	void sound_nmi_state(bool &line, bool &pending) const override { sound->nmi_state(line, pending); }
+	void restore_sound_nmi(bool line, bool pending) override { sound->restore_nmi(line, pending); }
 	void sound_set_reset(bool held) override { sound->set_reset(held); }
 
 private:

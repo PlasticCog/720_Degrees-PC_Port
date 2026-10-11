@@ -48,6 +48,10 @@ public:
 	virtual void main_end_timeslice() = 0;             // MAME 'synchronize' semantics
 	virtual void sound_set_nmi(bool state) = 0;
 	virtual void sound_set_irq(bool state) = 0;
+	// the sound CPU's NMI line and pending NMI, for Board snapshots (the difference tester
+	// runs the main program from a snapshot while the sound CPU stands still)
+	virtual void sound_nmi_state(bool &line, bool &pending) const { line = pending = false; }
+	virtual void restore_sound_nmi(bool line, bool pending) { (void)line; (void)pending; }
 	virtual void sound_set_reset(bool held) = 0;
 };
 
@@ -164,6 +168,7 @@ public:
 		bool scanline_int, video_int, p2portwr, p2portrd;
 		uint8_t soundlatch, mainlatch;
 		bool soundlatch_pending, mainlatch_pending, sound_reset;
+		bool sound_nmi_line, sound_nmi_pending;
 		int last_rendered, mo_last_xpos, scanline;
 	};
 	void save(Snapshot &s) const;

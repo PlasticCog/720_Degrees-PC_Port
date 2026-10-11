@@ -692,6 +692,7 @@ void Board::save(Snapshot &s) const
 	s.scanline_int = m_scanline_int; s.video_int = m_video_int; s.p2portwr = m_p2portwr; s.p2portrd = m_p2portrd;
 	s.soundlatch = m_soundlatch; s.mainlatch = m_mainlatch;
 	s.soundlatch_pending = m_soundlatch_pending; s.mainlatch_pending = m_mainlatch_pending; s.sound_reset = m_sound_reset;
+	m_link.sound_nmi_state(s.sound_nmi_line, s.sound_nmi_pending);
 	s.last_rendered = m_last_rendered; s.mo_last_xpos = m_mo_last_xpos; s.scanline = scanline;
 }
 
@@ -707,5 +708,6 @@ void Board::load(const Snapshot &s)
 	m_scanline_int = s.scanline_int; m_video_int = s.video_int; m_p2portwr = s.p2portwr; m_p2portrd = s.p2portrd;
 	m_soundlatch = s.soundlatch; m_mainlatch = s.mainlatch;
 	m_soundlatch_pending = s.soundlatch_pending; m_mainlatch_pending = s.mainlatch_pending; m_sound_reset = s.sound_reset;
+	m_link.restore_sound_nmi(s.sound_nmi_line, s.sound_nmi_pending);
 	m_last_rendered = s.last_rendered; m_mo_last_xpos = s.mo_last_xpos; scanline = s.scanline;
 }
