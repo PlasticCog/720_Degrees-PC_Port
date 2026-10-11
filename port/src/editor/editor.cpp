@@ -5,8 +5,11 @@
 //
 //   Map          left click: select a cell, or paint the brush block in Paint mode
 //                right drag: pan   wheel: zoom   middle click: pick block   double click: edit block
-//   Block editor left click/drag: paint the brush tile   right click: pick up a tile
-//   Tiles        left click: choose the brush tile
+//   Block editor left click/drag: paint the brush tile (or stamp the brush piece)
+//                right click: pick up a tile
+//   Library      Pieces: structures of the original maps (ramps, ledges, pits, walls,
+//                markings) to stamp; Tiles: single tiles by kind; All tiles: the raw banks
+//   Map, Stamp   left click: put the brush piece or tile there (shared blocks are copied)
 //
 //   editor720 --capture-test    runs the palette capture headless and prints what it found
 //
@@ -22,6 +25,7 @@
 #include "nativemachine.h"
 #include "inputscript.h"
 #include "romzip.h"
+#include "pieces.h"
 #include "../app/window_icon.h"
 #include <algorithm>
 #include <cmath>
@@ -224,6 +228,16 @@ struct Editor {
 
 	std::vector<SDL_Texture *> block_tex;
 	std::vector<char> block_dirty;
+
+	// library (pieces.h) of the current map's level, taken from the original maps
+	struct LibTile { uint16_t word; uint8_t bank1; PieceKind kind; int uses; };
+	int lib_level = -1;
+	std::vector<Piece> pieces;
+	std::vector<SDL_Texture *> piece_tex;
+	std::vector<LibTile> lib_tiles;
+	SDL_Texture *lib_tile_tex = nullptr;          // atlas of lib_tiles, 32 per row
+	int brush_piece = -1;                         // index into pieces, -1: the brush is brush_tile
+	bool lib_common_only = true;
 	SDL_Texture *picker_tex = nullptr;
 	int picker_key = -1;
 	std::vector<Snapshot> undo_stack, redo_stack;
@@ -377,6 +391,292 @@ struct Editor {
 		block_tex.clear();
 		block_dirty.clear();
 		picker_key = -1;
+		drop_library_textures();
+	}
+
+	// ------------------------------------------------------------ library
+	void drop_library_textures()
+	{
+		for (auto *t : piece_tex) if (t) SDL_DestroyTexture(t);
+		piece_tex.assign(pieces.size(), nullptr);
+		if (lib_tile_tex) SDL_DestroyTexture(lib_tile_tex);
+		lib_tile_tex = nullptr;
+	}
+
+	void build_library()
+	{
+		const LevelMap &lm = map();
+		if (lib_level == lm.level) return;
+		lib_level = lm.level;
+		std::vector<const LevelMap *> maps;
+		for (const LevelMap &m : original.maps)
+			if (m.level == lm.level) maps.push_back(&m);
+		pieces = extract_pieces(roms, maps);
+		brush_piece = -1;
+		// single tiles: every tile word the level's maps use, with how often
+		std::map<std::pair<uint16_t, uint8_t>, LibTile> tiles;
+		for (const LevelMap *m : maps)
+			for (int c : m->cells)
+			{
+				if (c < 0) continue;
+				for (const BlockHalf &h : m->blocks[c].half)
+				{
+					const uint8_t b1 = (uint8_t)m->half_bank1(h);
+					for (uint16_t w : h.tiles)
+					{
+						const uint16_t key = (uint16_t)(w & 0x3fff);
+						auto it = tiles.find({key, b1});
+						if (it == tiles.end())
+						{
+							const PieceKind k = (w & 0x7ff) < 16 ? PieceKind::Floor : terrain_kind(tile_terrain(roms, *m, w, b1));
+							it = tiles.emplace(std::make_pair(key, b1), LibTile{key, b1, k, 0}).first;
+						}
+						it->second.uses++;
+					}
+				}
+			}
+		lib_tiles.clear();
+		for (auto &kv : tiles) lib_tiles.push_back(kv.second);
+		std::stable_sort(lib_tiles.begin(), lib_tiles.end(), [](const LibTile &a, const LibTile &b) {
+			if (a.kind != b.kind) return a.kind < b.kind;
+			return (a.word & 0x7ff) < (b.word & 0x7ff);
+		});
+		drop_library_textures();
+	}
+
+	SDL_Texture *piece_texture(int i)
+	{
+		if (i < 0 || i >= (int)pieces.size()) return nullptr;
+		if (piece_tex.size() != pieces.size()) piece_tex.assign(pieces.size(), nullptr);
+		if (!piece_tex[i])
+		{
+			const Piece &p = pieces[i];
+			std::vector<uint32_t> px;
+			render_piece(gfx, map(), random_var, p, px);
+			piece_tex[i] = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, p.w * 8, p.h * 8);
+			SDL_SetTextureScaleMode(piece_tex[i], SDL_SCALEMODE_NEAREST);
+			SDL_SetTextureBlendMode(piece_tex[i], SDL_BLENDMODE_BLEND);
+			SDL_UpdateTexture(piece_tex[i], nullptr, px.data(), p.w * 8 * 4);
+		}
+		return piece_tex[i];
+	}
+
+	SDL_Texture *lib_tiles_texture()
+	{
+		if (lib_tile_tex || lib_tiles.empty()) return lib_tile_tex;
+		const int rows = ((int)lib_tiles.size() + 31) / 32;
+		std::vector<uint32_t> px((size_t)256 * rows * 8, 0);
+		const LevelMap &lm = map();
+		for (size_t i = 0; i < lib_tiles.size(); i++)
+		{
+			Piece one;
+			one.w = one.h = 1;
+			one.tiles = {lib_tiles[i].word};
+			one.bank1 = {lib_tiles[i].bank1};
+			std::vector<uint32_t> t;
+			render_piece(gfx, lm, random_var, one, t);
+			const int x0 = (int)(i % 32) * 8, y0 = (int)(i / 32) * 8;
+			for (int y = 0; y < 8; y++)
+				memcpy(&px[(size_t)(y0 + y) * 256 + x0], &t[(size_t)y * 8], 8 * 4);
+		}
+		lib_tile_tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, 256, rows * 8);
+		SDL_SetTextureScaleMode(lib_tile_tex, SDL_SCALEMODE_NEAREST);
+		SDL_UpdateTexture(lib_tile_tex, nullptr, px.data(), 256 * 4);
+		return lib_tile_tex;
+	}
+
+	// the brush as a piece: the chosen piece or the single brush tile
+	Piece brush_as_piece()
+	{
+		if (brush_piece >= 0 && brush_piece < (int)pieces.size()) return pieces[brush_piece];
+		Piece one;
+		one.w = one.h = 1;
+		one.tiles = {brush_tile};
+		one.bank1 = {(uint8_t)picker_bank1()};
+		return one;
+	}
+
+	SDL_Texture *brush_texture()
+	{
+		if (brush_piece >= 0) return piece_texture(brush_piece);
+		static SDL_Texture *one_tex = nullptr;
+		static uint32_t one_key = 0xffffffff;
+		const uint32_t key = brush_tile | (uint32_t)map_index << 16;
+		if (!one_tex)
+		{
+			one_tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, 8, 8);
+			SDL_SetTextureScaleMode(one_tex, SDL_SCALEMODE_NEAREST);
+			SDL_SetTextureBlendMode(one_tex, SDL_BLENDMODE_BLEND);
+		}
+		if (key != one_key)
+		{
+			std::vector<uint32_t> px;
+			render_piece(gfx, map(), random_var, brush_as_piece(), px);
+			SDL_UpdateTexture(one_tex, nullptr, px.data(), 8 * 4);
+			one_key = key;
+		}
+		return one_tex;
+	}
+
+	void mark_block_dirty(int bi)
+	{
+		if (bi >= 0 && bi < (int)block_dirty.size()) block_dirty[bi] = 1;
+	}
+
+	// stamp p into block bi with its top-left tile at (tx, ty); returns the tiles changed
+	int stamp_in_block(int bi, const Piece &p, int tx, int ty)
+	{
+		LevelMap &lm = map();
+		LevelBlock &b = lm.blocks[bi];
+		int n = 0;
+		for (int y = 0; y < p.h; y++)
+			for (int x = 0; x < p.w; x++)
+			{
+				const uint16_t w = p.tiles[(size_t)y * p.w + x];
+				const int bx = tx + x, by = ty + y;
+				if (w == PIECE_EMPTY || bx < 0 || by < 0 || bx >= 16 || by >= 16) continue;
+				uint16_t &t = b.half[by / 8].tiles[(by % 8) * 16 + bx];
+				if (t != w) { t = w; n++; }
+			}
+		if (n)
+		{
+			b.modified = true;
+			lm.dirty = true;
+			mark_block_dirty(bi);
+		}
+		return n;
+	}
+
+	// stamp p into the map with its top-left tile at (gx, gy) in map tiles; cells whose block
+	// other cells use too get their own copy first, so only this place changes
+	int stamp_on_map(const Piece &p, int gx, int gy)
+	{
+		LevelMap &lm = map();
+		int n = 0, zone = 0;
+		for (int y = 0; y < p.h; y++)
+			for (int x = 0; x < p.w; x++)
+			{
+				const size_t i = (size_t)y * p.w + x;
+				const uint16_t w = p.tiles[i];
+				const int mx = gx + x, my = gy + y;
+				if (w == PIECE_EMPTY || mx < 0 || my < 0 || mx >= lm.cols * 16 || my >= lm.rows * 16) continue;
+				int &cell = lm.cells[(my / 16) * lm.cols + mx / 16];
+				if (cell < 0) continue;
+				const int lx = mx % 16, ly = my % 16;
+				if (lm.blocks[cell].half[ly / 8].tiles[(ly % 8) * 16 + lx] == w) continue;
+				if (usage(cell) > 1) cell = duplicate_block(cell);
+				LevelBlock &b = lm.blocks[cell];
+				b.half[ly / 8].tiles[(ly % 8) * 16 + lx] = w;
+				b.modified = true;
+				mark_block_dirty(cell);
+				if (((w >> 10) & 1) && lm.half_bank1(b.half[ly / 8]) != p.bank1[i]) zone++;
+				n++;
+			}
+		if (n) lm.dirty = true;
+		if (zone)
+			status = std::to_string(zone) + " tile(s) use tile bank 1, which shows other graphics in this zone (see the block's zone bytes)";
+		return n;
+	}
+
+	// a piece or tile thumbnail laid out in a flowing row; returns true when clicked
+	bool flow_image(SDL_Texture *t, ImVec2 size, ImVec2 uv0, ImVec2 uv1, float avail, float &row, bool selected)
+	{
+		const float sp = ImGui::GetStyle().ItemSpacing.x;
+		if (row > 0 && row + size.x <= avail) ImGui::SameLine();
+		else row = 0;
+		const ImVec2 p0 = ImGui::GetCursorScreenPos();
+		ImGui::Image((ImTextureID)(intptr_t)t, size, uv0, uv1);
+		const bool clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+		ImDrawList *dl = ImGui::GetWindowDrawList();
+		if (selected) dl->AddRect({p0.x - 1, p0.y - 1}, {p0.x + size.x + 1, p0.y + size.y + 1}, IM_COL32(255, 255, 0, 255), 0, 0, 2);
+		else if (ImGui::IsItemHovered()) dl->AddRect(p0, {p0.x + size.x, p0.y + size.y}, IM_COL32(255, 255, 255, 160));
+		row += size.x + sp;
+		return clicked;
+	}
+
+	void ui_pieces()
+	{
+		ImGui::Checkbox("Common pieces only", &lib_common_only);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Pieces the original maps of this level use more than once.\nUntick to see every structure, including one-off parts of larger ones.");
+		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+		ImGui::TextWrapped("Click a piece, then click in the block editor or use the map's Stamp tool.");
+		ImGui::PopStyleColor();
+		ImGui::BeginChild("pieces", {0, 0}, ImGuiChildFlags_Borders);
+		const float avail = ImGui::GetContentRegionAvail().x;
+		for (int k = 0; k < (int)PieceKind::Count; k++)
+		{
+			std::vector<int> list;
+			for (int i = 0; i < (int)pieces.size(); i++)
+				if ((int)pieces[i].kind == k && (!lib_common_only || pieces[i].uses > 1)) list.push_back(i);
+			if (list.empty()) continue;
+			char head[96];
+			snprintf(head, sizeof(head), "%s (%zu)###kind%d", piece_kind_name((PieceKind)k), list.size(), k);
+			if (!ImGui::CollapsingHeader(head, k == 0 ? ImGuiTreeNodeFlags_DefaultOpen : 0)) continue;
+			float row = 0;
+			for (int i : list)
+			{
+				const Piece &p = pieces[i];
+				const float pw = p.w * 8.0f, ph = p.h * 8.0f;
+				const float s = std::max(pw, ph) > 96 ? 96 / std::max(pw, ph) : (std::max(pw, ph) <= 32 ? 2.0f : 1.0f);
+				ImGui::PushID(i);
+				if (flow_image(piece_texture(i), {pw * s, ph * s}, {0, 0}, {1, 1}, avail, row, i == brush_piece))
+				{
+					brush_piece = i;
+					status = std::string("Brush: ") + piece_kind_name(p.kind) + " piece " + std::to_string(p.w) + "x" + std::to_string(p.h);
+				}
+				if (ImGui::IsItemHovered())
+				{
+					ImGui::BeginTooltip();
+					ImGui::Text("%d x %d tiles, used %d time%s in the original maps", p.w, p.h, p.uses, p.uses == 1 ? "" : "s");
+					const float ts = std::min(2.0f, 320 / std::max(pw, ph));
+					ImGui::Image((ImTextureID)(intptr_t)piece_texture(i), {pw * ts, ph * ts});
+					ImGui::EndTooltip();
+				}
+				ImGui::PopID();
+			}
+		}
+		ImGui::EndChild();
+	}
+
+	void ui_lib_tiles()
+	{
+		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+		ImGui::TextWrapped("The tiles this level uses, by kind. Click one to paint with it.");
+		ImGui::PopStyleColor();
+		ImGui::BeginChild("libtiles", {0, 0}, ImGuiChildFlags_Borders);
+		SDL_Texture *t = lib_tiles_texture();
+		const float avail = ImGui::GetContentRegionAvail().x;
+		const int rows = ((int)lib_tiles.size() + 31) / 32;
+		for (int k = 0; k < (int)PieceKind::Count && t; k++)
+		{
+			std::vector<int> list;
+			for (int i = 0; i < (int)lib_tiles.size(); i++)
+				if ((int)lib_tiles[i].kind == k) list.push_back(i);
+			if (list.empty()) continue;
+			char head[96];
+			snprintf(head, sizeof(head), "%s (%zu)###tkind%d", k == (int)PieceKind::Floor ? "Floor (varied by the game)" : piece_kind_name((PieceKind)k), list.size(), k);
+			if (!ImGui::CollapsingHeader(head)) continue;
+			float row = 0;
+			for (int i : list)
+			{
+				const ImVec2 uv0 = {(i % 32) / 32.0f, (float)(i / 32) / rows};
+				const ImVec2 uv1 = {uv0.x + 1 / 32.0f, uv0.y + 1.0f / rows};
+				ImGui::PushID(i);
+				const LibTile &lt = lib_tiles[i];
+				if (flow_image(t, {16, 16}, uv0, uv1, avail, row, brush_piece < 0 && (brush_tile & 0x3fff) == lt.word))
+				{
+					brush_piece = -1;
+					brush_tile = (uint16_t)(lt.word | (pick_prio << 14));
+					pick_bank = (lt.word >> 10) & 1;
+					pick_pal = (lt.word >> 11) & 7;
+				}
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("tile %d, bank %d, palette %d, used %d times", lt.word & 0x3ff, (lt.word >> 10) & 1, (lt.word >> 11) & 7, lt.uses);
+				ImGui::PopID();
+			}
+		}
+		ImGui::EndChild();
 	}
 
 	SDL_Texture *picker_texture()
@@ -655,6 +955,9 @@ struct Editor {
 		ImGui::SameLine();
 		ImGui::RadioButton("Paint blocks", &tool, 1);
 		ImGui::SameLine();
+		ImGui::RadioButton("Stamp", &tool, 2);
+		if (ImGui::IsItemHovered()) ImGui::SetTooltip("Put the brush piece or tile (Library panel) on the map, tile by tile.\nBlocks other cells share are copied, so only the place you click changes.");
+		ImGui::SameLine();
 		ImGui::Checkbox("Grid", &show_grid);
 		ImGui::SameLine();
 		ImGui::SetNextItemWidth(140);
@@ -725,13 +1028,31 @@ struct Editor {
 		const int mcx = (int)std::floor((io.MousePos.x - origin.x - pan.x) / c2);
 		const int mcy = (int)std::floor((io.MousePos.y - origin.y - pan.y) / c2);
 		const bool in_map = hovered && mcx >= 0 && mcy >= 0 && mcx < lm.cols && mcy < lm.rows;
+		if (tool == 2 && hovered)
+		{
+			// stamp: the brush follows the mouse tile by tile
+			const float t8 = 8 * zoom;
+			const int gx = (int)std::floor((io.MousePos.x - origin.x - pan.x) / t8);
+			const int gy = (int)std::floor((io.MousePos.y - origin.y - pan.y) / t8);
+			const Piece p = brush_as_piece();
+			const ImVec2 g0 = {origin.x + pan.x + gx * t8, origin.y + pan.y + gy * t8};
+			dl->PushClipRect(origin, {origin.x + avail.x, origin.y + avail.y}, true);
+			dl->AddImage((ImTextureID)(intptr_t)brush_texture(), g0, {g0.x + p.w * t8, g0.y + p.h * t8}, {0, 0}, {1, 1}, IM_COL32(255, 255, 255, 170));
+			dl->AddRect(g0, {g0.x + p.w * t8, g0.y + p.h * t8}, IM_COL32(255, 255, 0, 200));
+			dl->PopClipRect();
+			const bool single = p.w == 1 && p.h == 1;
+			if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) { push_undo(); painting = true; }
+			if (painting && (ImGui::IsMouseClicked(ImGuiMouseButton_Left) || (single && ImGui::IsMouseDown(ImGuiMouseButton_Left))))
+				stamp_on_map(p, gx, gy);
+			if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) painting = false;
+		}
 		if (in_map && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
 		{
 			sel_cx = mcx;
 			sel_cy = mcy;
 			if (tool == 1 && brush_block >= 0) { push_undo(); painting = true; }
 		}
-		if (painting && in_map && ImGui::IsMouseDown(ImGuiMouseButton_Left))
+		if (tool == 1 && painting && in_map && ImGui::IsMouseDown(ImGuiMouseButton_Left))
 		{
 			int &c = lm.cells[mcy * lm.cols + mcx];
 			if (c != brush_block) { c = brush_block; lm.dirty = true; }
@@ -831,7 +1152,7 @@ struct Editor {
 			ImGui::TextColored({1, 0.7f, 0.2f, 1}, "Edits change every cell using this block.");
 		else
 			ImGui::TextUnformatted(" ");
-		const float scale = std::clamp(std::floor((w - 20) / 128.0f), 1.0f, 4.0f);
+		const float scale = std::clamp(std::floor(std::min(w - 20, h - 150) / 128.0f), 1.0f, 4.0f);
 		const ImVec2 p0 = ImGui::GetCursorScreenPos();
 		const ImVec2 sz = {128 * scale, 128 * scale};
 		ImGui::InvisibleButton("blk", sz, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
@@ -854,7 +1175,22 @@ struct Editor {
 				ImGui::SetTooltip("tile %d,%d = %04X\nindex %d, bank %d, palette %d, priority %d%s", tx, ty, tw,
 					tw & 0x3ff, (tw >> 10) & 1, (tw >> 11) & 7, (tw >> 14) & 3,
 					(tw & 0x7ff) < 16 ? "\nground placeholder (varied by the game)" : "");
-				if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) { push_undo(); tile_painting = true; }
+				if (brush_piece >= 0)
+				{
+					// stamping a piece: show where it goes, put it there on a click
+					const Piece &p = pieces[brush_piece];
+					dl->PushClipRect(p0, {p0.x + sz.x, p0.y + sz.y}, true);
+					const ImVec2 g0 = {p0.x + tx * 8 * scale, p0.y + ty * 8 * scale};
+					dl->AddImage((ImTextureID)(intptr_t)piece_texture(brush_piece), g0, {g0.x + p.w * 8 * scale, g0.y + p.h * 8 * scale},
+						{0, 0}, {1, 1}, IM_COL32(255, 255, 255, 170));
+					dl->PopClipRect();
+					if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+					{
+						push_undo();
+						if (!stamp_in_block(edit_block, p, tx, ty)) undo_stack.pop_back();
+					}
+				}
+				else if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) { push_undo(); tile_painting = true; }
 				if (tile_painting && ImGui::IsMouseDown(ImGuiMouseButton_Left) && tw != brush_tile)
 				{
 					tw = brush_tile;
@@ -864,6 +1200,7 @@ struct Editor {
 				}
 				if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
 				{
+					brush_piece = -1;
 					brush_tile = tw;
 					pick_bank = (tw >> 10) & 1;
 					pick_pal = (tw >> 11) & 7;
@@ -924,11 +1261,33 @@ struct Editor {
 		ImGui::End();
 	}
 
-	void ui_tiles(float x, float y, float w, float h)
+	void ui_library(float x, float y, float w, float h)
 	{
 		ImGui::SetNextWindowPos({x, y});
 		ImGui::SetNextWindowSize({w, h});
-		ImGui::Begin("Tiles", nullptr, PANEL);
+		ImGui::Begin("Library", nullptr, PANEL);
+		build_library();
+		if (brush_piece >= 0 && brush_piece < (int)pieces.size())
+		{
+			const Piece &p = pieces[brush_piece];
+			ImGui::Text("Brush: %s piece, %d x %d", piece_kind_name(p.kind), p.w, p.h);
+			ImGui::SameLine();
+			if (ImGui::SmallButton("Back to single tile")) brush_piece = -1;
+		}
+		else
+			ImGui::Text("Brush: tile %04X", brush_tile);
+		if (ImGui::BeginTabBar("library"))
+		{
+			if (ImGui::BeginTabItem("Pieces")) { ui_pieces(); ImGui::EndTabItem(); }
+			if (ImGui::BeginTabItem("Tiles")) { ui_lib_tiles(); ImGui::EndTabItem(); }
+			if (ImGui::BeginTabItem("All tiles")) { ui_raw_tiles(); ImGui::EndTabItem(); }
+			ImGui::EndTabBar();
+		}
+		ImGui::End();
+	}
+
+	void ui_raw_tiles()
+	{
 		ImGui::SetNextItemWidth(60); ImGui::SliderInt("bank", &pick_bank, 0, 1);
 		ImGui::SameLine(); ImGui::SetNextItemWidth(70); ImGui::SliderInt("palette", &pick_pal, 0, 7);
 		ImGui::SameLine(); ImGui::SetNextItemWidth(60); ImGui::SliderInt("priority", &pick_prio, 0, 3);
@@ -951,12 +1310,14 @@ struct Editor {
 			const int idx = ty * 32 + tx;
 			ImGui::SetTooltip("tile %d%s", idx, idx < 16 ? " (ground placeholder)" : "");
 			if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+			{
 				brush_tile = (uint16_t)(idx | (pick_bank << 10) | (pick_pal << 11) | (pick_prio << 14));
+				brush_piece = -1;
+			}
 		}
 		const ImVec2 b0 = {p0.x + (bi % 32) * 8 * scale, p0.y + (bi / 32) * 8 * scale};
 		ImGui::GetWindowDrawList()->AddRect(b0, {b0.x + 8 * scale, b0.y + 8 * scale}, IM_COL32(255, 255, 0, 255));
 		ImGui::EndChild();
-		ImGui::End();
 	}
 
 	void ui_status(float x, float y, float w, float h)
@@ -1003,14 +1364,14 @@ struct Editor {
 		const float X = vp->WorkPos.x, Y = vp->WorkPos.y, W = vp->WorkSize.x;
 		const float SH = ImGui::GetFrameHeight() + 8;
 		const float H = std::max(200.0f, vp->WorkSize.y - SH);
-		const float left = 300, right = 430;
+		const float left = 300, right = 470;
 		const float levels_h = std::min(340.0f, H * 0.4f);
-		const float editor_h = std::min(H * 0.62f, 128 * 3 + 220.0f);
+		const float editor_h = std::min(H * 0.5f, 128 * 3 + 220.0f);
 		ui_levels(X, Y, left, levels_h);
 		ui_blocks(X, Y + levels_h, left, H - levels_h);
 		ui_map(X + left, Y, std::max(100.0f, W - left - right), H);
 		ui_block_editor(X + W - right, Y, right, editor_h);
-		ui_tiles(X + W - right, Y + editor_h, right, H - editor_h);
+		ui_library(X + W - right, Y + editor_h, right, H - editor_h);
 		ui_status(X, Y + H, W, SH);
 		ui_save_popup();
 	}
@@ -1144,6 +1505,7 @@ int main(int argc, char **argv)
 	}
 	ed.invalidate_all();
 	if (ed.picker_tex) SDL_DestroyTexture(ed.picker_tex);
+	ed.drop_library_textures();
 	ImGui_ImplSDLRenderer3_Shutdown();
 	ImGui_ImplSDL3_Shutdown();
 	ImGui::DestroyContext();

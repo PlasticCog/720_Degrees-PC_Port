@@ -176,7 +176,7 @@ endif()
 
 # ---------------------------------------------------------------------------
 # Level data library
-add_library(leveldata STATIC src/level/leveldata.cpp)
+add_library(leveldata STATIC src/level/leveldata.cpp src/level/pieces.cpp)
 target_include_directories(leveldata PUBLIC src/level)
 target_link_libraries(leveldata PUBLIC board)
 target_include_directories(leveldata PUBLIC src/native)

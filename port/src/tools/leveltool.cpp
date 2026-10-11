@@ -2,7 +2,9 @@
 //   leveltool --roms DIR stats
 //   leveltool --roms DIR png OUTDIR            render every map to PNG (town palette)
 //   leveltool --roms DIR identity OUT.720mod   relocate all levels unchanged (pipeline test)
+//   leveltool --roms DIR pieces OUTDIR         the editor's pieces of every level, one sheet per level
 #include "leveldata.h"
+#include "pieces.h"
 #include "board.h"
 #include <cstdio>
 #include <map>
@@ -82,6 +84,57 @@ int main(int argc, char **argv)
 		printf("round-trip failures: %zu\n", total_bad);
 		return total_bad ? 2 : 0;
 	}
+	if (cmd == "pieces")
+	{
+		GfxSet gfx;
+		gfx.decode(rs);
+		int8_t rv[32];
+		for (int i = 0; i < 32; i++) rv[i] = (int8_t)rs.main[0xFEE2 + i];
+		for (int level = 0; level < 8; level++)
+		{
+			std::vector<const LevelMap *> maps;
+			for (const auto &m : ls.maps)
+				if (m.level == level) maps.push_back(&m);
+			if (maps.empty()) continue;
+			const auto pieces = extract_pieces(rs, maps);
+			// sheet: one row band per kind, pieces flowing left to right
+			const int SW = 1600;
+			std::vector<std::vector<uint32_t>> imgs(pieces.size());
+			int x = 0, y = 0, rowh = 0, H = 0;
+			std::vector<std::pair<int, int>> pos(pieces.size());
+			PieceKind last = PieceKind::Count;
+			int counts[(int)PieceKind::Count] = {};
+			for (size_t i = 0; i < pieces.size(); i++)
+			{
+				const Piece &p = pieces[i];
+				counts[(int)p.kind]++;
+				if (p.kind != last) { if (x) { y += rowh + 12; x = 0; rowh = 0; } y += 12; last = p.kind; }
+				if (x + p.w * 8 > SW) { x = 0; y += rowh + 4; rowh = 0; }
+				pos[i] = {x, y};
+				x += p.w * 8 + 4;
+				rowh = std::max(rowh, p.h * 8);
+				H = y + rowh;
+			}
+			std::vector<uint32_t> sheet((size_t)SW * (H + 4), 0xff202028);
+			for (size_t i = 0; i < pieces.size(); i++)
+			{
+				std::vector<uint32_t> px;
+				render_piece(gfx, *maps[0], rv, pieces[i], px);
+				const int W = pieces[i].w * 8;
+				for (int py = 0; py < pieces[i].h * 8; py++)
+					for (int pxx = 0; pxx < W; pxx++)
+						if (px[(size_t)py * W + pxx] >> 24) sheet[(size_t)(pos[i].second + py) * SW + pos[i].first + pxx] = px[(size_t)py * W + pxx];
+			}
+			char name[512];
+			snprintf(name, sizeof(name), "%s/pieces_L%d.png", arg.c_str(), level);
+			write_png(name, sheet.data(), SW, H + 4);
+			printf("level %d: %zu pieces (", level, pieces.size());
+			for (int k = 0; k < (int)PieceKind::Count; k++) if (counts[k]) printf(" %s %d", piece_kind_name((PieceKind)k), counts[k]);
+			printf(" ) -> %s\n", name);
+		}
+		return 0;
+	}
+
 	if (cmd == "png")
 	{
 		GfxSet gfx;
