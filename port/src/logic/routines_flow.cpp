@@ -4,9 +4,17 @@
 #include "logic.h"
 
 namespace logic {
+namespace steps {                                      // defined in routines_core.cpp
+void rts();
+void jsr(uint16_t ret, uint16_t addr);
+void c_save(int n, uint16_t body);
+void c_restore(int n);
+}
+
 namespace {
 
 using namespace t11rt;
+using namespace steps;
 
 uint16_t sext8(uint8_t v) { return (uint16_t)(int16_t)(int8_t)v; }
 
@@ -55,6 +63,46 @@ uint16_t ror(uint16_t d)
 // JSR included) and at the return address after the RTS, so an interrupt there sees memory
 // and the stack as in the original.
 void cyc(int n) { T.icount -= n; }
+
+
+// The step helpers (as in the other routines files): an instruction's action, its condition
+// codes, then its cycles and the next instruction's address (tick).
+// MOV #v,@#a / MOVB #v,@#a (33 cycles), CLR @#a / CLRB @#a (27) and the step to next
+void set_w(uint16_t a, uint16_t v, uint16_t next) { poke(a, v); fl::mov(v); tick(next, 33); }
+void set_b(uint16_t a, uint8_t v, uint16_t next) { pokeb(a, v); fl::movb(v); tick(next, 33); }
+void clr_w(uint16_t a, uint16_t next) { poke(a, 0); fl::clr(); tick(next, 27); }
+void clr_b(uint16_t a, uint16_t next) { pokeb(a, 0); fl::clr(); tick(next, 27); }
+// MOV #v,R0; MOV R0,@#shadow; MOV R0,@#register at pc: bank A (0x01D2 / BANK_A) or B (0x01D4 /
+// BANK_B)
+void select_bank(uint16_t pc, uint16_t shadow, uint16_t reg, uint16_t v)
+{
+	T.r[0] = v;
+	fl::mov(v);
+	tick((uint16_t)(pc + 4), 18);
+	poke(shadow, v);
+	fl::mov(v);
+	tick((uint16_t)(pc + 8), 27);
+	poke(reg, v);
+	fl::mov(v);
+	tick((uint16_t)(pc + 0x0C), 27);
+}
+void bank_a(uint16_t pc, uint16_t v) { select_bank(pc, 0x01D2, 0x1400, v); }
+void bank_b(uint16_t pc, uint16_t v) { select_bank(pc, 0x01D4, 0x1402, v); }
+// MOV @#a,-(SP) (36 cycles) / MOV k(SP),-(SP) (39) and the step to next
+void push_w(uint16_t a, uint16_t next)
+{
+	const uint16_t v = peek(a);
+	fl::mov(v);
+	push(v);
+	tick(next, 36);
+}
+void push_sp(int k, uint16_t next)
+{
+	const uint16_t v = peek((uint16_t)(T.r[6] + k));
+	fl::mov(v);
+	push(v);
+	tick(next, 39);
+}
 struct Clock {
 	int p = 0;                                         // cycles not charged yet
 	uint16_t pc = 0;                                   // address of the last sync
@@ -662,51 +710,81 @@ uint16_t skater_velocity(const Args &)
 
 // F:843E  place_skater(int z, int y, int x): objects 0-3 at (x, y, z) without velocity, the
 // skater's motion state reset (speed, ramp, terrain, gravity, ...), F:E238
-uint16_t place_skater(const Args &a)
+uint16_t place_skater(const Args &)
 {
-	Clock k;
 	push(T.r[1]);
-	k.add(24, 18);                                    // MOV R1,-(SP); MOV #3,R1
-	for (int i = 3; i >= 0; i--)
+	fl::mov(T.r[1]);
+	tick(0x8440, 24);
+	T.r[1] = 0x0003;
+	fl::mov(T.r[1]);
+	tick(0x8444, 18);
+	for (;;)                                           // objects 3..0
 	{
-		const uint16_t w = (uint16_t)(2 * i);
-		T.r[1] = (uint16_t)i;
-		T.r[0] = w;
-		k.add(12, 12);
-		k.at(0x8448); poke((uint16_t)(0x06F0 + w), a.u(2)); k.add(45);
-		k.at(0x844E); poke((uint16_t)(0x0730 + w), a.u(1)); k.add(45);
-		k.at(0x8454); poke((uint16_t)(0x06B0 + w), a.u(0)); k.add(45);
-		k.at(0x845A); poke((uint16_t)(0x04F0 + w), 0); k.add(30);
-		k.at(0x845E); poke((uint16_t)(0x0570 + w), 0); k.add(30);
-		k.at(0x8462); poke((uint16_t)(0x05B0 + w), 0); k.add(30);
-		k.at(0x8466); pokeb((uint16_t)(0x07F0 + i), 0); k.add(30);
-		k.at(0x846A); pokeb((uint16_t)(0x07F4 + i), 0); k.add(30);
-		k.at(0x846E); pokeb((uint16_t)(0x07F8 + i), 0); k.add(30);
-		k.add(12, 12);                                // DEC R1, BGE
+		T.r[0] = T.r[1];
+		fl::mov(T.r[0]);
+		tick(0x8446, 12);
+		T.r[0] = fl::asl(T.r[0]);
+		tick(0x8448, 12);
+		static const struct { uint16_t table; int k; uint16_t next; } at[3] = {
+			{0x06F0, 8, 0x844E}, {0x0730, 6, 0x8454}, {0x06B0, 4, 0x845A},   // x, y, z
+		};
+		for (const auto &p : at)
+		{
+			const uint16_t v = peek((uint16_t)(T.r[6] + p.k));
+			fl::mov(v);
+			poke((uint16_t)(p.table + T.r[0]), v);
+			tick(p.next, 45);
+		}
+		poke((uint16_t)(0x04F0 + T.r[0]), 0);          // no velocity
+		fl::clr();
+		tick(0x845E, 30);
+		poke((uint16_t)(0x0570 + T.r[0]), 0);
+		fl::clr();
+		tick(0x8462, 30);
+		poke((uint16_t)(0x05B0 + T.r[0]), 0);
+		fl::clr();
+		tick(0x8466, 30);
+		pokeb((uint16_t)(0x07F0 + T.r[1]), 0);
+		fl::clr();
+		tick(0x846A, 30);
+		pokeb((uint16_t)(0x07F4 + T.r[1]), 0);
+		fl::clr();
+		tick(0x846E, 30);
+		pokeb((uint16_t)(0x07F8 + T.r[1]), 0);
+		fl::clr();
+		tick(0x8472, 30);
+		T.r[1] = fl::dec(T.r[1]);
+		tick(0x8474, 12);
+		if ((int16_t)T.r[1] < 0)
+		{
+			tick(0x8476, 12);                          // BGE not taken
+			break;
+		}
+		tick(0x8444, 12);
 	}
-	k.at(0x8476); poke(0x01B4, 0); k.add(27);
-	k.at(0x847A); pokeb(0x01EA, 1); k.add(33);
-	k.at(0x8480); pokeb(0x031E, 0); k.add(27);
-	k.at(0x8484); pokeb(0x0328, 0xFE); k.add(33);
-	k.at(0x848A); pokeb(0x0320, 1); k.add(33);
-	k.at(0x8490); pokeb(0x031F, 0); k.add(27);
-	k.at(0x8494); pokeb(0x0323, 0); k.add(27);
-	k.at(0x8498); pokeb(0x0EA0, 0); k.add(27);
-	k.at(0x849C); pokeb(0x031B, 0xFF); k.add(33);
-	k.at(0x84A2); pokeb(0x032F, 0); k.add(27);
-	k.at(0x84A6); poke(0x02FC, 0); k.add(27);
-	k.at(0x84AA); poke(0x02FE, 0); k.add(27);
-	k.at(0x84AE); poke(0x02EE, 0); k.add(27);
-	k.at(0x84B2); pokeb(0x0325, 0xFF); k.add(33);
-	k.at(0x84B8); poke(0x01B0, 0); k.add(27);
-	k.at(0x84BC); poke(0x01B2, 0); k.add(27);
-	k.at(0x84C0); poke(0x0ED2, 0x3800); k.add(33);
-	k.at(0x84C6); poke(0x0ED4, 0xA800); k.add(33);
-	T.r[1] = 0xFFFF;
-	k.call(0xE238, 0x84D0);                            // reset_skater_state
+	clr_w(0x01B4, 0x847A);                             // the motion state
+	set_b(0x01EA, 0x01, 0x8480);
+	clr_b(0x031E, 0x8484);
+	set_b(0x0328, 0xFE, 0x848A);
+	set_b(0x0320, 0x01, 0x8490);
+	clr_b(0x031F, 0x8494);
+	clr_b(0x0323, 0x8498);
+	clr_b(0x0EA0, 0x849C);
+	set_b(0x031B, 0xFF, 0x84A2);
+	clr_b(0x032F, 0x84A6);
+	clr_w(0x02FC, 0x84AA);
+	clr_w(0x02FE, 0x84AE);
+	clr_w(0x02EE, 0x84B2);
+	set_b(0x0325, 0xFF, 0x84B8);
+	clr_w(0x01B0, 0x84BC);
+	clr_w(0x01B2, 0x84C0);
+	set_w(0x0ED2, 0x3800, 0x84C6);
+	set_w(0x0ED4, 0xA800, 0x84CC);
+	jsr(0x84D0, 0xE238);                               // reset_skater_state
 	T.r[1] = pop();
-	k.add(18);
-	k.leave();
+	fl::mov(T.r[1]);
+	tick(0x84D2, 18);
+	rts();
 	return T.r[0];
 }
 
@@ -1759,34 +1837,40 @@ void attract_frame()
 // interrupts allowed again, do the frame's work (F:8512) unless it is still running
 void irq_vblank_attract()
 {
-	Clock k;
 	for (int i = 0; i <= 5; i++)
 	{
-		k.at((uint16_t)(0x84D4 + 2 * i));
-		fl::mov(T.r[i]);
 		push(T.r[i]);
-		k.add(24);
+		fl::mov(T.r[i]);
+		tick((uint16_t)(0x84D6 + 2 * i), 24);
 	}
-	k.at(0x84E0); poke(0x01C4, fl::inc(peek(0x01C4))); k.add(27);
-	k.at(0x84E4); pokeb(0x0192, fl::incb(peekb(0x0192))); k.add(27);
-	k.at(0x84E8); poke(0x15C0, 0); fl::clr(); k.add(27);
-	k.at(0x84EC); pokeb(0x0191, 0); fl::clr(); k.add(27);
-	k.at(0x84F0); poke(0x15E0, 0); fl::clr(); k.add(27);
-	T.r[0] = 0; fl::clr(); k.add(12);
-	mtps(0); k.step(30, 0x84FA);                       // a pending interrupt is taken here
-	k.at(0x84FA);
+	poke(0x01C4, fl::inc(peek(0x01C4)));               // the frame counter
+	tick(0x84E4, 27);
+	pokeb(0x0192, fl::incb(peekb(0x0192)));
+	tick(0x84E8, 27);
+	clr_w(0x15C0, 0x84EC);                             // ACK_32V_IRQ
+	clr_b(0x0191, 0x84F0);
+	clr_w(0x15E0, 0x84F4);                             // ACK_VBLANK_IRQ
+	T.r[0] = 0;
+	fl::clr();
+	tick(0x84F6, 12);
+	mtps(0);
+	tick(0x84FA, 30);
 	const uint8_t busy = peekb(0x0196);
 	fl::tstb(busy);
-	k.add(24, 12);
-	if (!busy) k.call(0x8512, 0x8504);                 // attract_frame
+	tick(0x84FE, 24);
+	if (busy)
+		tick(0x8504, 12);                              // BNE
+	else
+	{
+		tick(0x8500, 12);
+		jsr(0x8504, 0x8512);                           // attract_frame
+	}
 	for (int i = 5; i >= 0; i--)
 	{
-		k.at((uint16_t)(0x8504 + 2 * (5 - i)));
 		T.r[i] = pop();
 		fl::mov(T.r[i]);
-		k.add(18);
+		tick((uint16_t)(0x8506 + 2 * (5 - i)), 18);
 	}
-	k.flush();                                         // the RTI (in the table)
 }
 
 // F:A2F0  skater_land(): back on the ground (mode 0x031F = 1): kick state reset, ground
@@ -4175,28 +4259,39 @@ void reset_entry()
 	}
 	tick(0x8016, 12);
 	slap(0x8016); slap(0x8018);
-	tick(0x8156, 18);
-	Clock k;
-	poke(0x1600, 0); fl::clr(); k.add(27);
-	k.at(0x815A); pokeb(0x1800, 0); k.add(27);
-	k.at(0x815E); poke(0x1600, 0); k.add(27);
-	T.r[0] = 0x0FFE; k.add(18);
-	do
+	tick(0x8156, 18);                                  // JMP @#0x8156: the power-on sequence
+	clr_w(0x1600, 0x815A);                             // interrupts off
+	clr_b(0x1800, 0x815E);                             // the watchdog
+	clr_w(0x1600, 0x8162);
+	T.r[0] = 0x0FFE;
+	fl::mov(T.r[0]);
+	tick(0x8166, 18);
+	for (;;)                                           // RAM 0x0080-0x0FFF cleared
 	{
-		k.at(0x8166); poke(T.r[0], 0); k.add(21);
-		T.r[0] = (uint16_t)(T.r[0] - 2);
+		poke(T.r[0], 0);
+		fl::clr();
+		tick(0x8168, 21);
+		T.r[0] = fl::sub(T.r[0], 0x0002);
+		tick(0x816C, 18);
 		fl::cmp(T.r[0], 0x0080);
-		k.add(18, 18, 12);
-	} while ((int16_t)T.r[0] >= 0x0080);
-	k.at(0x8172); pokeb(0x1800, 0); k.add(27);
-	k.call(0x8D2C, 0x817A);                     // clear_playfield_ram
-	k.call(0x8CE8, 0x817E);                     // clear_playfield
-	k.at(0x817E); pokeb(0x1800, 0); k.add(27);
-	k.at(0x8182); pokeb(0x0190, 1); k.add(33);
-	sel_ab(k, 0x8188, 0x3800, 0x3C00);
-	k.call(0x4B00, 0x81A4);
-	k.call(0x829E, 0x81A8);                     // attract mode: does not return
-	k.leave();
+		tick(0x8170, 18);
+		if ((int16_t)T.r[0] < 0x0080)
+		{
+			tick(0x8172, 12);                          // BGE not taken
+			break;
+		}
+		tick(0x8166, 12);
+	}
+	clr_b(0x1800, 0x8176);
+	jsr(0x817A, 0x8D2C);                               // clear_playfield_ram
+	jsr(0x817E, 0x8CE8);                               // clear_playfield
+	clr_b(0x1800, 0x8182);
+	set_b(0x0190, 0x01, 0x8188);
+	bank_a(0x8188, 0x3800);
+	bank_b(0x8194, 0x3C00);
+	jsr(0x81A4, 0x4B00);
+	jsr(0x81A8, 0x829E);                               // attract_mode: does not return
+	rts();
 }
 
 // F:829E (assembly; waits, does not return): the attract mode: display setup (F:BA2E),
@@ -4206,36 +4301,38 @@ void reset_entry()
 // then the attract main loop F:8714
 void attract_mode()
 {
-	Clock k;
-	k.call(0xBA2E, 0x82A2);
-	k.call(0x820C, 0x82A6);                     // install_interrupts_b
-	k.at(0x82A6); poke(0x15E0, 0); k.add(27);
-	k.at(0x82AA); poke(0x15C0, 0); k.add(27);
-	k.at(0x82AE); poke(0x1580, 0); k.add(27);
-	T.r[0] = 0; k.add(12);
-	mtps(0); k.step(30, 0x82B8);
-	k.at(0x82B8); pokeb(0x018F, 4); k.add(33);
-	k.at(0x82BE); pokeb(0x018E, 1); k.add(33);
-	k.at(0x82C4); pokeb(0x0F25, 2); k.add(33);
-	k.at(0x82CA); pokeb(0x0EA7, 0); k.add(27);
-	k.at(0x82CE); pokeb(0x0EA8, 0xFF); k.add(33);
-	k.at(0x82D4); poke(0x0EB0, 0xDA74); k.add(33);
-	k.call(0x8D50, 0x82DE);                     // wait_vblank
-	k.at(0x82DE); poke(0x0EB0, 0xDABA); k.add(33);
-	k.call(0x8D50, 0x82E8);
-	k.at(0x82E8); poke(0x0EB0, 0xDC3C); k.add(33);
-	k.at(0x82EE); poke(0x0EAC, 0x000F); k.add(33);
-	k.at(0x82F4); poke(0x0EAE, 0); k.add(27);
-	k.call(0x8D50, 0x82FC);
-	k.at(0x82FC); poke(0x0EB0, 0xDB4E); k.add(33);
-	k.call(0x8D50, 0x8306);
-	k.call(0x8CE8, 0x830A);                     // clear_playfield
-	k.at(0x830A); poke(0x0184, 0x5AC8); k.add(33);
-	k.at(0x8310); poke(0x018A, 1); k.add(33);
-	k.at(0x8316); pokeb(0x0336, 0xFF); k.add(33);
-	k.at(0x831C); poke(0x0EC2, 0xFFFF); k.add(33);
-	k.call(0x8714, 0x8326);                     // attract_loop: does not return
-	k.leave();
+	jsr(0x82A2, 0xBA2E);                               // clear_objects_and_text
+	jsr(0x82A6, 0x820C);                               // install_interrupts_b
+	clr_w(0x15E0, 0x82AA);                             // the pending acknowledges cleared
+	clr_w(0x15C0, 0x82AE);
+	clr_w(0x1580, 0x82B2);
+	T.r[0] = 0;
+	fl::clr();
+	tick(0x82B4, 12);
+	mtps(0);                                           // interrupts allowed
+	tick(0x82B8, 30);
+	set_b(0x018F, 0x04, 0x82BE);                       // game state 4
+	set_b(0x018E, 0x01, 0x82C4);
+	set_b(0x0F25, 0x02, 0x82CA);
+	clr_b(0x0EA7, 0x82CE);
+	set_b(0x0EA8, 0xFF, 0x82D4);
+	set_w(0x0EB0, 0xDA74, 0x82DA);                     // the palettes, a frame each
+	jsr(0x82DE, 0x8D50);                               // wait_vblank
+	set_w(0x0EB0, 0xDABA, 0x82E4);
+	jsr(0x82E8, 0x8D50);
+	set_w(0x0EB0, 0xDC3C, 0x82EE);
+	set_w(0x0EAC, 0x000F, 0x82F4);
+	clr_w(0x0EAE, 0x82F8);
+	jsr(0x82FC, 0x8D50);
+	set_w(0x0EB0, 0xDB4E, 0x8302);
+	jsr(0x8306, 0x8D50);
+	jsr(0x830A, 0x8CE8);                               // clear_playfield
+	set_w(0x0184, 0x5AC8, 0x8310);                     // the text table
+	set_w(0x018A, 0x0001, 0x8316);
+	set_b(0x0336, 0xFF, 0x831C);
+	set_w(0x0EC2, 0xFFFF, 0x8322);
+	jsr(0x8326, 0x8714);                               // attract_loop: does not return
+	rts();
 }
 
 // one phase of the attract main loop (see F:8714)
@@ -4794,63 +4891,116 @@ uint16_t wipe_screen_in(const Args &)
 // frames (F:8D50) with the sprite palette loaded (0x0EB0 = F:DB4E); banks restored
 void start_view()
 {
-	Clock k;
-	k.at(0x8328); push(peek(0x01D2)); k.add(36);
-	k.at(0x832C); push(peek(0x01D4)); k.add(36);
-	sel_a(k, 0x8330, 0x1800);
-	push(rw((uint16_t)(T.r[6] + 0x0A))); k.add(39);
-	push(rw((uint16_t)(T.r[6] + 0x0A))); k.add(39);
-	push(rw((uint16_t)(T.r[6] + 0x0A))); k.add(39);
-	k.call(0x4000, 0x834C);                     // A5:4000 init_map_view
-	sel_ab(k, 0x834C, 0x3800, 0x3C00);
-	k.call(0x8036, 0x8368);                     // load_scroll_registers
-	k.at(0x8368); pokeb(0x0370, 1); k.add(33);
-	k.at(0x836E); pokeb(0x0470, 0x30); k.add(33);
-	k.at(0x8374); pokeb(0x0371, 1); k.add(33);
-	k.at(0x837A); pokeb(0x0471, 0x10); k.add(33);
-	k.at(0x8380); pokeb(0x0372, 2); k.add(33);
-	k.at(0x8386); pokeb(0x0472, 0); k.add(27);
-	k.at(0x838A); pokeb(0x0373, 3); k.add(33);
-	k.at(0x8390); pokeb(0x0473, 0); k.add(27);
-	k.at(0x8394); poke(0x03B6, 0x50FA); k.add(33);
-	poke(T.r[6], rw((uint16_t)(T.r[6] + 0x16))); k.add(36);
-	k.at(0x839E); poke(T.r[6], (uint16_t)(rw(T.r[6]) + peek(0x01A8))); k.add(33);
-	push(rw((uint16_t)(T.r[6] + 0x14))); k.add(39);
-	k.at(0x83A6); poke(T.r[6], (uint16_t)(rw(T.r[6]) - peek(0x01AA))); k.add(33);
-	push(rw((uint16_t)(T.r[6] + 0x14))); k.add(39);
-	k.call(0x843E, 0x83B2);                     // place_skater
-	T.r[1] = 0; k.add(12);
-	do
+	push_w(0x01D2, 0x832C);                            // the banks, put back at the end
+	push_w(0x01D4, 0x8330);
+	bank_a(0x8330, 0x1800);
+	push_sp(0x0A, 0x8340);                             // A5:4000(a, b, c)
+	push_sp(0x0A, 0x8344);
+	push_sp(0x0A, 0x8348);
+	jsr(0x834C, 0x4000);                               // init_map_view
+	bank_a(0x834C, 0x3800);
+	bank_b(0x8358, 0x3C00);
+	jsr(0x8368, 0x8036);                               // load_scroll_registers
+	set_b(0x0370, 0x01, 0x836E);                       // objects 0-3: the skater's parts
+	set_b(0x0470, 0x30, 0x8374);
+	set_b(0x0371, 0x01, 0x837A);
+	set_b(0x0471, 0x10, 0x8380);
+	set_b(0x0372, 0x02, 0x8386);
+	clr_b(0x0472, 0x838A);
+	set_b(0x0373, 0x03, 0x8390);
+	clr_b(0x0473, 0x8394);
+	set_w(0x03B6, 0x50FA, 0x839A);
 	{
-		T.r[0] = (uint16_t)(T.r[1] << 1); k.add(12, 12);
-		k.at(0x83B8); poke((uint16_t)(0x03F0 + T.r[0]), 1); k.add(36);
-		poke(T.r[6], T.r[1]); k.add(21);
-		k.call(0xB4B6, 0x83C4);
-		T.r[1]++;
-		k.add(12, 18, 12);
-	} while ((int16_t)T.r[1] <= 3);
-	k.at(0x83CC); poke(T.r[6], peek(0x06F0)); k.add(33);
-	k.at(0x83D0); push(peek(0x0730)); k.add(36);
-	k.at(0x83D4); push(peek(0x06B0)); k.add(36);
-	push(0x0078); k.add(30);
-	k.call(0xE1FA, 0x83E0);                     // fill_slots
-	k.at(0x83E0); pokeb(0x0F13, 0); k.add(27);
-	k.at(0x83E4); pokeb(0x0F14, 0); k.add(27);
-	sel_ab(k, 0x83E8, 0x1800, 0x1C00);
-	k.call(0x5B18, 0x8404);                     // start_sequence_a5
-	k.at(0x8404); pokeb(0x01F8, 0); k.add(27);
-	k.at(0x8408); pokeb(0x032A, 0); k.add(27);
-	k.at(0x840C); pokeb(0x0ED0, 2); k.add(33);
-	k.call(0x8D50, 0x8416);                     // wait_vblank
-	k.at(0x8416); poke(0x0EB0, 0xDB4E); k.add(33);
-	k.call(0x8D50, 0x8420);
-	k.at(0x8420); poke(0x01D2, rw((uint16_t)(T.r[6] + 0x12))); k.add(42);
-	k.at(0x8426); poke(0x01D4, rw((uint16_t)(T.r[6] + 0x10))); k.add(42);
-	k.at(0x842C); poke(0x1400, peek(0x01D2)); k.add(39);
-	k.at(0x8432); poke(0x1402, peek(0x01D4)); k.add(39);
+		const uint16_t v = peek((uint16_t)(T.r[6] + 0x16));   // place_skater(dz, y - scroll y,
+		fl::mov(v);                                            // x + scroll x)
+		poke(T.r[6], v);
+	}
+	tick(0x839E, 36);
+	poke(T.r[6], fl::add(peek(T.r[6]), peek(0x01A8)));
+	tick(0x83A2, 33);
+	push_sp(0x14, 0x83A6);
+	poke(T.r[6], fl::sub(peek(T.r[6]), peek(0x01AA)));
+	tick(0x83AA, 33);
+	push_sp(0x14, 0x83AE);
+	jsr(0x83B2, 0x843E);                               // place_skater
+	T.r[1] = 0;
+	fl::clr();
+	tick(0x83B4, 12);
+	for (;;)                                           // objects 0-3 shown
+	{
+		T.r[0] = T.r[1];
+		fl::mov(T.r[0]);
+		tick(0x83B6, 12);
+		T.r[0] = fl::asl(T.r[0]);
+		tick(0x83B8, 12);
+		poke((uint16_t)(0x03F0 + T.r[0]), 0x0001);
+		fl::mov(0x0001);
+		tick(0x83BE, 36);
+		poke(T.r[6], T.r[1]);
+		fl::mov(T.r[1]);
+		tick(0x83C0, 21);
+		jsr(0x83C4, 0xB4B6);                           // show_object
+		T.r[1] = fl::inc(T.r[1]);
+		tick(0x83C6, 12);
+		fl::cmp(T.r[1], 0x0003);
+		tick(0x83CA, 18);
+		if ((int16_t)T.r[1] > 3)
+		{
+			tick(0x83CC, 12);                          // BLE not taken
+			break;
+		}
+		tick(0x83B4, 12);
+	}
+	{
+		const uint16_t v = peek(0x06F0);               // fill_slots(120, z, y, x)
+		fl::mov(v);
+		poke(T.r[6], v);
+	}
+	tick(0x83D0, 33);
+	push_w(0x0730, 0x83D4);
+	push_w(0x06B0, 0x83D8);
+	push(0x0078);
+	fl::mov(0x0078);
+	tick(0x83DC, 30);
+	jsr(0x83E0, 0xE1FA);                               // fill_slots
+	clr_b(0x0F13, 0x83E4);
+	clr_b(0x0F14, 0x83E8);
+	bank_a(0x83E8, 0x1800);
+	bank_b(0x83F4, 0x1C00);
+	jsr(0x8404, 0x5B18);                               // the sound sequence
+	clr_b(0x01F8, 0x8408);
+	clr_b(0x032A, 0x840C);
+	set_b(0x0ED0, 0x02, 0x8412);
+	jsr(0x8416, 0x8D50);                               // wait_vblank
+	set_w(0x0EB0, 0xDB4E, 0x841C);                     // the sprite palette
+	jsr(0x8420, 0x8D50);
+	{
+		const uint16_t v = peek((uint16_t)(T.r[6] + 0x12));   // the banks back
+		fl::mov(v);
+		poke(0x01D2, v);
+	}
+	tick(0x8426, 42);
+	{
+		const uint16_t v = peek((uint16_t)(T.r[6] + 0x10));
+		fl::mov(v);
+		poke(0x01D4, v);
+	}
+	tick(0x842C, 42);
+	{
+		const uint16_t v = peek(0x01D2);
+		fl::mov(v);
+		poke(0x1400, v);
+	}
+	tick(0x8432, 39);
+	{
+		const uint16_t v = peek(0x01D4);
+		fl::mov(v);
+		poke(0x1402, v);
+	}
+	tick(0x8438, 39);
 	T.r[6] = fl::add(T.r[6], 0x0014);
-	k.add(18);
-	k.leave();
+	tick(0x843C, 18);
+	rts();
 }
 
 // F:891E (interrupt; not reached by the tests): acknowledge the sound CPU's interrupt

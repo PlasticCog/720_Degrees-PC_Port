@@ -8,7 +8,8 @@ compares whole runs: each scenario of difftest_all runs twice, with the rewrites
 translated original only (--no-rewrite), and compares
 
   - RAM per frame: main RAM outside the stack page 0x0100-0x017F (the first frame that
-    differs), and sprite RAM and scroll (frames looking different);
+    differs), the stack page itself (registers and flags that interrupts push), and sprite
+    RAM and scroll (frames looking different);
   - the rendered screen every K frames (--images, default 10; 0: off): playfield, sprites,
     text and palette, which the RAM dump does not hold;
   - the sound commands (frame and value).  Their cycle stamps are not compared: the
@@ -37,7 +38,7 @@ REC = 0x1000 + 0x800 + 4
 
 def compare(a, b):
     n = min(len(a), len(b)) // REC
-    first_ram = first_vis = None
+    first_ram = first_vis = first_stack = None
     vis = 0
     for f in range(n):
         ra, rb = a[f * REC:(f + 1) * REC], b[f * REC:(f + 1) * REC]
@@ -47,9 +48,11 @@ def compare(a, b):
                 first_vis = f
         if first_ram is None and (ra[:0x0100] != rb[:0x0100] or ra[0x0180:0x1000] != rb[0x0180:0x1000]):
             first_ram = f
+        if first_stack is None and ra[0x0100:0x0180] != rb[0x0100:0x0180]:
+            first_stack = f
     last = (n - 1) * REC
     frames = (a[last + 0x01C4] | a[last + 0x01C5] << 8, b[last + 0x01C4] | b[last + 0x01C5] << 8)
-    return n, first_ram, first_vis, vis, frames
+    return n, first_ram, first_vis, vis, frames, first_stack
 
 
 def frame_number(name):
@@ -109,13 +112,14 @@ def main():
             outs = list(ex.map(run, jobs))
         for i, sc in enumerate(todo):
             a, b = outs[2 * i], outs[2 * i + 1]
-            n, fr, fv, vis, frames = compare(open(a + '.bin', 'rb').read(), open(b + '.bin', 'rb').read())
+            n, fr, fv, vis, frames, fs_ = compare(open(a + '.bin', 'rb').read(), open(b + '.bin', 'rb').read())
             sounds, fs = compare_sound(a + '.snd', b + '.snd')
             line = '%-9s %5d frames  first RAM difference %-5s  first visible %-5s  frames looking different %5d  ' \
                    'frame counter %04X/%04X%s  sound commands %5d %s' % (
                        sc[0], n, fr, fv, vis, frames[0], frames[1], '' if frames[0] == frames[1] else ' (differs)',
                        sounds, 'same' if fs is None else 'differ from #%d' % fs)
-            same &= fr is None and fv is None and frames[0] == frames[1] and fs is None
+            line += '  stack page %s' % ('same' if fs_ is None else 'differs from frame %d' % fs_)
+            same &= fr is None and fv is None and frames[0] == frames[1] and fs is None and fs_ is None
             if args.images:
                 count, bad, first = compare_images(a, b)
                 line += '  screens %4d, %d differ%s' % (count, bad, ' (first frame %d)' % first if bad else '')
