@@ -72,6 +72,16 @@ void step_rts()
 	push(ret);
 }
 
+// routines whose body ends at their final RTS (stepped up to it): the RTS with its interrupt
+// point follows
+template <void (*F)()> void with_rts() { F(); step_rts(); }
+template <uint16_t (*F)(const Args &)> uint16_t c_with_rts(const Args &a)
+{
+	const uint16_t r0 = F(a);
+	step_rts();
+	return r0;
+}
+
 // The register-save helper's frame instruction by instruction, for routines with interrupt
 // points after every instruction: the routine's JSR R1,@#helper and the helper's pushes on
 // entry (the helper's return address F142 / F150 / F160 / F172 ends on top), and on leave()
@@ -168,64 +178,132 @@ struct SavedRegs {
 // 0x0304 are set
 void record_position_trail()
 {
-	cyc(30 + 12);
+	uint16_t *R = T.r;
 	const uint8_t st = peekb(0x031F);
 	fl::cmpb(st, 5);
-	if (st == 5) return;
-	cyc(24 + 12);
+	step(0x785A, 30);
+	if (st == 5)
+	{
+		step(0x78E2, 12);
+		return;
+	}
+	step(0x785C, 12);
 	const uint8_t b = peekb(0x032B);
 	fl::tstb(b);
-	if (b) return;
-	cyc(18 + 24 + 12);
-	T.r[0] = lw(0x0007 & ~peek(0x0304));
-	if (!T.r[0]) return;
-	cyc(24 + 12 + 27 + 12);
-	T.r[0] = fl::dec(sext8(peekb(0x0F12)));
-	pokeb(0x0F12, (uint8_t)T.r[0]);
-	fl::movb((uint8_t)T.r[0]);
-	if ((int8_t)(uint8_t)T.r[0] > 0) return;
-	cyc(144);                                          // 7878-788E
-	pokeb(0x0F12, 1);
-	fl::movb(1);
-	T.r[2] = sext8(peekb(0x0F13));
-	T.r[0] = asl_w(T.r[2]);
-	T.r[1] = fl::sub(peek(0x06F0), peek((uint16_t)(0x0EDA + T.r[0])));
-	if ((int16_t)T.r[1] < 0)
+	step(0x7860, 24);
+	if (b)
 	{
-		cyc(12);
-		T.r[1] = neg_w(T.r[1]);
+		step(0x78E2, 12);
+		return;
 	}
-	cyc(18 + 12);
-	fl::cmp(T.r[1], 0x0600);
-	if ((int16_t)T.r[1] <= 0x0600)
+	step(0x7862, 12);
+	R[0] = lw(0x0007);
+	step(0x7866, 18);
+	R[0] = lw(R[0] & ~peek(0x0304));
+	step(0x786A, 24);
+	if (!R[0])
 	{
-		cyc(24 + 27 + 12);
-		T.r[1] = fl::sub(peek(0x0730), peek((uint16_t)(0x0EEA + T.r[0])));
-		if ((int16_t)T.r[1] < 0)
+		step(0x78E2, 12);
+		return;
+	}
+	step(0x786C, 12);
+	const uint8_t c = peekb(0x0F12);
+	R[0] = sext8(c);
+	fl::movb(c);
+	step(0x7870, 24);
+	R[0] = fl::dec(R[0]);
+	step(0x7872, 12);
+	pokeb(0x0F12, lb((uint8_t)R[0]));
+	step(0x7876, 27);
+	if ((int8_t)(uint8_t)R[0] > 0)
+	{
+		step(0x78E2, 12);
+		return;
+	}
+	step(0x7878, 12);
+	pokeb(0x0F12, lb(1));
+	step(0x787E, 33);
+	const uint8_t idx = peekb(0x0F13);
+	R[2] = sext8(idx);
+	fl::movb(idx);
+	step(0x7882, 24);
+	R[0] = lw(R[2]);
+	step(0x7884, 12);
+	R[0] = asl_w(R[0]);
+	step(0x7886, 12);
+	R[1] = lw(peek(0x06F0));
+	step(0x788A, 24);
+	R[1] = fl::sub(R[1], peek((uint16_t)(0x0EDA + R[0])));
+	step(0x788E, 27);
+	if ((int16_t)R[1] < 0)
+	{
+		step(0x7890, 12);
+		R[1] = neg_w(R[1]);
+		step(0x7892, 12);
+	}
+	else
+		step(0x7892, 12);
+	fl::cmp(R[1], 0x0600);
+	step(0x7896, 18);
+	if ((int16_t)R[1] > 0x0600)
+		step(0x78AC, 12);
+	else
+	{
+		step(0x7898, 12);
+		R[1] = lw(peek(0x0730));
+		step(0x789C, 24);
+		R[1] = fl::sub(R[1], peek((uint16_t)(0x0EEA + R[0])));
+		step(0x78A0, 27);
+		if ((int16_t)R[1] < 0)
 		{
-			cyc(12);
-			T.r[1] = neg_w(T.r[1]);
+			step(0x78A2, 12);
+			R[1] = neg_w(R[1]);
+			step(0x78A4, 12);
 		}
-		cyc(12 + 18 + 12);
-		T.r[0] = T.r[1];
-		fl::cmp(T.r[0], 0x0600);
-		if ((int16_t)T.r[0] <= 0x0600) return;
+		else
+			step(0x78A4, 12);
+		R[0] = lw(R[1]);
+		step(0x78A6, 12);
+		fl::cmp(R[0], 0x0600);
+		step(0x78AA, 18);
+		if ((int16_t)R[0] <= 0x0600)
+		{
+			step(0x78E2, 12);
+			return;
+		}
+		step(0x78AC, 12);
 	}
-	cyc(351);                                          // 78AC-78DC
-	pokeb(0x0F14, (uint8_t)T.r[2]);
-	T.r[0] = fl::inc(T.r[2]);
-	T.r[1] = lw(T.r[0] & 0x0007);
+	pokeb(0x0F14, lb((uint8_t)R[2]));
+	step(0x78B0, 27);
+	R[0] = lw(R[2]);
+	step(0x78B2, 12);
+	R[0] = fl::inc(R[0]);
+	step(0x78B4, 12);
+	R[1] = lw(R[0]);
+	step(0x78B6, 12);
+	R[1] = lw(R[1] & 0x0007);
+	step(0x78BA, 18);
 	pokeb(0x0F13, 0);
 	fl::clr();
-	pokeb(0x0F13, lb((uint8_t)(peekb(0x0F13) | (uint8_t)T.r[1])));
-	T.r[1] = sext8(peekb(0x0F13));
-	T.r[0] = asl_w(T.r[1]);
-	poke((uint16_t)(0x0EDA + T.r[0]), peek(0x06F0));
-	poke((uint16_t)(0x0EEA + T.r[0]), peek(0x0730));
-	poke((uint16_t)(0x0EFA + T.r[0]), peek(0x06B0));
-	const uint8_t t = peekb(0x0327);
-	pokeb((uint16_t)(0x0F0A + T.r[1]), t);
-	fl::movb(t);
+	step(0x78BE, 27);
+	pokeb(0x0F13, lb((uint8_t)(peekb(0x0F13) | (uint8_t)R[1])));
+	step(0x78C2, 27);
+	const uint8_t n = peekb(0x0F13);
+	R[1] = sext8(n);
+	fl::movb(n);
+	step(0x78C6, 24);
+	R[0] = lw(R[1]);
+	step(0x78C8, 12);
+	R[0] = asl_w(R[0]);
+	step(0x78CA, 12);
+	poke((uint16_t)(0x0EDA + R[0]), lw(peek(0x06F0)));
+	step(0x78D0, 42);
+	poke((uint16_t)(0x0EEA + R[0]), lw(peek(0x0730)));
+	step(0x78D6, 42);
+	poke((uint16_t)(0x0EFA + R[0]), lw(peek(0x06B0)));
+	step(0x78DC, 42);
+	pokeb((uint16_t)(0x0F0A + R[1]), lb(peekb(0x0327)));
+	step(0x78E2, 42);
 }
 
 // B1:78E4: start putting the skater back: objects 0-3 are reset at his position (F:843E),
@@ -233,17 +311,46 @@ void record_position_trail()
 // Returns the previous entry index - 1.
 uint16_t start_trail_return(const Args &)
 {
-	cyc(162);                                          // 78E4-78F2
-	push(T.r[1]);                                      // MOV R1,-(SP)
-	call(0x843E, {peek(0x06B0), peek(0x0730), peek(0x06F0)});
-	T.r[1] = pop();
-	poke(0x03B0, 0x50FA);
-	poke(0x03B4, 0x50FA);
-	pokeb(0x031F, 5);
-	const uint16_t r0 = (uint16_t)(sext8(peekb(0x0F14)) - 1);
-	pokeb(0x0F14, (uint8_t)(r0 & 7));
-	poke(0x02FA, 0x001E);
-	return r0;
+	uint16_t *R = T.r;
+	push(R[1]);
+	fl::mov(R[1]);
+	step(0x78E6, 24);
+	push(lw(peek(0x06F0)));
+	step(0x78EA, 36);
+	push(lw(peek(0x0730)));
+	step(0x78EE, 36);
+	push(lw(peek(0x06B0)));
+	step(0x78F2, 36);
+	jsr(0x78F6, 0x843E);
+	poke(0x03B0, lw(0x50FA));
+	step(0x78FC, 33);
+	poke(0x03B4, lw(0x50FA));
+	step(0x7902, 33);
+	pokeb(0x031F, lb(5));
+	step(0x7908, 33);
+	const uint8_t c = peekb(0x0F14);
+	R[0] = sext8(c);
+	fl::movb(c);
+	step(0x790C, 24);
+	R[0] = fl::dec(R[0]);
+	step(0x790E, 12);
+	R[1] = lw(R[0]);
+	step(0x7910, 12);
+	R[1] = lw(R[1] & 0x0007);
+	step(0x7914, 18);
+	pokeb(0x0F14, 0);
+	fl::clr();
+	step(0x7918, 27);
+	pokeb(0x0F14, lb((uint8_t)(peekb(0x0F14) | (uint8_t)R[1])));
+	step(0x791C, 27);
+	poke(0x02FA, lw(0x001E));
+	step(0x7922, 33);
+	R[6] = fl::add(R[6], 6);
+	step(0x7926, 18);
+	R[1] = pop();
+	fl::mov(R[1]);
+	step(0x7928, 18);
+	return R[0];
 }
 
 // B1:792A (assembly): one frame of putting the skater back.  The delay 0x02FA counts down
@@ -252,117 +359,234 @@ uint16_t start_trail_return(const Args &)
 // landing at the entry's height he is placed on it with its terrain.
 void trail_return_step()
 {
-	cyc(24 + 12);
-	T.r[0] = peek(0x02FA);
-	fl::mov(T.r[0]);
-	if (T.r[0])
+	uint16_t *R = T.r;
+	R[0] = lw(peek(0x02FA));
+	step(0x792E, 24);
+	if (R[0])
 	{
-		cyc(18 + 12);
-		fl::cmp(T.r[0], 1);
-		if (T.r[0] != 1)
+		step(0x7930, 12);
+		fl::cmp(R[0], 1);
+		step(0x7934, 18);
+		if (R[0] != 1)
 		{
-			cyc(12);                                   // BNE at 7A06
+			step(0x7A06, 12);
+			step(0x7A4E, 12);                          // BNE at 7A06
 			return;
 		}
-		cyc(228);                                      // 7936-7956
-		poke(0x05B0, 0x00C0);
-		poke(0x03B2, 0x57AC);
-		T.r[0] = 1;
-		pokeb(0x0791, 1);
-		pokeb(0x0771, 1);
+		step(0x7936, 12);
+		poke(0x05B0, lw(0x00C0));
+		step(0x793C, 33);
+		poke(0x03B2, lw(0x57AC));
+		step(0x7942, 33);
+		R[0] = lw(1);
+		step(0x7946, 18);
+		pokeb(0x0791, lb(1));
+		step(0x794A, 27);
+		pokeb(0x0771, lb(1));
+		step(0x794E, 27);
 		push(2);
+		fl::mov(2);
+		step(0x7952, 30);
 		push(2);
-		T.r[0] = call(0xB602, {});
-		cyc(33 + 27 + 24);
-		poke(0x03B4, 0x50FA);
+		fl::mov(2);
+		step(0x7956, 30);
+		R[0] = jsr(0x795A, 0xB602);
+		poke(0x03B4, lw(0x50FA));
+		step(0x7960, 33);
 		poke(0x02FA, 0);
+		fl::clr();
+		step(0x7964, 27);
 		const uint16_t s = pop(), d = pop();
 		fl::cmp(s, d);
+		step(0x7966, 24);
 		return;
 	}
-	cyc(24 + 12);
-	T.r[0] = peek(0x05B0);
-	fl::mov(T.r[0]);
-	if ((int16_t)T.r[0] > 0)
+	step(0x7968, 12);
+	R[0] = lw(peek(0x05B0));
+	step(0x796C, 24);
+	if ((int16_t)R[0] > 0)
 	{
-		cyc(24 + 12 + 24 + 27 + 18 + 12);
-		T.r[0] = asl_w(sext8(peekb(0x0F14)));
-		T.r[1] = fl::sub(peek(0x06B0), peek((uint16_t)(0x0EFA + T.r[0])));
-		T.r[1] = fl::sub(T.r[1], 0x0C00);
-		if ((int16_t)T.r[1] < 0) return;
-		cyc(27 + 42 + 39 + 18 + 12);
+		step(0x796E, 12);
+		const uint8_t e = peekb(0x0F14);
+		R[0] = sext8(e);
+		fl::movb(e);
+		step(0x7972, 24);
+		R[0] = asl_w(R[0]);
+		step(0x7974, 12);
+		R[1] = lw(peek(0x06B0));
+		step(0x7978, 24);
+		R[1] = fl::sub(R[1], peek((uint16_t)(0x0EFA + R[0])));
+		step(0x797C, 27);
+		R[1] = fl::sub(R[1], 0x0C00);
+		step(0x7980, 18);
+		if ((int16_t)R[1] < 0)
+		{
+			step(0x7A4E, 12);
+			return;
+		}
+		step(0x7982, 12);
 		poke(0x05B0, 0);
-		poke(0x04F0, peek((uint16_t)(0x0EDA + T.r[0])));
+		fl::clr();
+		step(0x7986, 27);
+		poke(0x04F0, lw(peek((uint16_t)(0x0EDA + R[0]))));
+		step(0x798C, 42);
 		uint16_t d = fl::sub(peek(0x04F0), peek(0x06F0));
 		poke(0x04F0, d);
+		step(0x7992, 39);
 		T.psw &= ~(CF | VF);
-		cyc((int16_t)d <= 0 ? 33 : 33 + 12);
-		poke(0x04F0, lw((int16_t)d <= 0 ? 0xFF00 : 0x0100));
-		cyc(42 + 39 + 18 + 12 + 33);
-		poke(0x0570, peek((uint16_t)(0x0EEA + T.r[0])));
+		step(0x7994, 18);
+		if ((int16_t)d <= 0)
+		{
+			step(0x799E, 12);
+			poke(0x04F0, lw(0xFF00));
+			step(0x79A4, 33);
+		}
+		else
+		{
+			step(0x7996, 12);
+			poke(0x04F0, lw(0x0100));
+			step(0x799C, 33);
+			step(0x79A4, 12);
+		}
+		poke(0x0570, lw(peek((uint16_t)(0x0EEA + R[0]))));
+		step(0x79AA, 42);
 		d = fl::sub(peek(0x0570), peek(0x0730));
 		poke(0x0570, d);
+		step(0x79B0, 39);
 		T.psw &= ~(CF | VF);
-		poke(0x0570, lw((int16_t)d <= 0 ? 0xFF80 : 0x0080));
+		step(0x79B2, 18);
+		if ((int16_t)d <= 0)
+		{
+			step(0x79BC, 12);
+			poke(0x0570, lw(0xFF80));
+			step(0x79C2, 33);
+		}
+		else
+		{
+			step(0x79B4, 12);
+			poke(0x0570, lw(0x0080));
+			step(0x79BA, 33);
+		}
 		return;
 	}
-	cyc(12);
-	if (T.r[0] == 0)
+	step(0x79C4, 12);
+	if (R[0] == 0)
 	{
-		cyc(24 + 12);
-		T.r[2] = lw(peek(0x04F0));
-		if (T.r[2])
+		step(0x79C6, 12);
+		R[2] = lw(peek(0x04F0));
+		step(0x79CA, 24);
+		if (R[2])
 		{
-			cyc(24 + 12 + 27 + 24 + 12 + 12);
-			T.r[0] = asl_w(sext8(peekb(0x0F14)));
-			T.r[1] = fl::sub(peek((uint16_t)(0x0EDA + T.r[0])), peek(0x06F0));
-			T.r[1] = lw(T.r[1] ^ T.r[2]);
-			if ((int16_t)T.r[1] < 0)
+			step(0x79CC, 12);
+			const uint8_t e = peekb(0x0F14);
+			R[0] = sext8(e);
+			fl::movb(e);
+			step(0x79D0, 24);
+			R[0] = asl_w(R[0]);
+			step(0x79D2, 12);
+			R[1] = lw(peek((uint16_t)(0x0EDA + R[0])));
+			step(0x79D6, 27);
+			R[1] = fl::sub(R[1], peek(0x06F0));
+			step(0x79DA, 24);
+			R[1] = lw(R[1] ^ R[2]);
+			step(0x79DC, 12);
+			if ((int16_t)R[1] < 0)
 			{
-				cyc(27);
+				step(0x79DE, 12);
 				poke(0x04F0, 0);
 				fl::clr();
+				step(0x79E2, 27);
 			}
+			else
+				step(0x79E2, 12);
 		}
-		cyc(24 + 12);
-		T.r[2] = lw(peek(0x0570));
-		if (T.r[2])
+		else
+			step(0x79E2, 12);
+		R[2] = lw(peek(0x0570));
+		step(0x79E6, 24);
+		if (R[2])
 		{
-			cyc(24 + 12 + 27 + 24 + 12 + 12);
-			T.r[0] = asl_w(sext8(peekb(0x0F14)));
-			T.r[1] = fl::sub(peek((uint16_t)(0x0EEA + T.r[0])), peek(0x0730));
-			T.r[1] = lw(T.r[1] ^ T.r[2]);
-			if ((int16_t)T.r[1] < 0)
+			step(0x79E8, 12);
+			const uint8_t e = peekb(0x0F14);
+			R[0] = sext8(e);
+			fl::movb(e);
+			step(0x79EC, 24);
+			R[0] = asl_w(R[0]);
+			step(0x79EE, 12);
+			R[1] = lw(peek((uint16_t)(0x0EEA + R[0])));
+			step(0x79F2, 27);
+			R[1] = fl::sub(R[1], peek(0x0730));
+			step(0x79F6, 24);
+			R[1] = lw(R[1] ^ R[2]);
+			step(0x79F8, 12);
+			if ((int16_t)R[1] < 0)
 			{
-				cyc(27);
+				step(0x79FA, 12);
 				poke(0x0570, 0);
 				fl::clr();
+				step(0x79FE, 27);
 			}
+			else
+				step(0x79FE, 12);
 		}
-		cyc(24 + 24 + 12);
-		T.r[0] = lw((uint16_t)(peek(0x04F0) | peek(0x0570)));
-		if (T.r[0]) return;
-		cyc(33);
+		else
+			step(0x79FE, 12);
+		R[0] = lw(peek(0x04F0));
+		step(0x7A02, 24);
+		R[0] = lw(R[0] | peek(0x0570));
+		step(0x7A06, 24);
+		if (R[0])
+		{
+			step(0x7A4E, 12);
+			return;
+		}
+		step(0x7A08, 12);
 		poke(0x05B0, lw(0xFF40));
+		step(0x7A0E, 33);
 		return;
 	}
-	cyc(24 + 12 + 24 + 27 + 18 + 12);
-	T.r[0] = asl_w(sext8(peekb(0x0F14)));
-	T.r[1] = fl::sub(peek(0x06B0), peek((uint16_t)(0x0EFA + T.r[0])));
+	step(0x7A10, 12);
+	const uint8_t e = peekb(0x0F14);
+	R[0] = sext8(e);
+	fl::movb(e);
+	step(0x7A14, 24);
+	R[0] = asl_w(R[0]);
+	step(0x7A16, 12);
+	R[1] = lw(peek(0x06B0));
+	step(0x7A1A, 24);
+	R[1] = fl::sub(R[1], peek((uint16_t)(0x0EFA + R[0])));
+	step(0x7A1E, 27);
 	T.psw &= ~(CF | VF);
-	if ((int16_t)T.r[1] > 0) return;
-	cyc(174);                                          // 7A22-7A32
+	step(0x7A20, 18);
+	if ((int16_t)R[1] > 0)
+	{
+		step(0x7A4E, 12);
+		return;
+	}
+	step(0x7A22, 12);
 	poke(0x05B0, 0);
-	push(peek((uint16_t)(0x0EDA + T.r[0])));
-	push(peek((uint16_t)(0x0EEA + T.r[0])));
-	push(peek((uint16_t)(0x0EFA + T.r[0])));
-	call(0x843E, {});
-	cyc(144);                                          // 7A36-7A4A
+	fl::clr();
+	step(0x7A26, 27);
+	push(lw(peek((uint16_t)(0x0EDA + R[0]))));
+	step(0x7A2A, 39);
+	push(lw(peek((uint16_t)(0x0EEA + R[0]))));
+	step(0x7A2E, 39);
+	push(lw(peek((uint16_t)(0x0EFA + R[0]))));
+	step(0x7A32, 39);
+	jsr(0x7A36, 0x843E);
 	pokeb(0x032A, 0);
-	T.r[0] = sext8(peekb(0x0F14));
-	pokeb(0x0327, peekb((uint16_t)(0x0F0A + T.r[0])));
-	pokeb(0x0F12, 0x1E);
-	T.r[6] = fl::add(T.r[6], 6);
+	fl::clr();
+	step(0x7A3A, 27);
+	const uint8_t e2 = peekb(0x0F14);
+	R[0] = sext8(e2);
+	fl::movb(e2);
+	step(0x7A3E, 24);
+	pokeb(0x0327, lb(peekb((uint16_t)(0x0F0A + R[0]))));
+	step(0x7A44, 42);
+	pokeb(0x0F12, lb(0x1E));
+	step(0x7A4A, 33);
+	R[6] = fl::add(R[6], 6);
+	step(0x7A4E, 18);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -374,70 +598,127 @@ void trail_return_step()
 // states it is removed (F:B56E) when the delay runs out
 void object4_step()
 {
-	cyc(12 + 24 + 18 + 12);
-	T.r[0] = peekb(0x07B4);
-	fl::cmp(T.r[0], 3);
-	if ((int16_t)T.r[0] < 3) return;
-	cyc(12);
-	if (T.r[0] == 3)
+	uint16_t *R = T.r;
+	R[0] = 0;
+	fl::clr();
+	step(0x7AA4, 12);
+	R[0] = lb(peekb(0x07B4));
+	step(0x7AA8, 24);
+	fl::cmp(R[0], 3);
+	step(0x7AAC, 18);
+	if ((int16_t)R[0] < 3)
 	{
-		cyc(12 + 24 + 12 + 18 + 27 + 27 + 27 + 33);
-		T.r[0] = (uint16_t)(peekb(0x0394) << 1);
-		T.r[0] = fl::add(T.r[0], 0x5772);
-		poke(0x03B8, T.r[0]);
+		step(0x7B2C, 12);
+		return;
+	}
+	step(0x7AAE, 12);
+	if (R[0] == 3)
+	{
+		step(0x7AB0, 12);
+		R[0] = 0;
+		fl::clr();
+		step(0x7AB2, 12);
+		R[0] = lb(peekb(0x0394));
+		step(0x7AB6, 24);
+		R[0] = asl_w(R[0]);
+		step(0x7AB8, 12);
+		R[0] = fl::add(R[0], 0x5772);
+		step(0x7ABC, 18);
+		poke(0x03B8, lw(R[0]));
+		step(0x7AC0, 27);
 		pokeb(0x0774, 0);
 		fl::clr();
+		step(0x7AC4, 27);
 		pokeb(0x07B4, fl::incb(peekb(0x07B4)));
+		step(0x7AC8, 27);
 		pokeb(0x0494, lb((uint8_t)(peekb(0x0494) | 0x18)));
+		step(0x7ACE, 33);
 		return;
 	}
-	cyc(18 + 12);
-	fl::cmp(T.r[0], 4);
-	if (T.r[0] == 4)
+	step(0x7AD0, 12);
+	fl::cmp(R[0], 4);
+	step(0x7AD4, 18);
+	if (R[0] == 4)
 	{
-		cyc(24 + 24 + 12);
-		T.r[0] = fl::sub(peek(0x0638), peek(0x0630));
-		if ((int16_t)T.r[0] < 0)
+		step(0x7AD6, 12);
+		R[0] = lw(peek(0x0638));
+		step(0x7ADA, 24);
+		R[0] = fl::sub(R[0], peek(0x0630));
+		step(0x7ADE, 24);
+		if ((int16_t)R[0] < 0)
 		{
-			cyc(12);
-			T.r[0] = neg_w(T.r[0]);
+			step(0x7AE0, 12);
+			R[0] = neg_w(R[0]);
+			step(0x7AE2, 12);
 		}
-		cyc(18 + 12);
-		fl::cmp(T.r[0], 0x0800);
-		if ((int16_t)T.r[0] <= 0x0800)
+		else
+			step(0x7AE2, 12);
+		fl::cmp(R[0], 0x0800);
+		step(0x7AE6, 18);
+		bool count = (int16_t)R[0] > 0x0800;
+		if (count)
+			step(0x7AFE, 12);
+		else
 		{
-			cyc(24 + 24 + 12);
-			T.r[0] = fl::sub(peek(0x0678), peek(0x0670));
-			if ((int16_t)T.r[0] < 0)
+			step(0x7AE8, 12);
+			R[0] = lw(peek(0x0678));
+			step(0x7AEC, 24);
+			R[0] = fl::sub(R[0], peek(0x0670));
+			step(0x7AF0, 24);
+			if ((int16_t)R[0] < 0)
 			{
-				cyc(12);
-				T.r[0] = neg_w(T.r[0]);
+				step(0x7AF2, 12);
+				R[0] = neg_w(R[0]);
+				step(0x7AF4, 12);
 			}
-			cyc(18 + 18 + 12);
-			T.r[0] = fl::sub(T.r[0], 0x0200);
-			fl::cmp(T.r[0], 0x0A00);
-			if (T.r[0] <= 0x0A00) return;
+			else
+				step(0x7AF4, 12);
+			R[0] = fl::sub(R[0], 0x0200);
+			step(0x7AF8, 18);
+			fl::cmp(R[0], 0x0A00);
+			step(0x7AFC, 18);
+			if (R[0] <= 0x0A00)
+			{
+				step(0x7B2C, 12);
+				return;
+			}
+			step(0x7AFE, 12);
 		}
-		cyc(27 + 12);
 		const uint16_t n = fl::dec(peek(0x0438));
 		poke(0x0438, n);
-		if (n) return;
-		cyc(33 + 27 + 33 + 33);
-		poke(0x03B8, 0x5786);
+		step(0x7B02, 27);
+		if (n)
+		{
+			step(0x7B2C, 12);
+			return;
+		}
+		step(0x7B04, 12);
+		poke(0x03B8, lw(0x5786));
+		step(0x7B0A, 33);
 		pokeb(0x07B4, fl::incb(peekb(0x07B4)));
+		step(0x7B0E, 27);
 		pokeb(0x0494, lb((uint8_t)(peekb(0x0494) | 0x18)));
+		step(0x7B14, 33);
 		poke(0x0438, lw(0x0003));
+		step(0x7B1A, 33);
 		return;
 	}
-	cyc(27 + 12);
+	step(0x7B1C, 12);
 	const uint16_t n = fl::dec(peek(0x0438));
 	poke(0x0438, n);
-	if (n) return;
-	cyc(30 + 30);
+	step(0x7B20, 27);
+	if (n)
+	{
+		step(0x7B2C, 12);
+		return;
+	}
+	step(0x7B22, 12);
 	push(4);
-	T.r[0] = call(0xB56E, {});
-	cyc(18);
+	fl::mov(4);
+	step(0x7B26, 30);
+	R[0] = jsr(0x7B2A, 0xB56E);
 	fl::tst(pop());
+	step(0x7B2C, 18);
 }
 
 // B1:7B3E (assembly)  start_object4(int tile): called on map tiles with bit 0x40; once object 1
@@ -446,36 +727,69 @@ void object4_step()
 // with sound 0x7A
 void start_object4()
 {
-	cyc(30 + 12);
+	uint16_t *R = T.r;
 	const uint16_t z = peek(0x06B2);
 	fl::cmp(z, 0x0800);
-	if ((int16_t)z < 0x0800) return;
-	cyc(666);                                          // 7B46-7BAC
-	pokeb(0x0374, 0x54);
-	poke(0x03B8, 0x578A);
-	poke(0x0438, 0x0017);
-	T.r[0] = 4;
-	pokeb(0x0794, 4);
-	pokeb(0x0774, 4);
-	const uint16_t arg = (uint16_t)(T.r[6] + 2);
-	T.r[0] = asr_w(asr_w(asr_w(rw(arg))));
-	ww(arg, T.r[0]);
+	step(0x7B44, 30);
+	if ((int16_t)z < 0x0800)
+	{
+		step(0x7BBA, 12);
+		return;
+	}
+	step(0x7B46, 12);
+	pokeb(0x0374, lb(0x54));
+	step(0x7B4C, 33);
+	poke(0x03B8, lw(0x578A));
+	step(0x7B52, 33);
+	poke(0x0438, lw(0x0017));
+	step(0x7B58, 33);
+	R[0] = lw(4);
+	step(0x7B5C, 18);
+	pokeb(0x0794, lb(4));
+	step(0x7B60, 27);
+	pokeb(0x0774, lb(4));
+	step(0x7B64, 27);
+	const uint16_t arg = (uint16_t)(R[6] + 2);
+	R[0] = lw(rw(arg));
+	step(0x7B68, 27);
+	R[0] = asr_w(R[0]);
+	step(0x7B6A, 12);
+	R[0] = asr_w(R[0]);
+	step(0x7B6C, 12);
+	R[0] = asr_w(R[0]);
+	step(0x7B6E, 12);
+	ww(arg, lw(R[0]));
+	step(0x7B72, 30);
 	ww(arg, lw(rw(arg) & 0x0003));
-	T.r[0] = asl_w(rw(arg));
-	poke(0x06F8, peek((uint16_t)(0x7B2E + T.r[0])));
+	step(0x7B78, 36);
+	R[0] = lw(rw(arg));
+	step(0x7B7C, 27);
+	R[0] = asl_w(R[0]);
+	step(0x7B7E, 12);
+	poke(0x06F8, lw(peek((uint16_t)(0x7B2E + R[0]))));
+	step(0x7B84, 42);
 	poke(0x06F8, fl::add(peek(0x06F8), peek(0x06F0)));
-	poke(0x0738, peek((uint16_t)(0x7B36 + T.r[0])));
+	step(0x7B8A, 39);
+	poke(0x0738, lw(peek((uint16_t)(0x7B36 + R[0]))));
+	step(0x7B90, 42);
 	poke(0x0738, fl::add(peek(0x0738), peek(0x0730)));
-	poke(0x06B8, peek(0x06B2));
+	step(0x7B96, 39);
+	poke(0x06B8, lw(peek(0x06B2)));
+	step(0x7B9C, 39);
 	poke(0x06B8, fl::add(peek(0x06B8), 0x0600));
-	pokeb(0x07B4, 5);
+	step(0x7BA2, 33);
+	pokeb(0x07B4, lb(5));
+	step(0x7BA8, 33);
 	push(4);
-	call(0xB4B6, {});
-	cyc(27 + 30);
-	ww(T.r[6], 0x007A);
-	T.r[0] = call(0x8E78, {});
-	cyc(18);
+	fl::mov(4);
+	step(0x7BAC, 30);
+	jsr(0x7BB0, 0xB4B6);
+	ww(R[6], 0x007A);
+	fl::mov(0x007A);
+	step(0x7BB4, 27);
+	R[0] = jsr(0x7BB8, 0x8E78);
 	fl::tst(pop());
+	step(0x7BBA, 18);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -491,7 +805,6 @@ void draw_countdown()
 	if (!f)
 	{
 		step(0x7A38, 12);
-		step_rts();
 		return;
 	}
 	step(0x79DC, 12);
@@ -560,7 +873,6 @@ void draw_countdown()
 		step(0x7A34, 12);
 	T.r[6] = fl::add(T.r[6], 10);
 	step(0x7A38, 18);
-	step_rts();
 }
 
 // B3:7A3A (assembly): count the countdown 0x0F1C down once a second (0x0F1E frames) and flag
@@ -568,64 +880,104 @@ void draw_countdown()
 // unless the skater is being put back, 0x0F20 counts down and the time bar is flagged.
 void tick_countdown()
 {
-	cyc(30 + 12);
+	uint16_t *R = T.r;
 	const uint8_t level = peekb(0x0F59);
 	fl::cmpb(level, 1);
+	step(0x7A40, 30);
 	bool other = level == 1;
 	if (!other)
 	{
-		cyc(30 + 12);
+		step(0x7A42, 12);
 		fl::cmpb(level, 2);
+		step(0x7A48, 30);
 		other = level == 2;
 	}
 	if (other)
 	{
-		cyc(24 + 12);
+		step(0x7A74, 12);
 		const uint16_t t = peek(0x0F20);
 		fl::tst(t);
-		if ((int16_t)t <= 0) return;
-		cyc(30 + 12);
-		if (lw(peek(0x01C4) & 0x000F)) return;
-		cyc(30 + 12);
+		step(0x7A78, 24);
+		if ((int16_t)t <= 0)
+		{
+			step(0x7A9C, 12);
+			return;
+		}
+		step(0x7A7A, 12);
+		const uint16_t f = lw(peek(0x01C4) & 0x000F);
+		step(0x7A80, 30);
+		if (f)
+		{
+			step(0x7A9C, 12);
+			return;
+		}
+		step(0x7A82, 12);
 		const uint8_t m = peekb(0x0F26);
 		fl::cmpb(m, 3);
-		if (m != 3) return;
-		cyc(30 + 12);
+		step(0x7A88, 30);
+		if (m != 3)
+		{
+			step(0x7A9C, 12);
+			return;
+		}
+		step(0x7A8A, 12);
 		const uint8_t st = peekb(0x031F);
 		fl::cmpb(st, 5);
-		if (st == 5) return;
-		cyc(27 + 33);
+		step(0x7A90, 30);
+		if (st == 5)
+		{
+			step(0x7A9C, 12);
+			return;
+		}
+		step(0x7A92, 12);
 		poke(0x0F20, fl::dec(peek(0x0F20)));
+		step(0x7A96, 27);
 		pokeb(0x0FA2, lb((uint8_t)(peekb(0x0FA2) | 0x04)));
+		step(0x7A9C, 33);
 		return;
 	}
-	cyc(24 + 12);
+	step(0x7A4A, 12);
 	const uint8_t f = peekb(0x0F1E);
-	T.r[0] = sext8(f);
+	R[0] = sext8(f);
 	fl::movb(f);
-	if (!f) return;
-	cyc(12 + 12 + 27 + 12);
-	T.r[1] = fl::dec(T.r[0]);
-	pokeb(0x0F1E, (uint8_t)T.r[1]);
-	fl::movb((uint8_t)T.r[1]);
-	if ((uint8_t)T.r[1]) return;
-	cyc(27 + 12);
+	step(0x7A4E, 24);
+	if (!f)
+	{
+		step(0x7A9C, 12);
+		return;
+	}
+	step(0x7A50, 12);
+	R[1] = lw(R[0]);
+	step(0x7A52, 12);
+	R[1] = fl::dec(R[1]);
+	step(0x7A54, 12);
+	pokeb(0x0F1E, lb((uint8_t)R[1]));
+	step(0x7A58, 27);
+	if ((uint8_t)R[1])
+	{
+		step(0x7A9C, 12);
+		return;
+	}
+	step(0x7A5A, 12);
 	const uint16_t n = fl::dec(peek(0x0F1C));
 	poke(0x0F1C, n);
+	step(0x7A5E, 27);
 	if (!n)
 	{
-		cyc(27 + 12);
+		step(0x7A60, 12);
 		pokeb(0x0F1E, 0);
 		fl::clr();
+		step(0x7A64, 27);
+		step(0x7A6C, 12);
 	}
 	else
 	{
-		cyc(33);
-		pokeb(0x0F1E, 0x3C);
-		fl::movb(0x3C);
+		step(0x7A66, 12);
+		pokeb(0x0F1E, lb(0x3C));
+		step(0x7A6C, 33);
 	}
-	cyc(33);
 	pokeb(0x0FA2, lb((uint8_t)(peekb(0x0FA2) | 0x10)));
+	step(0x7A72, 33);
 }
 
 // B3:7DD6  update_table_0fb4(int n): n = 0 sets the 32 bytes at 0x0FB4 to 3 and 0x0FE1 from
@@ -633,33 +985,86 @@ void tick_countdown()
 // each byte (at most 3) and -1 is returned.  The banks are restored.
 uint16_t update_table_0fb4(const Args &a)
 {
-	const SavedRegs saved(3);
-	cyc(IN_F144 + 27 + 12);
-	const uint16_t n = a.u(0);
-	if (n)
+	uint16_t *R = T.r;
+	SteppedFrame frame(3, 0x7DDA);
+	R[2] = lw(a.u(0));
+	step(0x7DDE, 27);
+	if (R[2])
 	{
-		cyc(18);
-		for (int i = 0x1F; i >= 0; i--)
+		step(0x7E24, 12);
+		R[0] = lw(0x001F);
+		step(0x7E28, 18);
+		for (;;)
 		{
-			const uint16_t p = (uint16_t)(0x0FB4 + i);
-			uint16_t v = (uint16_t)(peekb(p) + n);
-			cyc((int16_t)v > 3 ? 81 + 18 + 54 : 81 + 54);
-			if ((int16_t)v > 3) v = 3;
-			pokeb(p, (uint8_t)v);
+			R[1] = 0;
+			fl::clr();
+			step(0x7E2A, 12);
+			R[1] = lb(peekb((uint16_t)(0x0FB4 + R[0])));
+			step(0x7E2E, 27);
+			R[1] = fl::add(R[1], R[2]);
+			step(0x7E30, 12);
+			fl::cmp(R[1], 3);
+			step(0x7E34, 18);
+			if ((int16_t)R[1] > 3)
+			{
+				step(0x7E36, 12);
+				R[1] = lw(3);
+				step(0x7E3A, 18);
+			}
+			else
+				step(0x7E3A, 12);
+			pokeb((uint16_t)(0x0FB4 + R[0]), lb((uint8_t)R[1]));
+			step(0x7E3E, 30);
+			R[0] = fl::dec(R[0]);
+			step(0x7E40, 12);
+			if ((int16_t)R[0] < 0) break;
+			step(0x7E28, 12);
 		}
-		return 0xFFFF;
+		step(0x7E42, 12);
+		const uint16_t r0 = R[0];
+		frame.leave();
+		return r0;
 	}
-	cyc(24 + 24 + 18 + 32 * 60 + 282);
-	const uint16_t bank_a = peek(0x01D2), bank_b = peek(0x01D4);
-	for (int i = 0x1F; i >= 0; i--) pokeb((uint16_t)(0x0FB4 + i), 3);
-	poke(0x01D2, 0x2400);
-	poke(0x1400, 0x2400);
-	const uint16_t r0 = peekb(0x0F2E);
-	pokeb(0x0FE1, peekb((uint16_t)(0x4649 + r0)));
-	poke(0x01D2, bank_a);
-	poke(0x01D4, bank_b);
-	poke(0x1400, peek(0x01D2));
-	poke(0x1402, peek(0x01D4));
+	step(0x7DE0, 12);
+	R[1] = lw(peek(0x01D2));
+	step(0x7DE4, 24);
+	R[3] = lw(peek(0x01D4));
+	step(0x7DE8, 24);
+	R[0] = lw(0x001F);
+	step(0x7DEC, 18);
+	for (;;)
+	{
+		pokeb((uint16_t)(0x0FB4 + R[0]), lb(3));
+		step(0x7DF2, 36);
+		R[0] = fl::dec(R[0]);
+		step(0x7DF4, 12);
+		if ((int16_t)R[0] < 0) break;
+		step(0x7DEC, 12);
+	}
+	step(0x7DF6, 12);
+	R[0] = lw(0x2400);
+	step(0x7DFA, 18);
+	poke(0x01D2, lw(R[0]));
+	step(0x7DFE, 27);
+	poke(0x1400, lw(R[0]));
+	step(0x7E02, 27);
+	R[0] = 0;
+	fl::clr();
+	step(0x7E04, 12);
+	R[0] = lb(peekb(0x0F2E));
+	step(0x7E08, 24);
+	pokeb(0x0FE1, lb(peekb((uint16_t)(0x4649 + R[0]))));
+	step(0x7E0E, 42);
+	poke(0x01D2, lw(R[1]));
+	step(0x7E12, 27);
+	poke(0x01D4, lw(R[3]));
+	step(0x7E16, 27);
+	poke(0x1400, lw(peek(0x01D2)));
+	step(0x7E1C, 39);
+	poke(0x1402, lw(peek(0x01D4)));
+	step(0x7E22, 39);
+	const uint16_t r0 = R[0];
+	frame.leave();
 	return r0;
 }
 
@@ -668,49 +1073,119 @@ uint16_t update_table_0fb4(const Args &a)
 // screens 0-2 and added to 0x0F34 (time bar flagged) on the others
 uint16_t frame_delta_bonus(const Args &)
 {
-	cyc(24 + 30 + 12);
-	push(T.r[1]);                                      // MOV R1,-(SP)
-	struct Restore { ~Restore() { if (!std::uncaught_exceptions()) T.r[1] = pop(); } } restore;
-	if (peekb(0x0F59) == 4) return T.r[0];
-	cyc(180);                                          // 7E4E-7E66
-	const uint16_t d = (uint16_t)(peek(0x01C4) - peek(0x0FB0) - 0x001E);
-	const uint16_t r0 = call(0xF064, {(uint16_t)((int16_t)d >> 3)});
-	cyc(18 + 12 + 12);
-	if ((int16_t)r0 < 0) return r0;
-	cyc(66);                                           // 7E70-7E7A
-	const uint16_t amount = peek((uint16_t)(0xFCFC + (uint16_t)(r0 << 1)));
-	if (peekb(0x0F59) < 3)
+	uint16_t *R = T.r;
+	push(R[1]);
+	fl::mov(R[1]);
+	step(0x7E46, 24);
+	fl::cmpb(peekb(0x0F59), 4);
+	step(0x7E4C, 30);
+	if (peekb(0x0F59) != 4)
 	{
-		cyc(39 + 30);
-		const uint16_t r = call(0xEF24, {amount});
-		cyc(18 + 12);
-		return r;
+		step(0x7E4E, 12);
+		R[0] = lw(peek(0x01C4));
+		step(0x7E52, 24);
+		R[0] = fl::sub(R[0], peek(0x0FB0));
+		step(0x7E56, 24);
+		R[1] = lw(R[0]);
+		step(0x7E58, 12);
+		R[1] = fl::sub(R[1], 0x001E);
+		step(0x7E5C, 18);
+		R[0] = lw(R[1]);
+		step(0x7E5E, 12);
+		R[0] = asr_w(R[0]);
+		step(0x7E60, 12);
+		R[0] = asr_w(R[0]);
+		step(0x7E62, 12);
+		R[0] = asr_w(R[0]);
+		step(0x7E64, 12);
+		push(R[0]);
+		fl::mov(R[0]);
+		step(0x7E66, 24);
+		R[0] = jsr(0x7E6A, 0xF064);
+		fl::tst(pop());
+		step(0x7E6C, 18);
+		fl::tst(R[0]);
+		step(0x7E6E, 12);
+		if ((int16_t)R[0] >= 0)
+		{
+			step(0x7E70, 12);
+			R[1] = lw(R[0]);
+			step(0x7E72, 12);
+			R[1] = asl_w(R[1]);
+			step(0x7E74, 12);
+			fl::cmpb(peekb(0x0F59), 3);
+			step(0x7E7A, 30);
+			if (peekb(0x0F59) < 3)
+			{
+				step(0x7E7C, 12);
+				push(lw(peek((uint16_t)(0xFCFC + R[1]))));
+				step(0x7E80, 39);
+				R[0] = jsr(0x7E84, 0xEF24);
+				fl::tst(pop());
+				step(0x7E86, 18);
+				step(0x7E94, 12);
+			}
+			else
+			{
+				step(0x7E88, 12);
+				poke(0x0F34, fl::add(peek(0x0F34), peek((uint16_t)(0xFCFC + R[1]))));
+				step(0x7E8E, 42);
+				pokeb(0x0FA2, lb((uint8_t)(peekb(0x0FA2) | 0x04)));
+				step(0x7E94, 33);
+			}
+		}
+		else
+			step(0x7E94, 12);
 	}
-	cyc(42 + 33);
-	poke(0x0F34, (uint16_t)(peek(0x0F34) + amount));
-	pokeb(0x0FA2, (uint8_t)(peekb(0x0FA2) | 0x04));
-	return r0;
+	else
+		step(0x7E94, 12);
+	R[1] = pop();
+	fl::mov(R[1]);
+	step(0x7E96, 18);
+	return R[0];
 }
 
 // B3:7F52: F:DD5C, then while neither 0x0F26 nor 0x0EA0 is set the game timer counts: every
 // 0x0FA7 frames (counter 0x0FA6) one unit is taken off (F:F028 add_time(-1))
 uint16_t tick_game_timer(const Args &)
 {
-	const SavedRegs saved(5);
-	cyc(IN_F162 + 30);
-	call(0xDD5C, {});
-	cyc(24 + 24 + 18 + 12);
-	const uint16_t r0 = (uint16_t)(peekb(0x0F26) | peekb(0x0EA0));
-	if (r0) return r0;
-	cyc(27 + 12);
-	const uint8_t n = (uint8_t)(peekb(0x0FA6) - 1);
-	pokeb(0x0FA6, n);
-	if (n) return r0;
-	cyc(39 + 30 + 30);
-	pokeb(0x0FA6, peekb(0x0FA7));
-	const uint16_t r = call(0xF028, {0xFFFF});
-	cyc(18);
-	return r;
+	uint16_t *R = T.r;
+	SteppedFrame frame(5, 0x7F56);
+	jsr(0x7F5A, 0xDD5C);
+	const uint8_t m = peekb(0x0F26);
+	R[0] = sext8(m);
+	fl::movb(m);
+	step(0x7F5E, 24);
+	R[0] = (uint16_t)((R[0] & 0xFF00) | lb((uint8_t)(R[0] | peekb(0x0EA0))));
+	step(0x7F62, 24);
+	R[0] = lw(R[0] & 0x00FF);
+	step(0x7F66, 18);
+	if (!R[0])
+	{
+		step(0x7F68, 12);
+		const uint8_t n = fl::decb(peekb(0x0FA6));
+		pokeb(0x0FA6, n);
+		step(0x7F6C, 27);
+		if (!n)
+		{
+			step(0x7F6E, 12);
+			pokeb(0x0FA6, lb(peekb(0x0FA7)));
+			step(0x7F74, 39);
+			push(0xFFFF);
+			fl::mov(0xFFFF);
+			step(0x7F78, 30);
+			R[0] = jsr(0x7F7C, 0xF028);                // add_time
+			fl::tst(pop());
+			step(0x7F7E, 18);
+		}
+		else
+			step(0x7F7E, 12);
+	}
+	else
+		step(0x7F7E, 12);
+	const uint16_t r0 = R[0];
+	frame.leave();
+	return r0;
 }
 
 // B3:739A  draw_cash_meter(int player): a meter of up to 4 segments for the player's cash
@@ -719,52 +1194,115 @@ uint16_t tick_game_timer(const Args &)
 // of segments left unlit.
 uint16_t draw_cash_meter(const Args &a)
 {
-	const SavedRegs saved(4);
-	cyc(IN_F152 + 30);
-	call(0x8068, {});                                  // select_video_bank0
-	cyc(228);                                          // 73A2-73C6
-	poke(0x0188, 0x8000);
+	uint16_t *R = T.r;
+	SteppedFrame frame(4, 0x739E);
 	const uint16_t player = a.u(0);
-	poke(0x0186, peek((uint16_t)(0x51E2 + (uint16_t)(player << 1))));
-	poke(0x0186, (uint16_t)(peek(0x0186) + 0x2000));
-	uint16_t r0 = 4;
-	const bool current = player == sext8(peekb(0x01F5));
-	cyc(current ? 24 + 12 : 24);
-	const uint16_t cash = current ? peek(0x0256) : peek(0x0294);
-	cyc(24 + 12 + 18);
-	const uint16_t colour = peek(0x0188), lit = colour | 0x0087;
+	jsr(0x73A2, 0x8068);                               // select_video_bank0
+	poke(0x0188, lw(0x8000));
+	step(0x73A8, 33);
+	R[0] = lw(player);
+	step(0x73AC, 27);
+	R[0] = asl_w(R[0]);
+	step(0x73AE, 12);
+	poke(0x0186, lw(peek((uint16_t)(0x51E2 + R[0]))));
+	step(0x73B4, 42);
+	poke(0x0186, fl::add(peek(0x0186), 0x2000));
+	step(0x73BA, 33);
+	R[0] = lw(4);
+	step(0x73BE, 18);
+	const uint8_t cur = peekb(0x01F5);
+	R[1] = sext8(cur);
+	fl::movb(cur);
+	step(0x73C2, 24);
+	fl::cmp(player, R[1]);
+	step(0x73C6, 27);
+	if (player == R[1])
+	{
+		step(0x73C8, 12);
+		R[1] = lw(peek(0x0256));
+		step(0x73CC, 24);
+		step(0x73D2, 12);
+	}
+	else
+	{
+		step(0x73CE, 12);
+		R[1] = lw(peek(0x0294));
+		step(0x73D2, 24);
+	}
+	R[4] = lw(peek(0x0188));
+	step(0x73D6, 24);
+	R[3] = lw(R[4]);
+	step(0x73D8, 12);
+	R[3] = lw(R[3] | 0x0087);
+	step(0x73DC, 18);
 	for (;;)
 	{
-		cyc(12 + 12 + 27 + 12);
-		if ((int16_t)cash >= (int16_t)peek((uint16_t)(0x523E + (uint16_t)(r0 << 1)))) break;
-		cyc(12 + 12);
-		if ((int16_t)r0 <= 0) break;
-		cyc(192);                                      // 73EA-7404
-		const uint16_t p = peek(0x0186);
-		poke((uint16_t)(p + 0x82), lit);
-		poke((uint16_t)(p + 0x80), lit);
-		poke((uint16_t)(p + 2), lit);
-		poke(p, lit);
-		poke(0x0186, (uint16_t)(peek(0x0186) + 4));
-		r0--;
+		R[2] = lw(R[0]);
+		step(0x73DE, 12);
+		R[2] = asl_w(R[2]);
+		step(0x73E0, 12);
+		fl::cmp(R[1], peek((uint16_t)(0x523E + R[2])));
+		step(0x73E4, 27);
+		if ((int16_t)R[1] >= (int16_t)peek((uint16_t)(0x523E + R[2])))
+		{
+			step(0x7406, 12);
+			break;
+		}
+		step(0x73E6, 12);
+		fl::tst(R[0]);
+		step(0x73E8, 12);
+		if ((int16_t)R[0] <= 0)
+		{
+			step(0x7406, 12);
+			break;
+		}
+		step(0x73EA, 12);
+		R[2] = lw(peek(0x0186));
+		step(0x73EE, 24);
+		poke((uint16_t)(R[2] + 0x82), lw(R[3]));
+		step(0x73F2, 30);
+		poke((uint16_t)(R[2] + 0x80), lw(R[3]));
+		step(0x73F6, 30);
+		poke((uint16_t)(R[2] + 2), lw(R[3]));
+		step(0x73FA, 30);
+		poke(R[2], lw(R[3]));
+		step(0x73FC, 21);
+		poke(0x0186, fl::add(peek(0x0186), 4));
+		step(0x7402, 33);
+		R[0] = fl::dec(R[0]);
+		step(0x7404, 12);
+		step(0x73DC, 12);
 	}
-	cyc(18 + 12);
-	if ((int16_t)r0 < 3)
+	fl::cmp(R[0], 3);
+	step(0x740A, 18);
+	if ((int16_t)R[0] < 3)
 	{
-		cyc(108);                                      // 740C-7416
-		const uint16_t p = peek(0x0186);
-		poke((uint16_t)(p + 0x80), lit);
-		poke(p, lit);
-		poke(0x0186, (uint16_t)(peek(0x0186) + 2));
+		step(0x740C, 12);
+		R[1] = lw(peek(0x0186));
+		step(0x7410, 24);
+		poke((uint16_t)(R[1] + 0x80), lw(R[3]));
+		step(0x7414, 30);
+		poke(R[1], lw(R[3]));
+		step(0x7416, 21);
+		poke(0x0186, fl::add(peek(0x0186), 2));
+		step(0x741C, 33);
 	}
-	cyc(270);                                          // 741C-743E
-	const uint16_t p = peek(0x0186);
-	const uint16_t cells[4] = { p, (uint16_t)(p + 2), (uint16_t)(p + 0x80), (uint16_t)(p + 0x82) };
+	else
+		step(0x741C, 12);
+	R[1] = lw(peek(0x0186));
+	step(0x7420, 24);
+	static const uint16_t offset[4] = { 0, 2, 0x80, 0x82 };
+	static const uint16_t next[8] = { 0x7422, 0x7426, 0x742A, 0x7430, 0x7434, 0x743A, 0x743E, 0x7444 };
 	for (int i = 0; i < 4; i++)
 	{
-		poke(cells[i], colour);
-		poke(cells[i], (uint16_t)(peek(cells[i]) | (0x00FA + i)));
+		const uint16_t p = (uint16_t)(R[1] + offset[i]);
+		poke(p, lw(R[4]));
+		step(next[2 * i], i ? 30 : 21);
+		poke(p, lw((uint16_t)(peek(p) | (0x00FA + i))));
+		step(next[2 * i + 1], i ? 36 : 27);
 	}
+	const uint16_t r0 = R[0];
+	frame.leave();
 	return r0;
 }
 
@@ -774,97 +1312,191 @@ uint16_t draw_cash_meter(const Args &a)
 // halved.  Two words of locals are reserved; the flags end from comparing them.
 void update_status_display()
 {
-	cyc(30 + 24 + 12);
-	T.r[6] = (uint16_t)(T.r[6] - 4);                   // CMP -(SP),-(SP)
+	uint16_t *R = T.r;
+	fl::cmp(rw((uint16_t)(R[6] - 2)), rw((uint16_t)(R[6] - 4)));
+	R[6] = (uint16_t)(R[6] - 4);                       // CMP -(SP),-(SP)
+	step(0x77B6, 30);
 	const uint8_t busy = peekb(0x02BF);
+	fl::tstb(busy);
+	step(0x77BA, 24);
 	if (!busy)
 	{
-		cyc(30);
-		call(0x8068, {});                              // select_video_bank0
-		cyc(30 + 12);
-		if (peek(0x0FA2) & 0x0001)
+		step(0x77BC, 12);
+		jsr(0x77C0, 0x8068);                           // select_video_bank0
+		const uint16_t f0 = lw(peek(0x0FA2) & 0x0001);
+		step(0x77C6, 30);
+		if (f0)
 		{
-			cyc(27 + 24 + 12);
-			pokeb(0x0FA2, (uint8_t)(peekb(0x0FA2) - 1));
-			T.r[0] = sext8(peekb(0x01F5));
-			cyc(T.r[0] ? 33 : 33 + 12);
-			poke(0x0186, T.r[0] ? 0x2262 : 0x2204);
-			cyc(246);                                  // 77E0-77FA
-			T.r[0] = (uint16_t)(T.r[0] << 1);
-			poke(0x0188, peek((uint16_t)(0x51DE + T.r[0])));
-			push(peek(0x023E));
-			push(peek(0x0240));
-			push(6);
-			push(1);
-			push(1);
-			T.r[0] = call(0xBA9A, {});
-			cyc(18);
-			T.r[6] = (uint16_t)(T.r[6] + 10);
-		}
-		cyc(30 + 12);
-		bool high = (peek(0x0FA2) & 0x0002) != 0;
-		if (high)
-		{
-			cyc(24 + 12);
-			high = !peekb(0x036C);
-		}
-		if (high)
-		{
-			cyc(33 + 24 + 12);
-			pokeb(0x0FA2, (uint8_t)(peekb(0x0FA2) & ~0x02));
-			if (!peek(0x01FC))
+			step(0x77C8, 12);
+			pokeb(0x0FA2, fl::decb(peekb(0x0FA2)));
+			step(0x77CC, 27);
+			const uint8_t me = peekb(0x01F5);
+			R[0] = sext8(me);
+			fl::movb(me);
+			step(0x77D0, 24);
+			if (me)
 			{
-				cyc(30);
-				T.r[0] = call(0xA8FE, {});
+				step(0x77DA, 12);
+				poke(0x0186, lw(0x2262));
+				step(0x77E0, 33);
 			}
-			cyc(252);                                  // 7820-783E
-			poke(0x0188, 0xA000);
-			poke(0x0186, 0x3746);
-			push(peek(0x0244));
-			push(peek(0x0246));
-			push(8);
-			push(0);
-			push(1);
-			T.r[0] = call(0xBA96, {});
-			cyc(84);                                   // 7842-784E
-			pokeb(0x0EA6, (uint8_t)(peekb(0x0EA6) | 0x01));
-			poke(0x0EAA, 0x00B4);
-			T.r[6] = (uint16_t)(T.r[6] + 10);
-		}
-		cyc(30 + 12);
-		if (peek(0x0FA2) & 0x0008)
-		{
-			cyc(390);                                  // 785A-788E
-			pokeb(0x0FA2, (uint8_t)(peekb(0x0FA2) & ~0x08));
-			poke(0x018A, 0x00A8);
-			poke(0x0188, 0x8000);
-			T.r[0] = (uint16_t)(sext8(peekb(0x01F5)) << 1);
-			poke(0x0186, peek((uint16_t)(0x51E2 + T.r[0])));
-			poke(0x0186, (uint16_t)(peek(0x0186) + 0x2000));
-			push(peek(0x0256));
-			push(0);
+			else
+			{
+				step(0x77D2, 12);
+				poke(0x0186, lw(0x2204));
+				step(0x77D8, 33);
+				step(0x77E0, 12);
+			}
+			R[0] = asl_w(R[0]);
+			step(0x77E2, 12);
+			poke(0x0188, lw(peek((uint16_t)(0x51DE + R[0]))));
+			step(0x77E8, 42);
+			push(lw(peek(0x023E)));
+			step(0x77EC, 36);
+			push(lw(peek(0x0240)));
+			step(0x77F0, 36);
 			push(6);
+			fl::mov(6);
+			step(0x77F4, 30);
 			push(1);
-			push(1);
-			T.r[0] = call(0xBA9A, {});
-			cyc(24 + 21 + 30);
-			T.r[0] = sext8(peekb(0x01F5));
-			ww(T.r[6], T.r[0]);
-			T.r[0] = call(0x739A, {});                 // draw_cash_meter
-			cyc(18);
-			T.r[6] = (uint16_t)(T.r[6] + 10);
+			fl::mov(1);
+			step(0x77F8, 30);
+			push(rw(R[6]));
+			fl::mov(1);
+			step(0x77FA, 30);
+			R[0] = jsr(0x77FE, 0xBA9A);
+			R[6] = fl::add(R[6], 10);
+			step(0x7802, 18);
 		}
-		cyc(33 + 30 + 12);
-		poke(0x018A, 0x0001);
-		if (!(peek(0x01C2) & 0x001F))
+		else
+			step(0x7802, 12);
+		const uint16_t f1 = lw(peek(0x0FA2) & 0x0002);
+		step(0x7808, 30);
+		bool high = f1 != 0;
+		if (high)
 		{
-			cyc(12 + 24 + 12 + 27);
-			T.r[0] = (uint16_t)(peekb(0x0FE2) >> 1);
-			pokeb(0x0FE2, (uint8_t)T.r[0]);
+			step(0x780A, 12);
+			const uint8_t h = peekb(0x036C);
+			fl::tstb(h);
+			step(0x780E, 24);
+			high = !h;
 		}
+		if (high)
+		{
+			step(0x7810, 12);
+			pokeb(0x0FA2, lb((uint8_t)(peekb(0x0FA2) & ~0x02)));
+			step(0x7816, 33);
+			const uint16_t pz = peek(0x01FC);
+			fl::tst(pz);
+			step(0x781A, 24);
+			if (!pz)
+			{
+				step(0x781C, 12);
+				R[0] = jsr(0x7820, 0xA8FE);
+			}
+			else
+				step(0x7820, 12);
+			poke(0x0188, lw(0xA000));
+			step(0x7826, 33);
+			poke(0x0186, lw(0x3746));
+			step(0x782C, 33);
+			push(lw(peek(0x0244)));
+			step(0x7830, 36);
+			push(lw(peek(0x0246)));
+			step(0x7834, 36);
+			push(8);
+			fl::mov(8);
+			step(0x7838, 30);
+			push(0);
+			fl::clr();
+			step(0x783A, 24);
+			push(1);
+			fl::mov(1);
+			step(0x783E, 30);
+			R[0] = jsr(0x7842, 0xBA96);
+			pokeb(0x0EA6, lb((uint8_t)(peekb(0x0EA6) | 0x01)));
+			step(0x7848, 33);
+			poke(0x0EAA, lw(0x00B4));
+			step(0x784E, 33);
+			R[6] = fl::add(R[6], 10);
+			step(0x7852, 18);
+		}
+		else
+			step(0x7852, 12);
+		const uint16_t f3 = lw(peek(0x0FA2) & 0x0008);
+		step(0x7858, 30);
+		if (f3)
+		{
+			step(0x785A, 12);
+			pokeb(0x0FA2, lb((uint8_t)(peekb(0x0FA2) & ~0x08)));
+			step(0x7860, 33);
+			poke(0x018A, lw(0x00A8));
+			step(0x7866, 33);
+			poke(0x0188, lw(0x8000));
+			step(0x786C, 33);
+			const uint8_t me = peekb(0x01F5);
+			R[0] = sext8(me);
+			fl::movb(me);
+			step(0x7870, 24);
+			R[0] = asl_w(R[0]);
+			step(0x7872, 12);
+			poke(0x0186, lw(peek((uint16_t)(0x51E2 + R[0]))));
+			step(0x7878, 42);
+			poke(0x0186, fl::add(peek(0x0186), 0x2000));
+			step(0x787E, 33);
+			push(lw(peek(0x0256)));
+			step(0x7882, 36);
+			push(0);
+			fl::clr();
+			step(0x7884, 24);
+			push(6);
+			fl::mov(6);
+			step(0x7888, 30);
+			push(1);
+			fl::mov(1);
+			step(0x788C, 30);
+			push(rw(R[6]));
+			fl::mov(1);
+			step(0x788E, 30);
+			R[0] = jsr(0x7892, 0xBA9A);
+			const uint8_t me2 = peekb(0x01F5);
+			R[0] = sext8(me2);
+			fl::movb(me2);
+			step(0x7896, 24);
+			ww(R[6], R[0]);
+			fl::mov(R[0]);
+			step(0x7898, 21);
+			R[0] = jsr(0x789C, 0x739A);                // draw_cash_meter
+			R[6] = fl::add(R[6], 10);
+			step(0x78A0, 18);
+		}
+		else
+			step(0x78A0, 12);
+		poke(0x018A, lw(0x0001));
+		step(0x78A6, 33);
+		const uint16_t fr = lw(peek(0x01C2) & 0x001F);
+		step(0x78AC, 30);
+		if (!fr)
+		{
+			step(0x78AE, 12);
+			R[0] = 0;
+			fl::clr();
+			step(0x78B0, 12);
+			R[0] = lb(peekb(0x0FE2));
+			step(0x78B4, 24);
+			R[0] = asr_w(R[0]);
+			step(0x78B6, 12);
+			pokeb(0x0FE2, lb((uint8_t)R[0]));
+			step(0x78BA, 27);
+		}
+		else
+			step(0x78BA, 12);
 	}
-	fl::cmp(rw(T.r[6]), rw((uint16_t)(T.r[6] + 2)));
-	T.r[6] = (uint16_t)(T.r[6] + 4);
+	else
+		step(0x78BA, 12);
+	fl::cmp(rw(R[6]), rw((uint16_t)(R[6] + 2)));
+	R[6] = (uint16_t)(R[6] + 4);
+	step(0x78BC, 24);
 }
 
 // B3:78BE (assembly): when flagged (0x0FA2 bit 2) and unless 0x0F36 is set, draw the time
@@ -1808,217 +2440,354 @@ void shift_rounded()
 //      player's 0x1086 entry (ROM colours at 0x5EC6, bank A 0x2000); banks restored
 void animate_palette()
 {
-	cyc(24 + 12 + 18 + 18 + 12);
-	T.r[3] = peek(0x01C4);
-	T.r[1] = lw(T.r[3] & 0x0007);
-	fl::cmp(T.r[1], 5);
-	if ((int16_t)T.r[1] > 5)
+	uint16_t *R = T.r;
+	R[3] = lw(peek(0x01C4));
+	step(0x7BC0, 24);
+	R[1] = lw(R[3]);
+	step(0x7BC2, 12);
+	R[1] = lw(R[1] & 0x0007);
+	step(0x7BC6, 18);
+	fl::cmp(R[1], 5);
+	step(0x7BCA, 18);
+	if ((int16_t)R[1] > 5)
 	{
-		cyc(12 + 12);                                  // BNE at 7BE6 and 7CCA
+		step(0x7BE6, 12);
+		step(0x7CCA, 12);                              // BNE at 7BE6, 7CCA
+		step(0x7D74, 12);
 		return;
 	}
-	cyc(12 * 6 + 27);
-	T.r[0] = asr_w(asr_w(asr_w(T.r[3])));
-	T.r[2] = asl_w(T.r[1]);
-	f_nzvc(0);                                         // jump table at 0x7D76: ADD to PC, no carry
-	switch (T.r[1])
+	step(0x7BCC, 12);
+	R[0] = lw(R[3]);
+	step(0x7BCE, 12);
+	R[0] = asr_w(R[0]);
+	step(0x7BD0, 12);
+	R[0] = asr_w(R[0]);
+	step(0x7BD2, 12);
+	R[0] = asr_w(R[0]);
+	step(0x7BD4, 12);
+	R[2] = lw(R[1]);
+	step(0x7BD6, 12);
+	R[2] = asl_w(R[2]);
+	step(0x7BD8, 12);
+	f_nzvc(0);                                         // jump table at 0x7D76: ADD to PC
+	static const uint16_t entry[6] = { 0x7BDC, 0x7C00, 0x7C20, 0x7C3C, 0x7C7C, 0x7CE4 };
+	step(entry[R[1]], 27);
+	// cases 0-2: the colour for a level byte, by the frame's bit 0 (bit 1 for case 0)
+	auto level_colour = [&](uint16_t level_addr, uint16_t at) {
+		const uint8_t level = peekb(level_addr);
+		R[2] = sext8(level);
+		fl::movb(level);
+		step((uint16_t)(at + 4), 24);
+		return level;
+	};
+	switch (R[1])
 	{
 	case 0:
 	{
-		cyc(24 + 12);
-		const uint8_t level = peekb(0x025C);
-		T.r[2] = sext8(level);
-		fl::movb(level);
+		const uint8_t level = level_colour(0x025C, 0x7BDC);
 		if (!level)
 		{
-			cyc(12);
+			step(0x7C24, 12);
+			step(0x7C26, 12);                          // BNE at 7C24
 			return;
 		}
-		cyc(18 + 12);
-		if (lw(T.r[3] & 0x000F))
+		step(0x7BE2, 12);
+		const uint16_t f = lw(R[3] & 0x000F);
+		step(0x7BE6, 18);
+		if (f)
 		{
-			cyc(12);
+			step(0x7CCA, 12);
+			step(0x7D74, 12);                          // BNE at 7CCA
 			return;
 		}
-		cyc(12 + 12 + 12 + 18 + 12 + 12 + 12 + 42);
-		T.r[3] = asr_w(T.r[0]);
-		T.r[1] = lw(T.r[3] & 0x0001);
-		T.r[2] = asl_w(T.r[2]);
-		T.r[2] = fl::add(T.r[2], T.r[1]);
-		T.r[2] = asl_w(T.r[2]);
-		const uint16_t v = peek((uint16_t)(0x7A64 + T.r[2]));
-		poke(0x1038, v);
-		fl::mov(v);
+		step(0x7BE8, 12);
+		R[3] = lw(R[0]);
+		step(0x7BEA, 12);
+		R[3] = asr_w(R[3]);
+		step(0x7BEC, 12);
+		R[1] = lw(R[3]);
+		step(0x7BEE, 12);
+		R[1] = lw(R[1] & 0x0001);
+		step(0x7BF2, 18);
+		R[2] = asl_w(R[2]);
+		step(0x7BF4, 12);
+		R[2] = fl::add(R[2], R[1]);
+		step(0x7BF6, 12);
+		R[2] = asl_w(R[2]);
+		step(0x7BF8, 12);
+		poke(0x1038, lw(peek((uint16_t)(0x7A64 + R[2]))));
+		step(0x7BFE, 42);
 		return;
 	}
 	case 1:
 	{
-		cyc(24 + 12);
-		const uint8_t level = peekb(0x025F);
-		T.r[2] = sext8(level);
-		fl::movb(level);
+		const uint8_t level = level_colour(0x025F, 0x7C00);
 		if (!level)
 		{
-			cyc(12);
+			step(0x7C24, 12);
+			step(0x7C26, 12);
 			return;
 		}
-		cyc(12 + 18 + 12 + 12 + 12 + 42 + 42);
-		T.r[1] = lw(T.r[0] & 0x0001);
-		T.r[2] = asl_w(T.r[2]);
-		T.r[2] = fl::add(T.r[2], T.r[1]);
-		T.r[2] = asl_w(T.r[2]);
-		poke(0x1016, peek((uint16_t)(0x7A4C + T.r[2])));
-		const uint16_t v = peek((uint16_t)(0x7A58 + T.r[2]));
-		poke(0x101C, v);
-		fl::mov(v);
+		step(0x7C06, 12);
+		R[1] = lw(R[0]);
+		step(0x7C08, 12);
+		R[1] = lw(R[1] & 0x0001);
+		step(0x7C0C, 18);
+		R[2] = asl_w(R[2]);
+		step(0x7C0E, 12);
+		R[2] = fl::add(R[2], R[1]);
+		step(0x7C10, 12);
+		R[2] = asl_w(R[2]);
+		step(0x7C12, 12);
+		poke(0x1016, lw(peek((uint16_t)(0x7A4C + R[2]))));
+		step(0x7C18, 42);
+		poke(0x101C, lw(peek((uint16_t)(0x7A58 + R[2]))));
+		step(0x7C1E, 42);
 		return;
 	}
 	case 2:
 	{
-		cyc(24 + 12);
-		const uint8_t level = peekb(0x025E);
-		T.r[2] = sext8(level);
-		fl::movb(level);
-		if (!level) return;
-		cyc(12 + 18 + 12 + 12 + 12 + 42);
-		T.r[1] = lw(T.r[0] & 0x0001);
-		T.r[2] = asl_w(T.r[2]);
-		T.r[2] = fl::add(T.r[2], T.r[1]);
-		T.r[2] = asl_w(T.r[2]);
-		const uint16_t v = peek((uint16_t)(0x7A70 + T.r[2]));
-		poke(0x1004, v);
-		fl::mov(v);
+		const uint8_t level = level_colour(0x025E, 0x7C20);
+		if (!level)
+		{
+			step(0x7C26, 12);
+			return;
+		}
+		step(0x7C28, 12);
+		R[1] = lw(R[0]);
+		step(0x7C2A, 12);
+		R[1] = lw(R[1] & 0x0001);
+		step(0x7C2E, 18);
+		R[2] = asl_w(R[2]);
+		step(0x7C30, 12);
+		R[2] = fl::add(R[2], R[1]);
+		step(0x7C32, 12);
+		R[2] = asl_w(R[2]);
+		step(0x7C34, 12);
+		poke(0x1004, lw(peek((uint16_t)(0x7A70 + R[2]))));
+		step(0x7C3A, 42);
 		return;
 	}
 	case 3:
 	{
-		cyc(24 + 12);
 		const uint8_t level = peekb(0x0F59);
 		fl::tstb(level);
-		if (level) return;
-		cyc(30 + 12);
-		const uint16_t t = peek(0x0254);
-		fl::cmp(t, 0x0008);
-		if ((int16_t)t >= 8)
+		step(0x7C40, 24);
+		if (level)
 		{
-			cyc(27);
-			poke(0x1094, 0);
-			fl::clr();
+			step(0x7C26, 12);
 			return;
 		}
-		cyc(30 + 12 + 96);
+		step(0x7C42, 12);
+		const uint16_t t = peek(0x0254);
+		fl::cmp(t, 0x0008);
+		step(0x7C48, 30);
+		if ((int16_t)t >= 8)
+		{
+			step(0x7C76, 12);
+			poke(0x1094, 0);
+			fl::clr();
+			step(0x7C7A, 27);
+			return;
+		}
+		step(0x7C4A, 12);
 		const uint8_t st = peekb(0x018F);
 		fl::cmpb(st, 1);
-		uint16_t v;
-		if (st == 1)
-		{
-			T.r[1] = lw(T.r[0] & 0x0003);
-			T.r[2] = asl_w(T.r[1]);
-			v = peek((uint16_t)(0x7A84 + T.r[2]));
-			poke(0x109C, v);
-		}
-		else
-		{
-			T.r[1] = lw(T.r[0] & 0x0001);
-			T.r[2] = asl_w(T.r[1]);
-			v = peek((uint16_t)(0x7A80 + T.r[2]));
-			poke(0x1094, v);
-		}
-		fl::mov(v);
+		step(0x7C50, 30);
+		const bool one = st == 1;
+		const uint16_t at = one ? 0x7C52 : 0x7C64;
+		step(at, 12);
+		R[1] = lw(R[0]);
+		step((uint16_t)(at + 2), 12);
+		R[1] = lw(R[1] & (one ? 0x0003 : 0x0001));
+		step((uint16_t)(at + 6), 18);
+		R[2] = lw(R[1]);
+		step((uint16_t)(at + 8), 12);
+		R[2] = asl_w(R[2]);
+		step((uint16_t)(at + 10), 12);
+		poke(one ? 0x109C : 0x1094, lw(peek((uint16_t)((one ? 0x7A84 : 0x7A80) + R[2]))));
+		step((uint16_t)(at + 16), 42);
 		return;
 	}
 	case 4:
 	{
-		cyc(12 + 24 + 12 + 12);
-		T.r[2] = peekb(0x0F59);
-		fl::tst(T.r[2]);
-		if (T.r[2])
+		R[2] = 0;
+		fl::clr();
+		step(0x7C7E, 12);
+		R[2] = lb(peekb(0x0F59));
+		step(0x7C82, 24);
+		fl::tst(R[2]);
+		step(0x7C84, 12);
+		if (R[2])
 		{
-			cyc(18 + 12);
-			fl::cmp(T.r[2], 7);
-			if (T.r[2] != 7) return;
-			cyc(12 + 18 + 12 + 12 + 42 + 42);
-			T.r[1] = lw(T.r[0] & 0x0001);
-			T.r[2] = asl_w(T.r[1]);
-			poke(0x1148, peek((uint16_t)(0x7A96 + T.r[2])));
-			const uint16_t v = peek((uint16_t)(0x7A9A + T.r[2]));
-			poke(0x114C, v);
-			fl::mov(v);
+			step(0x7CC6, 12);
+			fl::cmp(R[2], 7);
+			step(0x7CCA, 18);
+			if (R[2] != 7)
+			{
+				step(0x7D74, 12);
+				return;
+			}
+			step(0x7CCC, 12);
+			R[1] = lw(R[0]);
+			step(0x7CCE, 12);
+			R[1] = lw(R[1] & 0x0001);
+			step(0x7CD2, 18);
+			R[2] = lw(R[1]);
+			step(0x7CD4, 12);
+			R[2] = asl_w(R[2]);
+			step(0x7CD6, 12);
+			poke(0x1148, lw(peek((uint16_t)(0x7A96 + R[2]))));
+			step(0x7CDC, 42);
+			poke(0x114C, lw(peek((uint16_t)(0x7A9A + R[2]))));
+			step(0x7CE2, 42);
 			return;
 		}
-		cyc(402);                                      // 7C86-7CC0
-		T.r[1] = lw(T.r[0] & 0x0003);
-		T.r[2] = asl_w(T.r[1]);
-		T.r[2] = peek((uint16_t)(0x7A8C + T.r[2]));
-		for (uint16_t a = 0x1108; a <= 0x1188; a += 0x20) poke(a, T.r[2]);
-		T.r[2] = asl_w(T.r[1]);
-		T.r[0] = peek((uint16_t)(0x7A8E + T.r[2]));
-		for (uint16_t a = 0x110C; a <= 0x118C; a += 0x20) poke(a, T.r[0]);
-		fl::mov(T.r[0]);
+		step(0x7C86, 12);
+		R[1] = lw(R[0]);
+		step(0x7C88, 12);
+		R[1] = lw(R[1] & 0x0003);
+		step(0x7C8C, 18);
+		R[2] = lw(R[1]);
+		step(0x7C8E, 12);
+		R[2] = asl_w(R[2]);
+		step(0x7C90, 12);
+		R[2] = lw(peek((uint16_t)(0x7A8C + R[2])));
+		step(0x7C94, 27);
+		for (int i = 0; i < 5; i++)
+		{
+			poke((uint16_t)(0x1108 + 0x20 * i), lw(R[2]));
+			step((uint16_t)(0x7C98 + 4 * i), 27);
+		}
+		R[2] = lw(R[1]);
+		step(0x7CAA, 12);
+		R[2] = asl_w(R[2]);
+		step(0x7CAC, 12);
+		R[0] = lw(peek((uint16_t)(0x7A8E + R[2])));
+		step(0x7CB0, 27);
+		for (int i = 0; i < 5; i++)
+		{
+			poke((uint16_t)(0x110C + 0x20 * i), lw(R[0]));
+			step((uint16_t)(0x7CB4 + 4 * i), 27);
+		}
 		return;
 	}
 	default:
 	{
-		cyc(180);                                      // 7CE4-7D00
-		T.r[4] = peek(0x01D2);
-		T.r[5] = peek(0x01D4);
-		T.r[2] = 0x2000;
-		poke(0x01D2, T.r[2]);
-		poke(0x1400, T.r[2]);
-		T.r[3] = peekb(0x0EA6);
-		fl::tst(T.r[3]);
-		if (T.r[3])
+		R[4] = lw(peek(0x01D2));
+		step(0x7CE8, 24);
+		R[5] = lw(peek(0x01D4));
+		step(0x7CEC, 24);
+		R[2] = lw(0x2000);
+		step(0x7CF0, 18);
+		poke(0x01D2, lw(R[2]));
+		step(0x7CF4, 27);
+		poke(0x1400, lw(R[2]));
+		step(0x7CF8, 27);
+		R[3] = 0;
+		fl::clr();
+		step(0x7CFA, 12);
+		R[3] = lb(peekb(0x0EA6));
+		step(0x7CFE, 24);
+		fl::tst(R[3]);
+		step(0x7D00, 12);
+		if (R[3])
 		{
-			cyc(33 + 18 + 12);
+			step(0x7D02, 12);
 			poke(0x0EAA, fl::sub(peek(0x0EAA), 0x0008));
+			step(0x7D08, 33);
 			T.psw &= ~(CF | VF);
+			step(0x7D0A, 18);
 			if ((int16_t)peek(0x0EAA) <= 0)
 			{
-				cyc(183);                              // 7D0C-7D26
+				step(0x7D0C, 12);
 				pokeb(0x0EA6, 0);
 				fl::clr();
-				T.r[0] = asl_w(asl_w(asl_w(sext8(peekb(0x01F5)))));
-				poke((uint16_t)(0x1086 + T.r[0]), peek((uint16_t)(0x5EC6 + T.r[0])));
-				poke(0x10AA, peek(0x5EEA));
+				step(0x7D10, 27);
+				const uint8_t me = peekb(0x01F5);
+				R[0] = sext8(me);
+				fl::movb(me);
+				step(0x7D14, 24);
+				R[0] = asl_w(R[0]);
+				step(0x7D16, 12);
+				R[0] = asl_w(R[0]);
+				step(0x7D18, 12);
+				R[0] = asl_w(R[0]);
+				step(0x7D1A, 12);
+				poke((uint16_t)(0x1086 + R[0]), lw(peek((uint16_t)(0x5EC6 + R[0]))));
+				step(0x7D20, 45);
+				poke(0x10AA, lw(peek(0x5EEA)));
+				step(0x7D26, 39);
+				step(0x7D60, 12);
 			}
 			else
 			{
-				cyc(12 + 18 + 18 + 12);
-				T.r[1] = lw(T.r[0] & 0x0001);
-				if (lw(T.r[3] & 0x0001))
+				step(0x7D28, 12);
+				R[1] = lw(R[0]);
+				step(0x7D2A, 12);
+				R[1] = lw(R[1] & 0x0001);
+				step(0x7D2E, 18);
+				const uint16_t b0 = lw(R[3] & 0x0001);
+				step(0x7D32, 18);
+				if (b0)
 				{
-					cyc(12 + 12 + 42);
-					T.r[2] = asl_w(T.r[1]);
-					poke(0x10AA, peek((uint16_t)(0x7A9A + T.r[2])));
+					step(0x7D34, 12);
+					R[2] = lw(R[1]);
+					step(0x7D36, 12);
+					R[2] = asl_w(R[2]);
+					step(0x7D38, 12);
+					poke(0x10AA, lw(peek((uint16_t)(0x7A9A + R[2]))));
+					step(0x7D3E, 42);
 				}
-				cyc(18 + 12);
-				if (lw(T.r[3] & 0x0002))
+				else
+					step(0x7D3E, 12);
+				const uint16_t b1 = lw(R[3] & 0x0002);
+				step(0x7D42, 18);
+				if (b1)
 				{
-					cyc(24 + 12 + 12 + 12 + 12 + 12);
-					T.r[0] = asl_w(asl_w(asl_w(sext8(peekb(0x01F5)))));
-					fl::tst(T.r[1]);
-					if (!T.r[1])
+					step(0x7D44, 12);
+					const uint8_t me = peekb(0x01F5);
+					R[0] = sext8(me);
+					fl::movb(me);
+					step(0x7D48, 24);
+					R[0] = asl_w(R[0]);
+					step(0x7D4A, 12);
+					R[0] = asl_w(R[0]);
+					step(0x7D4C, 12);
+					R[0] = asl_w(R[0]);
+					step(0x7D4E, 12);
+					fl::tst(R[1]);
+					step(0x7D50, 12);
+					if (!R[1])
 					{
-						cyc(27 + 12);
-						T.r[1] = peek((uint16_t)(0x5EC6 + T.r[0]));
+						step(0x7D52, 12);
+						R[1] = lw(peek((uint16_t)(0x5EC6 + R[0])));
+						step(0x7D56, 27);
+						step(0x7D5C, 12);
 					}
 					else
 					{
-						cyc(18);
-						T.r[1] = 0xFF0F;
+						step(0x7D58, 12);
+						R[1] = lw(0xFF0F);
+						step(0x7D5C, 18);
 					}
-					cyc(30);
-					poke((uint16_t)(0x1086 + T.r[0]), T.r[1]);
+					poke((uint16_t)(0x1086 + R[0]), lw(R[1]));
+					step(0x7D60, 30);
 				}
+				else
+					step(0x7D60, 12);
 			}
 		}
-		cyc(27 + 27 + 39 + 39);
-		poke(0x01D2, T.r[4]);
-		poke(0x01D4, T.r[5]);
-		poke(0x1400, peek(0x01D2));
-		const uint16_t v = peek(0x01D4);
-		poke(0x1402, v);
-		fl::mov(v);
+		else
+			step(0x7D60, 12);
+		poke(0x01D2, lw(R[4]));
+		step(0x7D64, 27);
+		poke(0x01D4, lw(R[5]));
+		step(0x7D68, 27);
+		poke(0x1400, lw(peek(0x01D2)));
+		step(0x7D6E, 39);
+		poke(0x1402, lw(peek(0x01D4)));
+		step(0x7D74, 39);
 		return;
 	}
 	}
@@ -4182,28 +4951,28 @@ uint16_t next_turn(const Args &)
 }
 
 LOGIC_TABLE(bankb,
-	asm_routine("B1", 0x7854, "record_position_trail", record_position_trail, 21),
-	c_routine("B1", 0x78E4, "start_trail_return", start_trail_return, 0, 309),
-	asm_routine("B1", 0x792A, "trail_return_step", trail_return_step, 21),
-	asm_routine("B1", 0x7AA2, "object4_step", object4_step, 21),
-	asm_routine("B1", 0x7B3E, "start_object4", start_object4, 21),
-	asm_routine("B3", 0x79D4, "draw_countdown", draw_countdown, 0),
-	asm_routine("B3", 0x7A3A, "tick_countdown", tick_countdown, 21),
-	c_routine("B3", 0x7DD6, "update_table_0fb4", update_table_0fb4, 0, OUT_F144),
-	c_routine("B3", 0x7E44, "frame_delta_bonus", frame_delta_bonus, 0, 39),
-	c_routine("B3", 0x7F52, "tick_game_timer", tick_game_timer, 0, OUT_F162),
-	c_routine("B3", 0x739A, "draw_cash_meter", draw_cash_meter, 0, OUT_F152),
-	asm_routine("B3", 0x77B4, "update_status_display", update_status_display, 45),
-	asm_routine("B3", 0x78BE, "update_time_bar", update_time_bar, 21),
-	asm_routine("B6", 0x7B82, "track_scroll_blocks", track_scroll_blocks, 21),
-	asm_routine("B6", 0x7C84, "step_pause", step_pause, 21),
+	asm_routine("B1", 0x7854, "record_position_trail", with_rts<record_position_trail>, 0),
+	c_routine("B1", 0x78E4, "start_trail_return", c_with_rts<start_trail_return>, 0, 0),
+	asm_routine("B1", 0x792A, "trail_return_step", with_rts<trail_return_step>, 0),
+	asm_routine("B1", 0x7AA2, "object4_step", with_rts<object4_step>, 0),
+	asm_routine("B1", 0x7B3E, "start_object4", with_rts<start_object4>, 0),
+	asm_routine("B3", 0x79D4, "draw_countdown", with_rts<draw_countdown>, 0),
+	asm_routine("B3", 0x7A3A, "tick_countdown", with_rts<tick_countdown>, 0),
+	c_routine("B3", 0x7DD6, "update_table_0fb4", c_with_rts<update_table_0fb4>, 0, 0),
+	c_routine("B3", 0x7E44, "frame_delta_bonus", c_with_rts<frame_delta_bonus>, 0, 0),
+	c_routine("B3", 0x7F52, "tick_game_timer", c_with_rts<tick_game_timer>, 0, 0),
+	c_routine("B3", 0x739A, "draw_cash_meter", c_with_rts<draw_cash_meter>, 0, 0),
+	asm_routine("B3", 0x77B4, "update_status_display", with_rts<update_status_display>, 0),
+	asm_routine("B3", 0x78BE, "update_time_bar", with_rts<update_time_bar>, 0),
+	asm_routine("B6", 0x7B82, "track_scroll_blocks", with_rts<track_scroll_blocks>, 0),
+	asm_routine("B6", 0x7C84, "step_pause", with_rts<step_pause>, 0),
 	c_routine("B6", 0x7CF6, "show_hint", show_hint, 0, OUT_F144),
 	asm_routine("B6", 0x7E54, "hint_countdowns", hint_countdowns, 21),
 	asm_routine("B6", 0x7F16, "show_ticket_hint", show_ticket_hint, 21),
 	asm_routine("B8", 0x7DB8, "shift_rounded", shift_rounded, 21),
-	asm_routine("B1", 0x7BBC, "animate_palette", animate_palette, 21),
+	asm_routine("B1", 0x7BBC, "animate_palette", with_rts<animate_palette>, 0),
 	c_routine("B3", 0x7ADA, "score_landing", score_landing, 0, 18 + OUT_F162),
-	c_routine("B3", 0x7446, "draw_status_line", draw_status_line, 0, 21),
+	c_routine("B3", 0x7446, "draw_status_line", c_with_rts<draw_status_line>, 0, 0),
 	asm_routine("B6", 0x7942, "follow_skater_scroll", follow_skater_scroll, 24 + 21),
 	asm_routine("B3", 0x65FE, "park_mode_step", park_mode_step, 21),
 	c_routine("B3", 0x6A1C, "load_demo_park", load_demo_park, 0, 18 + OUT_F144),
