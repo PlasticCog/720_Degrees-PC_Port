@@ -126,10 +126,12 @@ struct SteppedFrame {
 		for (int i = last; i >= 2; i--)                // MOV (SP)+,Ri
 		{
 			T.r[i] = pop();
+			f_nzv(nzw(T.r[i]));
 			pc = (uint16_t)(pc + 2);
 			step(pc, 18);
 		}
 		T.r[1] = pop();                                // MOV (SP)+,R1
+		f_nzv(nzw(T.r[1]));
 		step(0xF17C, 18);
 	}
 };
@@ -3531,13 +3533,17 @@ uint16_t score_landing(const Args &)
 			}
 			else
 				step(0x7CB0, 12);
-			// the air time's value from 0x45B1 is looked up but not used
+			// the value from 0x45B1 by 0x0FB2 is looked up but not used by the original
 			const uint8_t unused = peekb((uint16_t)(0x45B1 + R[4]));
 			R[4] = sext8(unused);
 			fl::movb(unused);
 			step(0x7CB4, 27);
 			R[4] = lw(R[4] & 0x00FF);
 			step(0x7CB8, 18);
+			// 0x0FB2 counts frames in the air over hazard tiles ("JUMPING OVER HAZARDS GIVES YOU
+			// MORE POINTS"); g_fix_hazard_bonus adds the value and keeps the total inside its
+			// 40-entry table row (below)
+			if (g_fix_hazard_bonus) R[1] = (uint16_t)(R[1] + R[4]);
 			fl::cmp(level, 2);
 			step(0x7CBE, 33);
 			if (level != 2)
@@ -3610,6 +3616,7 @@ uint16_t score_landing(const Args &)
 			}
 			else
 				step(0x7D04, 12);
+			if (g_fix_hazard_bonus && (int16_t)R[1] > 39) R[1] = 39;
 			R[4] = 0;
 			fl::clr();
 			step(0x7D06, 12);

@@ -5,6 +5,9 @@
 #include "soundcpu.h"
 #include <memory>
 
+// T-11 cycles run since power-on, exact also in the middle of a time slice (for tooling)
+uint64_t main_cycles_now();
+
 class NativeMachine : public CpuLink {
 public:
 	explicit NativeMachine(const RomSet &roms);

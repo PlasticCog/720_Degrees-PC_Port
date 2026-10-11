@@ -222,6 +222,7 @@ int main(int argc, char **argv)
 
 	auto machine = std::make_unique<NativeMachine>(roms);
 	DebugUI dbg(roms);
+	dbg.load_extras(pref_file("extras.cfg"));
 	auto start_machine = [&]() {
 		machine->reset();
 		load_eeprom(machine->board);
@@ -318,6 +319,7 @@ int main(int argc, char **argv)
 			in.coin1 = in_frame.coin1;
 			in.coin2 = in_frame.coin2;
 			in.test = test_switch;
+			dbg.apply_inputs(in);
 			machine->run_frame();
 			dbg.after_frame(*machine);
 			frames_run++;
