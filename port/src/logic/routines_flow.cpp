@@ -1791,61 +1791,147 @@ void probe_ground()
 // Bank B restored; returns the index.  R1-R4 preserved (F152).
 uint16_t skater_motion_params(const Args &)
 {
-	Clock k;
-	k.save(0x9B82, 4);
-	k.at(0x9B86); T.r[4] = peek(0x01D4); k.add(24);
-	sel_b(k, 0x9B8A, 0x2C00);
-	k.at(0x9B96); T.r[0] = sext8(peekb(0x031D)); k.add(24);
-	k.at(0x9B9A); T.r[3] = sext8(peekb(0x0327)); k.add(24, 18, 12);
-	if (T.r[3] & 7)
+	c_save(3, 0x9B86);
+	T.r[4] = peek(0x01D4);                             // bank B, put back at the end
+	fl::mov(T.r[4]);
+	tick(0x9B8A, 24);
+	bank_b(0x9B8A, 0x2C00);
+	T.r[0] = sext8(peekb(0x031D));                     // the direction
+	fl::movb((uint8_t)T.r[0]);
+	tick(0x9B9A, 24);
+	T.r[3] = sext8(peekb(0x0327));                     // the terrain
+	fl::movb((uint8_t)T.r[3]);
+	tick(0x9B9E, 24);
+	const bool sloped = fl::logic((uint16_t)(T.r[3] & 0x0007)) != 0;
+	tick(0x9BA2, 18);
+	if (!sloped)
+		tick(0x9BDE, 12);                              // BEQ: the direction alone
+	else
 	{
-		T.r[1] = (uint16_t)(7 & ~T.r[3]); k.add(18, 12, 12);
-		if (T.r[1])
+		tick(0x9BA4, 12);
+		T.r[1] = 0x0007;
+		fl::mov(T.r[1]);
+		tick(0x9BA8, 18);
+		T.r[1] = fl::logic((uint16_t)(T.r[1] & ~T.r[3]));
+		tick(0x9BAA, 12);
+		if (!T.r[1])
 		{
-			// a slope: its row of the table at 0x79E8 plus 16 per step
-			T.r[1] = (uint16_t)(((int16_t)T.r[3] >> 3) << 1); k.add(12, 12, 12, 12, 12);
-			T.r[2] = (uint16_t)((T.r[3] & 7) << 4); k.add(12, 18, 12, 12, 12, 12);
-			k.at(0x9BC4); T.r[2] = (uint16_t)(T.r[2] + peek((uint16_t)(0x79E8 + T.r[1]))); k.add(27);
-			T.r[2] = (uint16_t)(T.r[2] + T.r[0]); k.add(12);
-			T.r[0] = T.r[2]; k.add(12, 12);
+			tick(0x9BCE, 12);                          // BEQ: 7, the row of a block at 0x220
+			T.r[1] = T.r[3];
+			fl::mov(T.r[1]);
+			tick(0x9BD0, 12);
+			T.r[1] = fl::logic((uint16_t)(T.r[1] & 0x0038));
+			tick(0x9BD4, 18);
+			T.r[1] = fl::asl(T.r[1]);
+			tick(0x9BD6, 12);
+			T.r[1] = fl::add(T.r[1], T.r[0]);
+			tick(0x9BD8, 12);
+			T.r[0] = T.r[1];
+			fl::mov(T.r[0]);
+			tick(0x9BDA, 12);
+			T.r[0] = fl::add(T.r[0], 0x0220);
+			tick(0x9BDE, 18);
 		}
 		else
 		{
-			T.r[1] = (uint16_t)(((T.r[3] & 0x0038) << 1) + T.r[0]); k.add(12, 18, 12, 12);
-			T.r[0] = (uint16_t)(T.r[1] + 0x0220); k.add(12, 18);
+			tick(0x9BAC, 12);                          // the row table at 0x79E8
+			T.r[1] = T.r[3];
+			fl::mov(T.r[1]);
+			tick(0x9BAE, 12);
+			for (uint16_t pc = 0x9BB0; pc <= 0x9BB4; pc += 2)
+			{
+				T.r[1] = fl::asr(T.r[1]);
+				tick(pc, 12);
+			}
+			T.r[1] = fl::asl(T.r[1]);
+			tick(0x9BB6, 12);
+			T.r[2] = T.r[3];
+			fl::mov(T.r[2]);
+			tick(0x9BB8, 12);
+			T.r[2] = fl::logic((uint16_t)(T.r[2] & 0x0007));
+			tick(0x9BBC, 18);
+			for (uint16_t pc = 0x9BBE; pc <= 0x9BC4; pc += 2)
+			{
+				T.r[2] = fl::asl(T.r[2]);
+				tick(pc, 12);
+			}
+			T.r[2] = fl::add(T.r[2], peek((uint16_t)(0x79E8 + T.r[1])));
+			tick(0x9BC8, 27);
+			T.r[2] = fl::add(T.r[2], T.r[0]);
+			tick(0x9BCA, 12);
+			T.r[0] = T.r[2];
+			fl::mov(T.r[0]);
+			tick(0x9BCC, 12);
+			tick(0x9BDE, 12);                          // BR
 		}
 	}
-	T.r[1] = (uint16_t)(T.r[0] << 1); k.add(12, 12);
-	k.at(0x9BE2); poke(0x02E2, peek((uint16_t)(0x6048 + T.r[1]))); k.add(42);
-	k.at(0x9BE8); poke(0x02E4, peek((uint16_t)(0x6588 + T.r[1]))); k.add(42);
-	k.at(0x9BEE); poke(0x02E6, peek((uint16_t)(0x6AC8 + T.r[1]))); k.add(42);
-	k.at(0x9BF4);
-	const bool ramp = peekb(0x01EA) != 0;
-	k.add(24, 12);
+	T.r[1] = T.r[0];
+	fl::mov(T.r[1]);
+	tick(0x9BE0, 12);
+	T.r[1] = fl::asl(T.r[1]);
+	tick(0x9BE2, 12);
+	static const struct { uint16_t table, to, next; } factor[3] = {
+		{0x6048, 0x02E2, 0x9BE8}, {0x6588, 0x02E4, 0x9BEE}, {0x6AC8, 0x02E6, 0x9BF4},
+	};
+	for (const auto &f : factor)                       // the direction factors
+	{
+		const uint16_t v = peek((uint16_t)(f.table + T.r[1]));
+		fl::mov(v);
+		poke(f.to, v);
+		tick(f.next, 42);
+	}
+	const uint8_t ramp = peekb(0x01EA);
+	fl::tstb(ramp);
+	tick(0x9BF8, 24);
 	if (ramp)
 	{
-		k.at(0x9BFA); T.r[2] = sext8(peekb((uint16_t)(0x7668 + T.r[0]))); k.add(27);
-		k.at(0x9BFE); poke(0x02EE, T.r[2]); k.add(27);
-		k.at(0x9C02);
-		const bool park3 = peekb(0x0F59) == 3;
-		k.add(30, 12);
-		if (park3)
+		tick(0x9BFA, 12);                              // the gravity
+		T.r[2] = sext8(peekb((uint16_t)(0x7668 + T.r[0])));
+		fl::movb((uint8_t)T.r[2]);
+		tick(0x9BFE, 27);
+		poke(0x02EE, T.r[2]);
+		fl::mov(T.r[2]);
+		tick(0x9C02, 27);
+		const uint8_t level = peekb(0x0F59);
+		fl::cmpb(level, 0x03);
+		tick(0x9C08, 30);
+		if (level != 3)
+			tick(0x9C54, 12);                          // BNE
+		else
 		{
-			k.add(12, 12);
-			if (T.r[2] & 0x8000)
+			tick(0x9C0A, 12);                          // park 3: halved below the speed limit
+			fl::tst(T.r[2]);
+			tick(0x9C0C, 12);
+			if ((int16_t)T.r[2] >= 0)
+				tick(0x9C54, 12);                      // BGE
+			else
 			{
-				k.at(0x9C0E);
-				const bool moving = (int16_t)peek(0x01B4) > 0;
-				k.add(24, 12);
-				if (moving)
+				tick(0x9C0E, 12);
+				const uint16_t speed = peek(0x01B4);
+				fl::tst(speed);
+				tick(0x9C12, 24);
+				if ((int16_t)speed <= 0)
+					tick(0x9C54, 12);                  // BLE
+				else
 				{
-					k.at(0x9C14); T.r[1] = (uint16_t)(sext8(peekb(0x025C)) << 1); k.add(24, 12);
-					k.at(0x9C1A);
-					const bool slow = (int16_t)peek(0x01B4) < (int16_t)peek((uint16_t)(0x7C68 + T.r[1]));
-					k.add(39, 12);
-					if (slow)
+					tick(0x9C14, 12);
+					T.r[1] = sext8(peekb(0x025C));
+					fl::movb((uint8_t)T.r[1]);
+					tick(0x9C18, 24);
+					T.r[1] = fl::asl(T.r[1]);
+					tick(0x9C1A, 12);
+					const uint16_t speed2 = peek(0x01B4);
+					const uint16_t limit = peek((uint16_t)(0x7C68 + T.r[1]));
+					fl::cmp(speed2, limit);
+					tick(0x9C20, 39);
+					if ((int16_t)speed2 >= (int16_t)limit)
+						tick(0x9C54, 12);              // BGE
+					else
 					{
-						k.at(0x9C22); poke(0x02EE, (uint16_t)((int16_t)peek(0x02EE) >> 1)); k.add(27, 12);
+						tick(0x9C22, 12);
+						poke(0x02EE, fl::asr(peek(0x02EE)));
+						tick(0x9C26, 27);
+						tick(0x9C54, 12);              // BR
 					}
 				}
 			}
@@ -1853,32 +1939,56 @@ uint16_t skater_motion_params(const Args &)
 	}
 	else
 	{
-		T.r[2] = (uint16_t)(7 & ~T.r[3]); k.add(18, 12, 12);
-		if (T.r[2])
+		tick(0x9C28, 12);                              // BEQ: the jump values
+		T.r[2] = 0x0007;
+		fl::mov(T.r[2]);
+		tick(0x9C2C, 18);
+		T.r[2] = fl::logic((uint16_t)(T.r[2] & ~T.r[3]));
+		tick(0x9C2E, 12);
+		if (!T.r[2])
 		{
-			k.at(0x9C30); pokeb(0x02EA, peekb((uint16_t)(0x7008 + T.r[0]))); k.add(42);
-			k.at(0x9C36); pokeb(0x02EB, 0); k.add(27);
-			k.at(0x9C3A);
-			const bool any = peek(0x02EA) != 0;
-			k.add(24, 12);
-			if (any)
-			{
-				k.at(0x9C40); poke(0x02EA, (uint16_t)(peek(0x02EA) + 1)); k.add(27);
-			}
-			k.at(0x9C44); poke(0x02EC, peek((uint16_t)(0x7228 + T.r[1]))); k.add(42, 12);
+			tick(0x9C4C, 12);                          // BEQ
+			clr_w(0x02EA, 0x9C50);
+			clr_w(0x02EC, 0x9C54);
 		}
 		else
 		{
-			k.at(0x9C4C); poke(0x02EA, 0); k.add(27);
-			k.at(0x9C50); poke(0x02EC, 0); k.add(27);
+			tick(0x9C30, 12);
+			{
+				const uint8_t v = peekb((uint16_t)(0x7008 + T.r[0]));
+				fl::movb(v);
+				pokeb(0x02EA, v);
+			}
+			tick(0x9C36, 42);
+			clr_b(0x02EB, 0x9C3A);
+			const uint16_t jump = peek(0x02EA);
+			fl::tst(jump);
+			tick(0x9C3E, 24);
+			if (!jump)
+				tick(0x9C44, 12);                      // BEQ
+			else
+			{
+				tick(0x9C40, 12);
+				poke(0x02EA, fl::inc(peek(0x02EA)));
+				tick(0x9C44, 27);
+			}
+			{
+				const uint16_t v = peek((uint16_t)(0x7228 + T.r[1]));
+				fl::mov(v);
+				poke(0x02EC, v);
+			}
+			tick(0x9C4A, 42);
+			tick(0x9C54, 12);                          // BR
 		}
 	}
-	k.at(0x9C54); poke(0x01D4, T.r[4]); k.add(27);
-	k.at(0x9C58); poke(0x1402, T.r[4]); k.add(27);
-	const uint16_t r0 = T.r[0];
-	k.restore(4);
-	k.leave();
-	return r0;
+	poke(0x01D4, T.r[4]);
+	fl::mov(T.r[4]);
+	tick(0x9C58, 27);
+	poke(0x1402, T.r[4]);
+	fl::mov(T.r[4]);
+	tick(0x9C5C, 27);
+	c_restore(3);
+	return T.r[0];
 }
 
 // F:9FB4  skater_take_off(): leave the ramp (0x01EA = 0): skater state saved (B3:7A9E) unless
@@ -5205,161 +5315,305 @@ void trace_cells()
 // the jump's z velocity (F:80FA).
 void check_terrain()
 {
-	Clock k;
-	k.at(0x9A32); T.r[1] = peek(0x0304); k.add(24);
-	k.at(0x9A36);
-	const bool ramp = peekb(0x01EA) != 0;
-	k.add(24, 12);
+	T.r[1] = peek(0x0304);                             // the probed cell's terrain code
+	fl::mov(T.r[1]);
+	tick(0x9A36, 24);
+	const uint8_t ramp = peekb(0x01EA);
+	fl::tstb(ramp);
+	tick(0x9A3A, 24);
 	if (ramp)
 	{
-		k.at(0x9A3C); T.r[0] = peek(0x06B2); k.add(24);
-		k.at(0x9A40); T.r[0] = (uint16_t)(T.r[0] - peek(0x06B0)); k.add(24, 18, 12);
-		if ((int16_t)T.r[0] <= 0)
-		{
-			k.at(0x9A48); T.r[2] = sext8(peekb(0x0327)); k.add(24, 12, 12);
-			if (T.r[2] != T.r[1])
-			{
-				T.r[2] = (uint16_t)(7 & ~T.r[1]);
-				k.add(18, 12, 12);
-				if (T.r[2])
-				{
-					T.r[2] = 0x1800; k.add(18);
-					k.at(0x9A5C); poke(0x01D2, T.r[2]); k.add(27);
-					k.at(0x9A60); poke(0x1400, T.r[2]); k.add(27);
-					push(T.r[1]); k.add(24);
-					k.call(0x51EE, 0x9A6A);            // A5:51EE
-					T.r[2] = 0x0800; k.add(18);
-					k.at(0x9A6E); poke(0x01D2, T.r[2]); k.add(27);
-					k.at(0x9A72); poke(0x1400, T.r[2]); k.add(27);
-					T.r[3] = T.r[0]; k.add(12);
-					k.at(0x9A78); T.r[2] = peek(0x01B4); k.add(24, 12);
-					if ((int16_t)T.r[2] < 0)
-					{
-						T.r[0] = (uint16_t)-T.r[0];
-						k.add(12);
-					}
-					k.add(12, 12);
-					if ((int16_t)T.r[0] > 0)
-					{
-						T.r[3] = sext8((uint8_t)(T.r[3] >> 8)); k.add(12, 12);
-						poke(T.r[6], T.r[3]); k.add(21);
-						push(T.r[2]); k.add(24);
-						poke(T.r[6], (uint16_t)((int16_t)rw(T.r[6]) >> 2)); k.add(21, 21);
-						k.call(0x80D8, 0x9A94);        // mul16
-						T.r[0] = (uint16_t)(T.r[0] - 0x1200);
-						T.r[6] = (uint16_t)(T.r[6] + 2);
-						k.add(18, 18);
-					}
-					T.r[6] = (uint16_t)(T.r[6] + 2);
-					k.add(18);
-				}
-			}
-		}
-		k.add(12, 12);
+		// on a ramp: he takes off when object 1 is above it or the ramp is steep enough
+		tick(0x9A3C, 12);
+		T.r[0] = peek(0x06B2);
+		fl::mov(T.r[0]);
+		tick(0x9A40, 24);
+		T.r[0] = fl::sub(T.r[0], peek(0x06B0));
+		tick(0x9A44, 24);
+		T.psw = (uint8_t)(T.psw & ~(CF | VF));
+		tick(0x9A46, 18);                              // CCC CV
 		if ((int16_t)T.r[0] > 0)
+			tick(0x9A9C, 12);                          // BGT
+		else
 		{
-			k.call(0x9F8A, 0x9AA4);                    // skater_jump
-			k.add(12);
-		}
-	}
-	else
-	{
-		k.at(0x9AA6);
-		const bool falling = (int16_t)peek(0x05B2) < (int16_t)peek(0x05B0);
-		k.add(36, 12);
-		if (falling)
-		{
-			k.at(0x9AAE); T.r[0] = peek(0x06B2); k.add(24);
-			k.at(0x9AB2); T.r[0] = (uint16_t)(T.r[0] + peek(0x05B2)); k.add(24);
-			k.at(0x9AB6); T.r[2] = peek(0x06B0); k.add(24);
-			k.at(0x9ABA); T.r[2] = (uint16_t)(T.r[2] + peek(0x05B0)); k.add(24);
-			T.r[0] = (uint16_t)(T.r[0] - T.r[2]); k.add(12, 18, 12);
-			if ((int16_t)T.r[0] < 0x0040)
+			tick(0x9A48, 12);
+			T.r[2] = sext8(peekb(0x0327));
+			fl::movb((uint8_t)T.r[2]);
+			tick(0x9A4C, 24);
+			fl::cmp(T.r[2], T.r[1]);
+			tick(0x9A4E, 12);
+			if (T.r[2] == T.r[1])
+				tick(0x9A9C, 12);                      // BEQ
+			else
 			{
-				push(0x0047); k.add(30);
-				k.call(0x8E78, 0x9ACE);                // queue_sound
-				poke(T.r[6], 0x004B); k.add(27);
-				k.call(0x8E78, 0x9AD6);
-				poke(T.r[6], T.r[1]); k.add(21);
-				k.call(0xA090, 0x9ADC);                // skater_touch_down
-				sel_ab(k, 0x9ADC, 0x3800, 0x3C00);
-				k.at(0x9AF4);
-				const bool park3 = peekb(0x0F59) == 3;
-				k.add(30, 12);
-				if (park3)
-					k.call(0x7E98, 0x9B06);
+				tick(0x9A50, 12);
+				T.r[2] = 0x0007;
+				fl::mov(T.r[2]);
+				tick(0x9A54, 18);
+				T.r[2] = fl::logic((uint16_t)(T.r[2] & ~T.r[1]));
+				tick(0x9A56, 12);
+				if (!T.r[2])
+					tick(0x9A9C, 12);                  // BEQ: a corner code
 				else
 				{
-					k.call(0x7ADA, 0x9B00);
-					k.add(12);
+					tick(0x9A58, 12);                  // the new slope (bank A 0x1800 by R2)
+					T.r[2] = 0x1800;
+					fl::mov(T.r[2]);
+					tick(0x9A5C, 18);
+					poke(0x01D2, T.r[2]);
+					fl::mov(T.r[2]);
+					tick(0x9A60, 27);
+					poke(0x1400, T.r[2]);
+					fl::mov(T.r[2]);
+					tick(0x9A64, 27);
+					push(T.r[1]);
+					fl::mov(T.r[1]);
+					tick(0x9A66, 24);
+					jsr(0x9A6A, 0x51EE);               // slope_height
+					T.r[2] = 0x0800;
+					fl::mov(T.r[2]);
+					tick(0x9A6E, 18);
+					poke(0x01D2, T.r[2]);
+					fl::mov(T.r[2]);
+					tick(0x9A72, 27);
+					poke(0x1400, T.r[2]);
+					fl::mov(T.r[2]);
+					tick(0x9A76, 27);
+					T.r[3] = T.r[0];
+					fl::mov(T.r[3]);
+					tick(0x9A78, 12);
+					T.r[2] = peek(0x01B4);
+					fl::mov(T.r[2]);
+					tick(0x9A7C, 24);
+					if ((int16_t)T.r[2] >= 0)
+						tick(0x9A80, 12);              // BGE
+					else
+					{
+						tick(0x9A7E, 12);
+						T.r[0] = fl::neg(T.r[0]);
+						tick(0x9A80, 12);
+					}
+					fl::tst(T.r[0]);
+					tick(0x9A82, 12);
+					if ((int16_t)T.r[0] <= 0)
+						tick(0x9A9A, 12);              // BLE
+					else
+					{
+						tick(0x9A84, 12);              // steep enough for the speed?
+						T.r[3] = fl::swab(T.r[3]);
+						tick(0x9A86, 12);
+						T.r[3] = sext8((uint8_t)T.r[3]);
+						fl::movb((uint8_t)T.r[3]);
+						tick(0x9A88, 12);
+						poke(T.r[6], T.r[3]);
+						fl::mov(T.r[3]);
+						tick(0x9A8A, 21);
+						push(T.r[2]);
+						fl::mov(T.r[2]);
+						tick(0x9A8C, 24);
+						poke(T.r[6], fl::asr(peek(T.r[6])));
+						tick(0x9A8E, 21);
+						poke(T.r[6], fl::asr(peek(T.r[6])));
+						tick(0x9A90, 21);
+						jsr(0x9A94, 0x80D8);           // mul16
+						T.r[0] = fl::sub(T.r[0], 0x1200);
+						tick(0x9A98, 18);
+						drop(0x9A98);
+					}
+					drop(0x9A9A);
 				}
-				T.r[6] = (uint16_t)(T.r[6] + 2);
-				k.add(18);
 			}
 		}
-	}
-	k.at(0x9B08); T.r[0] = sext8(peekb(0x0327)); k.add(24);
-	fl::cmp(T.r[0], T.r[1]);
-	k.add(12, 12);
-	if (T.r[0] == T.r[1])
-	{
-		k.leave();
-		return;
-	}
-	T.r[2] = (uint16_t)(7 & ~T.r[1]);
-	f_nzv(nzw(T.r[2]));
-	k.add(18, 12, 12);
-	if (!T.r[2])
-	{
-		k.leave();
-		return;
-	}
-	k.at(0x9B18); T.r[2] = sext8(peekb(0x032D)); k.add(24, 12, 12);
-	if (T.r[1] == T.r[2])
-	{
-		k.at(0x9B20); T.r[2] = sext8(peekb(0x032C)); k.add(24);
-		T.r[2] = (uint16_t)(T.r[2] - 1); k.add(12);
-		k.at(0x9B26); pokeb(0x032C, (uint8_t)T.r[2]); k.add(27, 12);
+		fl::tst(T.r[0]);
+		tick(0x9A9E, 12);
+		if ((int16_t)T.r[0] <= 0)
+			tick(0x9B08, 12);                          // BLE
+		else
+		{
+			tick(0x9AA0, 12);
+			jsr(0x9AA4, 0x9F8A);                       // skater_jump
+			tick(0x9B08, 12);                          // BR
+		}
 	}
 	else
 	{
-		k.at(0x9B2C); pokeb(0x032C, 0x0A); k.add(33);
-	}
-	k.at(0x9B32); pokeb(0x032D, (uint8_t)T.r[0]); k.add(27);
-	T.r[2] = (uint16_t)(7 & ~T.r[0]); k.add(18, 12, 12);
-	if (!T.r[2])
-	{
-		k.add(18, 12);
-		if (!(T.r[1] & 7))
+		// in the air: close enough above the ground while falling, he lands
+		tick(0x9AA6, 12);                              // BEQ
+		const uint16_t vz = peek(0x05B2);
+		const uint16_t vz0 = peek(0x05B0);
+		fl::cmp(vz, vz0);
+		tick(0x9AAC, 36);
+		if ((int16_t)vz >= (int16_t)vz0)
+			tick(0x9B08, 12);                          // BGE
+		else
 		{
-			k.at(0x9B44); T.r[0] = sext8(peekb(0x031D)); k.add(24);
-			k.at(0x9B48); pokeb(0x031D, peekb((uint16_t)(0xFCE0 + T.r[0]))); k.add(42);
+			tick(0x9AAE, 12);
+			T.r[0] = peek(0x06B2);
+			fl::mov(T.r[0]);
+			tick(0x9AB2, 24);
+			T.r[0] = fl::add(T.r[0], peek(0x05B2));
+			tick(0x9AB6, 24);
+			T.r[2] = peek(0x06B0);
+			fl::mov(T.r[2]);
+			tick(0x9ABA, 24);
+			T.r[2] = fl::add(T.r[2], peek(0x05B0));
+			tick(0x9ABE, 24);
+			T.r[0] = fl::sub(T.r[0], T.r[2]);
+			tick(0x9AC0, 12);
+			fl::cmp(T.r[0], 0x0040);
+			tick(0x9AC4, 18);
+			if ((int16_t)T.r[0] >= 0x40)
+				tick(0x9B08, 12);                      // BGE
+			else
+			{
+				tick(0x9AC6, 12);
+				push(0x0047);
+				fl::mov(0x0047);
+				tick(0x9ACA, 30);
+				jsr(0x9ACE, 0x8E78);                   // queue_sound(0x47)
+				poke(T.r[6], 0x004B);
+				fl::mov(0x004B);
+				tick(0x9AD2, 27);
+				jsr(0x9AD6, 0x8E78);                   // queue_sound(0x4B)
+				poke(T.r[6], T.r[1]);
+				fl::mov(T.r[1]);
+				tick(0x9AD8, 21);
+				jsr(0x9ADC, 0xA090);                   // skater_touch_down
+				bank_a(0x9ADC, 0x3800);
+				bank_b(0x9AE8, 0x3C00);
+				const uint8_t level = peekb(0x0F59);
+				fl::cmpb(level, 0x03);
+				tick(0x9AFA, 30);
+				if (level == 3)
+				{
+					tick(0x9B02, 12);                  // BEQ
+					jsr(0x9B06, 0x7E98);
+				}
+				else
+				{
+					tick(0x9AFC, 12);
+					jsr(0x9B00, 0x7ADA);               // score_landing
+					tick(0x9B06, 12);                  // BR
+				}
+				drop(0x9B06);
+			}
 		}
 	}
-	k.at(0x9B4E); pokeb(0x0327, (uint8_t)T.r[1]); k.add(27);
-	k.call(0x9B82, 0x9B56);                            // skater_motion_params
-	k.at(0x9B56);
-	const uint8_t ramp2 = peekb(0x01EA);
-	k.add(24, 12);
-	if (ramp2)
+	// a new terrain is taken over
+	T.r[0] = sext8(peekb(0x0327));
+	fl::movb((uint8_t)T.r[0]);
+	tick(0x9B0C, 24);
+	fl::cmp(T.r[0], T.r[1]);
+	tick(0x9B0E, 12);
+	if (T.r[0] == T.r[1])
 	{
-		fl::tstb(ramp2);
-		k.leave();
+		tick(0x9B80, 12);                              // BEQ
+		rts();
 		return;
 	}
-	k.at(0x9B5C); push(peek(0x01B4)); k.add(36);
-	k.at(0x9B60); push(peek(0x02EC)); k.add(36);
-	k.call(0x80FA, 0x9B68);                            // mul32
-	k.at(0x9B68); pokeb(0x07F8, peekb(0x0205)); k.add(39);
-	k.at(0x9B6E); poke(0x05B0, peek(0x0206)); k.add(39);
-	k.at(0x9B74);
-	const bool carried = peekb(0x0EA0) != 0;
-	k.add(24, 12);
-	if (carried) k.call(0xD6BE, 0x9B7E);
-	fl::cmp(rw(T.r[6]), rw((uint16_t)(T.r[6] + 2)));
-	T.r[6] = (uint16_t)(T.r[6] + 4);
-	k.add(24);
-	k.leave();
+	tick(0x9B10, 12);
+	T.r[2] = 0x0007;
+	fl::mov(T.r[2]);
+	tick(0x9B14, 18);
+	T.r[2] = fl::logic((uint16_t)(T.r[2] & ~T.r[1]));
+	tick(0x9B16, 12);
+	if (!T.r[2])
+	{
+		tick(0x9B80, 12);                              // BEQ: not to a corner code
+		rts();
+		return;
+	}
+	tick(0x9B18, 12);
+	T.r[2] = sext8(peekb(0x032D));
+	fl::movb((uint8_t)T.r[2]);
+	tick(0x9B1C, 24);
+	fl::cmp(T.r[1], T.r[2]);
+	tick(0x9B1E, 12);
+	if (T.r[1] == T.r[2])
+	{
+		tick(0x9B20, 12);                              // the same one again: counted down
+		T.r[2] = sext8(peekb(0x032C));
+		fl::movb((uint8_t)T.r[2]);
+		tick(0x9B24, 24);
+		T.r[2] = fl::dec(T.r[2]);
+		tick(0x9B26, 12);
+		pokeb(0x032C, (uint8_t)T.r[2]);
+		fl::movb((uint8_t)T.r[2]);
+		tick(0x9B2A, 27);
+		tick(0x9B32, 12);                              // BR
+	}
+	else
+	{
+		tick(0x9B2C, 12);                              // BNE
+		set_b(0x032C, 0x0A, 0x9B32);
+	}
+	pokeb(0x032D, (uint8_t)T.r[0]);
+	fl::movb((uint8_t)T.r[0]);
+	tick(0x9B36, 27);
+	T.r[2] = 0x0007;
+	fl::mov(T.r[2]);
+	tick(0x9B3A, 18);
+	T.r[2] = fl::logic((uint16_t)(T.r[2] & ~T.r[0]));
+	tick(0x9B3C, 12);
+	if (T.r[2])
+		tick(0x9B4E, 12);                              // BNE
+	else
+	{
+		tick(0x9B3E, 12);                              // leaving a corner code
+		const bool sloped = fl::logic((uint16_t)(T.r[1] & 0x0007)) != 0;
+		tick(0x9B42, 18);
+		if (sloped)
+			tick(0x9B4E, 12);                          // BNE
+		else
+		{
+			tick(0x9B44, 12);                          // onto the flat: the direction mapped
+			T.r[0] = sext8(peekb(0x031D));
+			fl::movb((uint8_t)T.r[0]);
+			tick(0x9B48, 24);
+			{
+				const uint8_t v = peekb((uint16_t)(0xFCE0 + T.r[0]));
+				fl::movb(v);
+				pokeb(0x031D, v);
+			}
+			tick(0x9B4E, 42);
+		}
+	}
+	pokeb(0x0327, (uint8_t)T.r[1]);
+	fl::movb((uint8_t)T.r[1]);
+	tick(0x9B52, 27);
+	jsr(0x9B56, 0x9B82);                               // skater_motion_params
+	const uint8_t ramp2 = peekb(0x01EA);
+	fl::tstb(ramp2);
+	tick(0x9B5A, 24);
+	if (ramp2)
+	{
+		tick(0x9B80, 12);                              // BNE
+		rts();
+		return;
+	}
+	tick(0x9B5C, 12);                                  // in the air: the jump's z velocity
+	push_w(0x01B4, 0x9B60);
+	push_w(0x02EC, 0x9B64);
+	jsr(0x9B68, 0x80FA);                               // mul32
+	{
+		const uint8_t v = peekb(0x0205);
+		fl::movb(v);
+		pokeb(0x07F8, v);
+	}
+	tick(0x9B6E, 39);
+	copy_w(0x0206, 0x05B0, 0x9B74);
+	const uint8_t carried = peekb(0x0EA0);
+	fl::tstb(carried);
+	tick(0x9B78, 24);
+	if (!carried)
+		tick(0x9B7E, 12);                              // BEQ
+	else
+	{
+		tick(0x9B7A, 12);
+		jsr(0x9B7E, 0xD6BE);                           // slope_of_object_0ea0
+	}
+	drop2(0x9B7E);
+	rts();
 }
 
 
