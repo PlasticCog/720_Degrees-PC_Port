@@ -296,6 +296,10 @@ public:
 	// move a definition (world offsets inside its cell, 0..0x3FFF): patches of its x and y words
 	std::vector<Patch> encode_definition_position(int def, uint16_t x, uint16_t y) const;
 
+	// a map object as the game places it from a list entry (type, descriptor): definition,
+	// position, initial direction and frame (rom: the entry's offset, 0 if not from the ROM)
+	MapObject place(ObjectSource src, int stage, int index, int type, uint16_t desc, bool dynamic, uint32_t rom) const;
+
 private:
 	const RomSet *m_roms = nullptr;
 	RomView anim_view() const;
@@ -304,7 +308,6 @@ private:
 	void name_frames();
 	void collect_animations();
 	void decode_objects();
-	MapObject place(ObjectSource src, int stage, int index, int type, uint16_t desc, bool dynamic, uint32_t rom) const;
 };
 
 }   // namespace sprites
