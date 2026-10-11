@@ -4599,310 +4599,551 @@ void check_wall()
 //                    of bits 0-2: digit, digit block, F:BA9A / F:BA96 counters, small digit
 // The arguments of the screen part stay on the stack; the counter formats pass their last
 // argument in that slot.  R1-R5 preserved (F162).
-uint16_t run_text_script(const Args &a)
+uint16_t run_text_script(const Args &)
 {
-	Clock k;
-	k.save(0xA9FC, 5);
-	k.at(0xAA00); push(peek(0x01D2)); k.add(36);
-	k.at(0xAA04); push(peek(0x01D4)); k.add(36);
-	sel_b(k, 0xAA08, 0x2800);
-	T.r[2] = a.u(0); k.add(27);
-	k.at(0xAA18);
-	const bool block = (int16_t)peek(T.r[2]) >= 0x4000;
-	k.add(24, 12);
-	if (block)
+	c_save(4, 0xAA00);
+	push_w(0x01D2, 0xAA04);                            // the banks, put back at the end
+	push_w(0x01D4, 0xAA08);
+	bank_b(0xAA08, 0x2800);
+	T.r[2] = peek((uint16_t)(T.r[6] + 0x12));          // the script
+	fl::mov(T.r[2]);
+	tick(0xAA18, 27);
 	{
-		k.at(0xAA1E); push(peek(T.r[2])); k.add(30);
-		push(0); k.add(24);
-		k.call(0xEAD4, 0xAA26);                        // draw_tile_block
-		T.r[2] = (uint16_t)(T.r[2] + 2); k.add(18, 12);
-	}
-	else
-	{
-		sel_a(k, 0xAA2C, 0x3800);
-		push(T.r[2]); k.add(24);
-		push(0); k.add(24);
-		k.call(0x4D30, 0xAA40);
-		T.r[2] = (uint16_t)(T.r[2] + 4); k.add(18);
-	}
-	// the level class bits of the current rating entry (0x0262 by 0x0F31 / 0x0F2B) into R0
-	auto rating_class = [&k](uint16_t pc) {
-		k.at(pc);
-		const bool two = peekb(0x0F2B) == 2;
-		k.add(30, 12);
-		T.r[0] = 0; k.add(12);
-		k.at((uint16_t)(two ? pc + 0x0A : pc + 0x12)); T.r[0] = peekb(0x0F31); k.add(24);
-		if (two)
-			k.add(12);
+		const uint16_t v = peek(T.r[2]);
+		fl::cmp(v, 0x4000);
+		tick(0xAA1C, 24);
+		if ((int16_t)v >= 0x4000)
+		{
+			tick(0xAA1E, 12);                          // the screen part: a tile block
+			{
+				const uint16_t w = peek(T.r[2]);
+				fl::mov(w);
+				push(w);
+			}
+			tick(0xAA20, 30);
+			push(0);
+			fl::clr();
+			tick(0xAA22, 24);
+			jsr(0xAA26, 0xEAD4);                       // draw_tile_block
+			T.r[2] = fl::add(T.r[2], 0x0002);
+			tick(0xAA2A, 18);
+			tick(0xAA44, 12);                          // BR
+		}
 		else
 		{
-			T.r[0]--;
-			k.add(12);
+			tick(0xAA2C, 12);                          // BLT
+			bank_a(0xAA2C, 0x3800);
+			push(T.r[2]);
+			fl::mov(T.r[2]);
+			tick(0xAA3A, 24);
+			push(0);
+			fl::clr();
+			tick(0xAA3C, 24);
+			jsr(0xAA40, 0x4D30);
+			T.r[2] = fl::add(T.r[2], 0x0004);
+			tick(0xAA44, 18);
 		}
-		k.at((uint16_t)(pc + 0x18)); T.r[0] = peekb((uint16_t)(0x0262 + T.r[0])); k.add(27, 18);
-		T.r[0] = (uint16_t)((T.r[0] >> 6) & 3); k.add(12, 12, 12, 12, 12, 12, 18);
+	}
+	// CLR Rr at pc; BISB src,Rr (cyc cycles): the byte at a, on at pc + 6
+	auto load = [](uint16_t pc, int r, uint16_t a, int cyc) {
+		T.r[r] = 0;
+		fl::clr();
+		tick((uint16_t)(pc + 2), 12);
+		T.r[r] = (uint16_t)(T.r[r] | fl::logicb(peekb(a)));
+		tick((uint16_t)(pc + 6), cyc);
+	};
+	// CMPB @#0x0F2B,#2 at pc ...: the level class bits of the current rating entry (0x0262 by
+	// 0x0F31, one less unless 0x0F2B is 2) in R0, on at pc + 0x30
+	auto rating_class = [&load](uint16_t pc) {
+		const uint8_t mode = peekb(0x0F2B);
+		fl::cmpb(mode, 0x02);
+		tick((uint16_t)(pc + 6), 30);
+		if (mode == 2)
+		{
+			tick((uint16_t)(pc + 8), 12);
+			load((uint16_t)(pc + 8), 0, 0x0F31, 24);
+			tick((uint16_t)(pc + 0x18), 12);           // BR
+		}
+		else
+		{
+			tick((uint16_t)(pc + 0x10), 12);           // BNE
+			load((uint16_t)(pc + 0x10), 0, 0x0F31, 24);
+			T.r[0] = fl::dec(T.r[0]);
+			tick((uint16_t)(pc + 0x18), 12);
+		}
+		T.r[0] = sext8(peekb((uint16_t)(0x0262 + T.r[0])));
+		fl::movb((uint8_t)T.r[0]);
+		tick((uint16_t)(pc + 0x1C), 27);
+		T.r[0] = fl::logic((uint16_t)(T.r[0] & 0x00FF));
+		tick((uint16_t)(pc + 0x20), 18);
+		for (int i = 1; i <= 6; i++)
+		{
+			T.r[0] = fl::asr(T.r[0]);
+			tick((uint16_t)(pc + 0x20 + 2 * i), 12);
+		}
+		T.r[0] = fl::logic((uint16_t)(T.r[0] & 0x0003));
+		tick((uint16_t)(pc + 0x30), 18);
+	};
+	// MOV #v,-(SP) / CLR -(SP) and the step to next
+	auto arg = [](uint16_t v, uint16_t next) {
+		push(v);
+		if (v)
+			fl::mov(v);
+		else
+			fl::clr();
+		tick(next, v ? 30 : 24);
+	};
+	// MOV R1,(SP) at pc: the number into the slot of the screen part
+	auto number = [](uint16_t pc) {
+		poke(T.r[6], T.r[1]);
+		fl::mov(T.r[1]);
+		tick((uint16_t)(pc + 2), 21);
 	};
 	for (;;)
 	{
-		k.at(0xAA44); poke(0x020C, peek(T.r[2])); T.r[2] = (uint16_t)(T.r[2] + 2); k.add(33);
-		k.at(0xAA48);
-		const bool end = peek(0x020C) == 0xFFFF;
-		k.add(30, 12);
-		if (end)
+		// 0xAA44: the next command
 		{
-			k.add(18);
+			const uint16_t v = peek(T.r[2]);
+			T.r[2] = (uint16_t)(T.r[2] + 2);
+			fl::mov(v);
+			poke(0x020C, v);
+		}
+		tick(0xAA48, 33);
+		const uint16_t cmd = peek(0x020C);
+		fl::cmp(cmd, 0xFFFF);
+		tick(0xAA4E, 30);
+		if (cmd == 0xFFFF)
+		{
+			tick(0xAA50, 12);                          // the end
+			tick(0xACC8, 18);                          // JMP
 			break;
 		}
-		T.r[3] = 0; k.add(12);
-		k.at(0xAA56); T.r[3] = peekb(0x020C); k.add(24, 12);
+		tick(0xAA54, 12);
+		load(0xAA54, 3, 0x020C, 24);
 		if (!(T.r[3] & 0x80))
 		{
-			T.r[0] = 0; k.add(12);
-			k.at(0xAA5E);
-			const uint8_t how = peekb(0x020D);
-			T.r[0] = how;
-			k.add(24);
-			T.r[0] = (uint16_t)(T.r[0] << 1); k.add(12, 27);
-			switch (how)
+			// a string, drawn by the high byte
+			tick(0xAA5C, 12);
+			load(0xAA5C, 0, 0x020D, 24);
+			T.r[0] = fl::asl(T.r[0]);
+			tick(0xAA64, 12);
+			const uint16_t at = fl::add(0xAA68, peek((uint16_t)(0xFD36 + T.r[0])));
+			tick(at, 27);                              // ADD 0xFD36(R0),PC
+			switch (at)
 			{
-			case 0:
-				T.r[0] = T.r[3]; k.add(12, 12);
-				k.call(0x8AB6, 0xAB06);                // draw_string_large
+			case 0xAA68:                               // 0: large
+				T.r[0] = T.r[3];
+				fl::mov(T.r[0]);
+				tick(0xAA6A, 12);
+				tick(0xAB02, 12);                      // BR
 				break;
-			case 1:
-				T.r[0] = T.r[3]; k.add(12);
-				k.call(0x8B04, 0xAA72);                // draw_string_small
-				break;
-			case 2:
-				rating_class(0xAA74);
-				T.r[0] = (uint16_t)(T.r[0] + T.r[3] - 1); k.add(12, 12, 12);
-				k.call(0x8AB6, 0xAB06);
-				break;
-			case 3:
-				k.call(0x5326, 0xAAAE);
-				T.r[0] = (uint16_t)(T.r[0] + T.r[3]); k.add(12, 12);
-				k.call(0x8AB6, 0xAB06);
-				break;
-			case 4:
-			case 5:
-				T.r[0] = 0; k.add(12);
-				k.at(how == 4 ? 0xAAB4 : 0xAABC); T.r[0] = peekb(how == 4 ? 0x02B8 : 0x0261); k.add(24, 12);
-				T.r[0] = (uint16_t)(T.r[0] + T.r[3]); k.add(12, 12);
-				k.call(0x8AB6, 0xAB06);
-				break;
-			case 6:
-				k.call(0x9152, 0xAAC6);                // next_random
-				T.r[1] = T.r[0] & 1; k.add(12, 18);
-				T.r[4] = (uint16_t)(T.r[1] << 1); k.add(12, 12);
-				T.r[0] = 0; k.add(12);
-				k.at(0xAAD2); T.r[0] = (uint16_t)(peekb(0x020C) + T.r[4]); k.add(24, 12);
-				k.call(0x8AB6, 0xAADC);
-				T.r[0] = 0; k.add(12);
-				k.at(0xAADE); T.r[0] = (uint16_t)(peekb(0x020C) + T.r[4] + 1); k.add(24, 12, 12, 12);
-				k.call(0x8AB6, 0xAB06);
-				break;
-			case 7:
-				k.at(0xAAE6); T.r[1] = (uint16_t)((peek(0x020A) & 1) << 1); k.add(24, 18, 12);
-				T.r[0] = (uint16_t)(T.r[1] + T.r[3]); k.add(12, 12);
-				k.call(0x8AB6, 0xAAF8);
-				T.r[0] = 0; k.add(12);
-				k.at(0xAAFA); T.r[0] = (uint16_t)(peekb(0x020C) + T.r[1] + 1); k.add(24, 12, 12);
-				k.call(0x8AB6, 0xAB06);
-				break;
-			default:                                   // past the table (next table's data): unused
+			case 0xAA6C:                               // 1: small
+				T.r[0] = T.r[3];
+				fl::mov(T.r[0]);
+				tick(0xAA6E, 12);
+				jsr(0xAA72, 0x8B04);                   // draw_string_small
+				tick(0xAA44, 12);                      // BR
 				continue;
+			case 0xAA74:                               // 2: by the level class
+				rating_class(0xAA74);
+				T.r[0] = fl::add(T.r[0], T.r[3]);
+				tick(0xAAA6, 12);
+				T.r[0] = fl::dec(T.r[0]);
+				tick(0xAAA8, 12);
+				tick(0xAB02, 12);                      // BR
+				break;
+			case 0xAAAA:                               // 3-5: by A?:5326, 0x02B8, 0x0261
+			case 0xAAB2:
+			case 0xAABA:
+				if (at == 0xAAAA)
+					jsr(0xAAAE, 0x5326);
+				else
+				{
+					load(at, 0, at == 0xAAB2 ? 0x02B8 : 0x0261, 24);
+					tick(0xAAAE, 12);                  // BR
+				}
+				T.r[0] = fl::add(T.r[0], T.r[3]);
+				tick(0xAAB0, 12);
+				tick(0xAB02, 12);                      // BR
+				break;
+			case 0xAAC2:                               // 6: a random pair
+				jsr(0xAAC6, 0x9152);                   // next_random
+				T.r[1] = T.r[0];
+				fl::mov(T.r[1]);
+				tick(0xAAC8, 12);
+				T.r[1] = fl::logic((uint16_t)(T.r[1] & 0x0001));
+				tick(0xAACC, 18);
+				T.r[4] = T.r[1];
+				fl::mov(T.r[4]);
+				tick(0xAACE, 12);
+				T.r[4] = fl::asl(T.r[4]);
+				tick(0xAAD0, 12);
+				load(0xAAD0, 0, 0x020C, 24);
+				T.r[0] = fl::add(T.r[0], T.r[4]);
+				tick(0xAAD8, 12);
+				jsr(0xAADC, 0x8AB6);                   // draw_string_large
+				load(0xAADC, 0, 0x020C, 24);
+				T.r[0] = fl::add(T.r[0], T.r[4]);
+				tick(0xAAE4, 12);
+				tick(0xAB00, 12);                      // BR
+				T.r[0] = fl::inc(T.r[0]);
+				tick(0xAB02, 12);
+				break;
+			case 0xAAE6:                               // 7: the pair by 0x020A
+				T.r[1] = peek(0x020A);
+				fl::mov(T.r[1]);
+				tick(0xAAEA, 24);
+				T.r[1] = fl::logic((uint16_t)(T.r[1] & 0x0001));
+				tick(0xAAEE, 18);
+				T.r[1] = fl::asl(T.r[1]);
+				tick(0xAAF0, 12);
+				T.r[0] = T.r[1];
+				fl::mov(T.r[0]);
+				tick(0xAAF2, 12);
+				T.r[0] = fl::add(T.r[0], T.r[3]);
+				tick(0xAAF4, 12);
+				jsr(0xAAF8, 0x8AB6);                   // draw_string_large
+				load(0xAAF8, 0, 0x020C, 24);
+				T.r[0] = fl::add(T.r[0], T.r[1]);
+				tick(0xAB00, 12);
+				T.r[0] = fl::inc(T.r[0]);
+				tick(0xAB02, 12);
+				break;
+			default:                                   // high bytes beyond the table
+				leave_to(at);
 			}
-			k.add(12);
+			jsr(0xAB06, 0x8AB6);                       // draw_string_large
+			tick(0xAA44, 12);                          // BR
 			continue;
 		}
-		T.r[0] = (uint16_t)((T.r[3] - 0x80) << 1); k.add(12, 18, 12, 27);
-		switch (T.r[3] - 0x80)
+		// a number in R1
+		tick(0xAB08, 12);                              // BMI
+		T.r[0] = T.r[3];
+		fl::mov(T.r[0]);
+		tick(0xAB0A, 12);
+		T.r[0] = fl::sub(T.r[0], 0x0080);
+		tick(0xAB0E, 18);
+		T.r[0] = fl::asl(T.r[0]);
+		tick(0xAB10, 12);
+		const uint16_t at = fl::add(0xAB14, peek((uint16_t)(0xFD46 + T.r[0])));
+		tick(at, 27);                                  // ADD 0xFD46(R0),PC
+		switch (at)
 		{
-		case 0:
-			T.r[1] = 0; k.add(12, 12);
-			break;
-		case 1: case 2: case 3: case 4:
-			k.at(0xAB14); T.r[5] = sext8(peekb(0x027A)); k.add(24);
-			T.r[0] = (uint16_t)(T.r[3] - 0x81); k.add(12, 18);
-			k.at(0xAB1E); pokeb(0x027A, (uint8_t)T.r[0]); k.add(27);
-			k.call(0x90BA, 0xAB26);                    // park_level
-			T.r[1] = T.r[0]; k.add(12);
-			k.at(0xAB28); pokeb(0x027A, (uint8_t)T.r[5]); k.add(27, 12);
-			break;
-		case 5: case 6: case 7:
-			k.at(0xAB2E); T.r[1] = peek(0x0F38); k.add(24, 12);
-			break;
-		case 8:
-			rating_class(0xAB34);
-			poke(T.r[6], 0); k.add(21);
-			k.at(0xAB66); poke(T.r[6], peekb((uint16_t)(0xFE8C + T.r[0]))); k.add(36);
-			k.call(0x90BA, 0xAB6E);
-			push(T.r[0]); k.add(24);
-			k.call(0x80D8, 0xAB74);                    // mul16
+		case 0xAB14:                                   // 0x81-0x84: the level of park n
+			T.r[5] = sext8(peekb(0x027A));
+			fl::movb((uint8_t)T.r[5]);
+			tick(0xAB18, 24);
+			T.r[0] = T.r[3];
+			fl::mov(T.r[0]);
+			tick(0xAB1A, 12);
+			T.r[0] = fl::sub(T.r[0], 0x0081);
+			tick(0xAB1E, 18);
+			pokeb(0x027A, (uint8_t)T.r[0]);
+			fl::movb((uint8_t)T.r[0]);
+			tick(0xAB22, 27);
+			jsr(0xAB26, 0x90BA);                       // park_level
 			T.r[1] = T.r[0];
-			T.r[6] = (uint16_t)(T.r[6] + 2);
-			k.add(12, 18, 12);
+			fl::mov(T.r[1]);
+			tick(0xAB28, 12);
+			pokeb(0x027A, (uint8_t)T.r[5]);
+			fl::movb((uint8_t)T.r[5]);
+			tick(0xAB2C, 27);
+			tick(0xABCC, 12);                          // BR
 			break;
-		case 9:
-			T.r[0] = 0; k.add(12);
-			k.at(0xAB7C); T.r[0] = peekb(0x0F31); k.add(24);
-			k.at(0xAB80); T.r[0] = peekb((uint16_t)(0xFE7C + T.r[0])); k.add(27, 18);
-			T.r[1] = 0; k.add(12);
-			k.at(0xAB8A); T.r[1] = peekb((uint16_t)(0xFE70 + T.r[0])); k.add(27, 12);
+		case 0xAB2E:                                   // 0x85-0x87: 0x0F38
+			T.r[1] = peek(0x0F38);
+			fl::mov(T.r[1]);
+			tick(0xAB32, 24);
+			tick(0xABCC, 12);                          // BR
 			break;
-		case 10:
-			T.r[1] = 0; k.add(12);
-			k.at(0xAB92); T.r[1] = (uint16_t)(peekb(0x01F9) >> 2); k.add(24, 12, 12, 12);
-			break;
-		case 11:
-			k.call(0x90BA, 0xABA0);
-			T.r[1] = T.r[0]; k.add(12, 12);
-			break;
-		case 12:
-			T.r[1] = 0; k.add(12);
-			k.at(0xABA6); T.r[1] = (uint16_t)(peekb(0x01F5) + 1); k.add(24, 12, 12);
-			break;
-		case 13:
-			T.r[1] = 2; k.add(18);
-			T.r[0] = 0; k.add(12);
-			k.at(0xABB4); T.r[0] = peekb(0x01F5); k.add(24);
-			T.r[1] = (uint16_t)(T.r[1] - T.r[0]); k.add(12, 12);
-			break;
-		case 14: case 15: case 16: case 17:            // the bytes 0x025C-0x025F
-			T.r[1] = 0; k.add(12);
-			k.at(0xABBE); T.r[1] = peekb((uint16_t)(0x01CE + T.r[3])); k.add(27, 12);
-			if (T.r[1] & 0x80)
+		case 0xAB34:                                   // 0x88: by the level class
+			rating_class(0xAB34);
+			poke(T.r[6], 0);
+			fl::clr();
+			tick(0xAB66, 21);
 			{
-				T.r[1] = 0;
-				k.add(12, 12);
+				const uint8_t v = peekb((uint16_t)(0xFE8C + T.r[0]));
+				fl::movb(v);
+				pokeb(T.r[6], v);
 			}
+			tick(0xAB6A, 36);
+			jsr(0xAB6E, 0x90BA);                       // park_level
+			push(T.r[0]);
+			fl::mov(T.r[0]);
+			tick(0xAB70, 24);
+			jsr(0xAB74, 0x80D8);                       // mul16
+			T.r[1] = T.r[0];
+			fl::mov(T.r[1]);
+			tick(0xAB76, 12);
+			drop(0xAB76);
+			tick(0xABCC, 12);                          // BR
 			break;
-		case 18:
-			k.at(0xABC8); T.r[1] = peek(0x0248); k.add(24);
+		case 0xAB7A:                                   // 0x89
+			load(0xAB7A, 0, 0x0F31, 24);
+			T.r[0] = sext8(peekb((uint16_t)(0xFE7C + T.r[0])));
+			fl::movb((uint8_t)T.r[0]);
+			tick(0xAB84, 27);
+			T.r[0] = fl::logic((uint16_t)(T.r[0] & 0x00FF));
+			tick(0xAB88, 18);
+			load(0xAB88, 1, (uint16_t)(0xFE70 + T.r[0]), 27);
+			tick(0xABCC, 12);                          // BR
 			break;
-		default:                                       // past the table: unused
-			continue;
+		case 0xAB90:                                   // 0x8A: 0x01F9 / 4
+			load(0xAB90, 1, 0x01F9, 24);
+			T.r[1] = fl::asr(T.r[1]);
+			tick(0xAB98, 12);
+			T.r[1] = fl::asr(T.r[1]);
+			tick(0xAB9A, 12);
+			tick(0xABCC, 12);                          // BR
+			break;
+		case 0xAB9C:                                   // 0x8B: the level
+			jsr(0xABA0, 0x90BA);                       // park_level
+			T.r[1] = T.r[0];
+			fl::mov(T.r[1]);
+			tick(0xABA2, 12);
+			tick(0xABCC, 12);                          // BR
+			break;
+		case 0xABA4:                                   // 0x8C: the park
+			load(0xABA4, 1, 0x01F5, 24);
+			T.r[1] = fl::inc(T.r[1]);
+			tick(0xABAC, 12);
+			tick(0xABCC, 12);                          // BR
+			break;
+		case 0xABAE:                                   // 0x8D: 2 - the park
+			T.r[1] = 0x0002;
+			fl::mov(T.r[1]);
+			tick(0xABB2, 18);
+			load(0xABB2, 0, 0x01F5, 24);
+			T.r[1] = fl::sub(T.r[1], T.r[0]);
+			tick(0xABBA, 12);
+			tick(0xABCC, 12);                          // BR
+			break;
+		case 0xABBC:                                   // 0x8E-0x91: 0x025C-0x025F
+			load(0xABBC, 1, (uint16_t)(0x01CE + T.r[3]), 27);
+			if (!(T.r[1] & 0x80))
+			{
+				tick(0xABCC, 12);                      // BPL
+				break;
+			}
+			tick(0xABC4, 12);                          // negative: 0
+			[[fallthrough]];
+		case 0xABC4:                                   // 0x80: zero
+			T.r[1] = 0;
+			fl::clr();
+			tick(0xABC6, 12);
+			tick(0xABCC, 12);                          // BR
+			break;
+		case 0xABC8:                                   // 0x92: the word 0x0248
+			T.r[1] = peek(0x0248);
+			fl::mov(T.r[1]);
+			tick(0xABCC, 24);
+			break;
+		default:                                       // numbers beyond the table
+			leave_to(at);
 		}
-		T.r[4] = 0; k.add(12);
-		k.at(0xABCE); T.r[4] = peekb(0x020D); k.add(24, 18, 12);
+		// the screen position: relative (bits 3-7) or the next word
+		load(0xABCC, 4, 0x020D, 24);
+		fl::logic(T.r[4] & 0x00F8);
+		tick(0xABD6, 18);
 		if (T.r[4] & 0x00F8)
 		{
-			T.r[0] = (uint16_t)((T.r[4] >> 1) & ~3); k.add(12, 12, 18);
-			k.at(0xABE0); T.r[0] = (uint16_t)(T.r[0] + peek(0x0186)); k.add(24);
-			k.at(0xABE4); poke(0x0186, T.r[0]); k.add(27);
-			k.at(0xABE8); poke(0x0186, (uint16_t)(peek(0x0186) - 0x0040)); k.add(33, 12);
+			tick(0xABD8, 12);
+			T.r[0] = T.r[4];
+			fl::mov(T.r[0]);
+			tick(0xABDA, 12);
+			T.r[0] = fl::asr(T.r[0]);
+			tick(0xABDC, 12);
+			T.r[0] = fl::logic((uint16_t)(T.r[0] & ~0x0003));
+			tick(0xABE0, 18);
+			T.r[0] = fl::add(T.r[0], peek(0x0186));
+			tick(0xABE4, 24);
+			poke(0x0186, T.r[0]);
+			fl::mov(T.r[0]);
+			tick(0xABE8, 27);
+			poke(0x0186, fl::sub(peek(0x0186), 0x0040));
+			tick(0xABEE, 33);
+			tick(0xABFA, 12);                          // BR
 		}
 		else
 		{
-			k.at(0xABF0); poke(0x0186, peek(T.r[2])); T.r[2] = (uint16_t)(T.r[2] + 2); k.add(33);
-			k.at(0xABF4); poke(0x0186, (uint16_t)(peek(0x0186) + 0x2000)); k.add(33);
-		}
-		const uint16_t format = T.r[4] & 7;
-		T.r[4] = (uint16_t)(format << 1); k.add(18, 12, 27);
-		switch (format)
-		{
-		case 0:
-			k.add(18, 12);
-			if ((int16_t)T.r[1] < 10)
+			tick(0xABF0, 12);                          // BEQ
 			{
-				T.r[4] = (uint16_t)(T.r[1] + 0x30);
-				T.r[0] = T.r[4];
-				k.add(12, 18, 12, 12);
+				const uint16_t v = peek(T.r[2]);
+				T.r[2] = (uint16_t)(T.r[2] + 2);
+				fl::mov(v);
+				poke(0x0186, v);
+			}
+			tick(0xABF4, 33);
+			poke(0x0186, fl::add(peek(0x0186), 0x2000));
+			tick(0xABFA, 33);
+		}
+		T.r[4] = fl::logic((uint16_t)(T.r[4] & 0x0007));
+		tick(0xABFE, 18);
+		T.r[4] = fl::asl(T.r[4]);
+		tick(0xAC00, 12);
+		const uint16_t form = fl::add(0xAC04, peek((uint16_t)(0xFD6C + T.r[4])));
+		tick(form, 27);                                // ADD 0xFD6C(R4),PC: the format
+		switch (form)
+		{
+		case 0xAC04:                                   // 0: a digit
+			fl::cmp(T.r[1], 0x000A);
+			tick(0xAC08, 18);
+			if ((int16_t)T.r[1] >= 0x000A)
+			{
+				tick(0xAC14, 12);                      // BGE
+				T.r[0] = 0x003D;
+				fl::mov(T.r[0]);
+				tick(0xAC18, 18);
 			}
 			else
 			{
-				T.r[0] = 0x003D;
-				k.add(18);
+				tick(0xAC0A, 12);
+				T.r[4] = T.r[1];
+				fl::mov(T.r[4]);
+				tick(0xAC0C, 12);
+				T.r[4] = fl::add(T.r[4], 0x0030);
+				tick(0xAC10, 18);
+				T.r[0] = T.r[4];
+				fl::mov(T.r[0]);
+				tick(0xAC12, 12);
+				tick(0xAC18, 12);                      // BR
 			}
-			k.call(0x8B52, 0xAC1C);                    // draw_large_char
-			k.add(12);
+			jsr(0xAC1C, 0x8B52);
+			tick(0xACC4, 12);                          // BR
 			break;
-		case 1:
+		case 0xAC1E:                                   // 1: a digit block
 		{
-			k.at(0xAC1E); T.r[0] = peek(0x0186); k.add(24);
-			k.at(0xAC22); T.r[4] = peek(0x0188); k.add(24);
-			k.at(0xAC26); poke(T.r[0], T.r[4]); k.add(21);
-			k.at(0xAC28); poke(T.r[0], (uint16_t)(peek(T.r[0]) | 0x0138)); k.add(27);
-			k.at(0xAC2C); poke((uint16_t)(T.r[0] + 2), T.r[4]); k.add(30);
-			k.at(0xAC30); poke((uint16_t)(T.r[0] + 2), (uint16_t)(peek((uint16_t)(T.r[0] + 2)) | 0x0139)); k.add(36);
-			k.at(0xAC36); poke((uint16_t)(T.r[0] + 0x80), T.r[4]); k.add(30);
-			k.at(0xAC3A); poke((uint16_t)(T.r[0] + 0x80), (uint16_t)(peek((uint16_t)(T.r[0] + 0x80)) | 0x013A)); k.add(36);
-			k.at(0xAC40); poke((uint16_t)(T.r[0] + 0x82), T.r[4]); k.add(30);
-			k.at(0xAC44); poke((uint16_t)(T.r[0] + 0x82), (uint16_t)(peek((uint16_t)(T.r[0] + 0x82)) | 0x013B)); k.add(36);
-			k.at(0xAC4A); poke(0x0186, (uint16_t)(peek(0x0186) + 4)); k.add(33);
-			poke(T.r[6], T.r[1]); k.add(21);
-			push(0); k.add(24);
-			push(3); k.add(30);
-			push(0); k.add(24, 12);
-			push(1); k.add(30);
-			k.call(0xBA9A, 0xACC0);
-			T.r[6] = (uint16_t)(T.r[6] + 8); k.add(18);
+			T.r[0] = peek(0x0186);
+			fl::mov(T.r[0]);
+			tick(0xAC22, 24);
+			T.r[4] = peek(0x0188);
+			fl::mov(T.r[4]);
+			tick(0xAC26, 24);
+			static const struct { uint16_t k, tile; } cell[4] = {
+				{0x0000, 0x0138}, {0x0002, 0x0139}, {0x0080, 0x013A}, {0x0082, 0x013B},
+			};
+			uint16_t pc = 0xAC26;
+			for (const auto &c : cell)
+			{
+				const uint16_t a = (uint16_t)(T.r[0] + c.k);
+				poke(a, T.r[4]);
+				fl::mov(T.r[4]);
+				pc = (uint16_t)(pc + (c.k ? 4 : 2));
+				tick(pc, c.k ? 30 : 21);
+				poke(a, fl::logic((uint16_t)(peek(a) | c.tile)));
+				pc = (uint16_t)(pc + (c.k ? 6 : 4));
+				tick(pc, c.k ? 36 : 27);
+			}
+			poke(0x0186, fl::add(peek(0x0186), 0x0004));
+			tick(0xAC50, 33);
+			number(0xAC50);
+			arg(0, 0xAC54);
+			arg(3, 0xAC58);
+			arg(0, 0xAC5A);
+			tick(0xACB8, 12);                          // BR
+			arg(1, 0xACBC);
+			jsr(0xACC0, 0xBA9A);
+			T.r[6] = fl::add(T.r[6], 0x0008);
+			tick(0xACC4, 18);
 			break;
 		}
-		case 2:
-			poke(T.r[6], T.r[1]); k.add(21);
-			push(0); k.add(24);
-			push(4); k.add(30, 12);
-			push(1); k.add(30);
-			push(1); k.add(30);
-			k.call(0xBA9A, 0xACC0);
-			T.r[6] = (uint16_t)(T.r[6] + 8); k.add(18);
+		case 0xAC5C:                                   // 2
+			number(0xAC5C);
+			arg(0, 0xAC60);
+			arg(4, 0xAC64);
+			tick(0xACB4, 12);                          // BR
+			arg(1, 0xACB8);
+			arg(1, 0xACBC);
+			jsr(0xACC0, 0xBA9A);
+			T.r[6] = fl::add(T.r[6], 0x0008);
+			tick(0xACC4, 18);
 			break;
-		case 3:
-			poke(T.r[6], T.r[1]); k.add(21);
-			push(0); k.add(24);
-			push(2); k.add(30);
-			push(1); k.add(30);
-			push(0); k.add(24, 12);
-			k.call(0xBA9A, 0xACC0);
-			T.r[6] = (uint16_t)(T.r[6] + 8); k.add(18);
+		case 0xAC66:                                   // 3
+			number(0xAC66);
+			arg(0, 0xAC6A);
+			arg(2, 0xAC6E);
+			arg(1, 0xAC72);
+			arg(0, 0xAC74);
+			tick(0xACBC, 12);                          // BR
+			jsr(0xACC0, 0xBA9A);
+			T.r[6] = fl::add(T.r[6], 0x0008);
+			tick(0xACC4, 18);
 			break;
-		case 4:
-			k.at(0xAC76); poke(T.r[6], peek(0x023E)); k.add(33);
-			k.at(0xAC7A); push(peek(0x0240)); k.add(36);
-			push(6); k.add(30);
-			push(0); k.add(24);
-			push(1); k.add(30, 12);
-			k.call(0xBA96, 0xAC9C);
-			T.r[6] = (uint16_t)(T.r[6] + 8); k.add(12, 18);
+		case 0xAC76:                                   // 4: the counters 0x023E / 0x0240
+		case 0xAC8A:                                   // 5: the counter 0x0242
+		{
+			const bool pair = form == 0xAC76;
+			{
+				const uint16_t v = peek(pair ? 0x023E : 0x0242);
+				fl::mov(v);
+				poke(T.r[6], v);
+			}
+			tick((uint16_t)(form + 4), 33);
+			if (pair)
+			{
+				push_w(0x0240, 0xAC7E);
+				arg(6, 0xAC82);
+				arg(0, 0xAC84);
+				arg(1, 0xAC88);
+				tick(0xAC98, 12);                      // BR
+			}
+			else
+			{
+				arg(0, 0xAC90);
+				arg(3, 0xAC94);
+				arg(0, 0xAC96);
+				arg(0, 0xAC98);
+			}
+			jsr(0xAC9C, 0xBA96);
+			tick(0xACC0, 12);                          // BR
+			T.r[6] = fl::add(T.r[6], 0x0008);
+			tick(0xACC4, 18);
 			break;
-		case 5:
-			k.at(0xAC8A); poke(T.r[6], peek(0x0242)); k.add(33);
-			push(0); k.add(24);
-			push(3); k.add(30);
-			push(0); k.add(24);
-			push(0); k.add(24);
-			k.call(0xBA96, 0xAC9C);
-			T.r[6] = (uint16_t)(T.r[6] + 8); k.add(12, 18);
-			break;
-		case 6:
-			T.r[4] = (uint16_t)(T.r[1] + 0x30);
+		}
+		case 0xAC9E:                                   // 6: a small digit
+			T.r[4] = T.r[1];
+			fl::mov(T.r[4]);
+			tick(0xACA0, 12);
+			T.r[4] = fl::add(T.r[4], 0x0030);
+			tick(0xACA4, 18);
 			T.r[0] = T.r[4];
-			k.add(12, 18, 12);
-			k.call(0x8C12, 0xACAA);                    // put_small_char
-			k.add(12);
+			fl::mov(T.r[0]);
+			tick(0xACA6, 12);
+			jsr(0xACAA, 0x8C12);
+			tick(0xACC4, 12);                          // BR
 			break;
-		case 7:
-			poke(T.r[6], T.r[1]); k.add(21);
-			push(0); k.add(24);
-			push(5); k.add(30);
-			push(1); k.add(30);
-			push(1); k.add(30);
-			k.call(0xBA9A, 0xACC0);
-			T.r[6] = (uint16_t)(T.r[6] + 8); k.add(18);
+		case 0xACAC:                                   // 7
+			number(0xACAC);
+			arg(0, 0xACB0);
+			arg(5, 0xACB4);
+			arg(1, 0xACB8);
+			arg(1, 0xACBC);
+			jsr(0xACC0, 0xBA9A);
+			T.r[6] = fl::add(T.r[6], 0x0008);
+			tick(0xACC4, 18);
 			break;
+		default:
+			leave_to(form);
 		}
-		k.add(18);                                     // JMP back to the next command
+		tick(0xAA44, 18);                              // JMP @#0xAA44
 	}
-	const uint16_t sp = T.r[6];
-	k.at(0xACC8); poke(0x01D2, rw((uint16_t)(sp + 6))); k.add(42);
-	k.at(0xACCE); poke(0x01D4, rw((uint16_t)(sp + 4))); k.add(42);
-	k.at(0xACD4); poke(0x1400, peek(0x01D2)); k.add(39);
-	k.at(0xACDA); poke(0x1402, peek(0x01D4)); k.add(39);
-	T.r[6] = (uint16_t)(T.r[6] + 8);
-	k.add(18);
-	k.restore(5);
-	k.leave();
+	{
+		const uint16_t v = peek((uint16_t)(T.r[6] + 6));
+		fl::mov(v);
+		poke(0x01D2, v);
+	}
+	tick(0xACCE, 42);
+	{
+		const uint16_t v = peek((uint16_t)(T.r[6] + 4));
+		fl::mov(v);
+		poke(0x01D4, v);
+	}
+	tick(0xACD4, 42);
+	copy_w(0x01D2, 0x1400, 0xACDA);
+	copy_w(0x01D4, 0x1402, 0xACE0);
+	T.r[6] = fl::add(T.r[6], 0x0008);
+	tick(0xACE4, 18);
+	c_restore(4);
 	return T.r[0];
 }
 
