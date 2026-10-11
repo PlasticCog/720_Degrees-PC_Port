@@ -255,3 +255,6 @@ A5:5462 trick_step
 A5:5264 start_trick
 A5:54CE trick_moves
 A7:4A66 velocity_direction
+A5:4A2A skater_physics
+A7:45B0 enter_high_score
+A7:5BB8 game_over_states
