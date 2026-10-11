@@ -1,11 +1,13 @@
 // Debug menu (TAB): overlays (sprites, terrain height map), game objects and skater state,
 // physics tuning (jump power, gravity, kick and top speed), cheats, sound test, memory
-// viewer / search and emulation control (pause, frame step, speed, layers).
+// viewer / search, emulation control (pause, frame step, speed, layers) and "Tricks": the
+// document docs/programming-tricks.md (built into the program) about how the game works.
 //
 // RAM and ROM locations used here were found with ref720 --watch and render720 --ram-dump
 // (see port/src/app/debugui.cpp for the list).
 #pragma once
 #include <SDL3/SDL.h>
+#include "docview.h"
 #include <cstdint>
 #include <deque>
 #include <map>
@@ -67,6 +69,10 @@ private:
 	float m_chip_db[4] = {-99, -99, -99, -99};          // YM, POKEY 1, POKEY 2, speech
 	bool m_mute[3] = {false, false, false};
 
+	// the programming tricks document
+	DocView m_tricks;
+	bool m_tricks_loaded = false, m_tricks_window = false;
+
 	// memory
 	struct Watch { uint16_t addr; bool word; bool freeze; uint16_t value; std::string name; };
 	std::vector<Watch> m_watches;
@@ -85,6 +91,7 @@ private:
 	void tab_cheats(NativeMachine &m);
 	void tab_sound(NativeMachine &m);
 	void tab_memory(NativeMachine &m);
+	void tab_tricks();
 	void draw_sprite_overlay(NativeMachine &m, const SDL_FRect &game);
 	void draw_height_probe(NativeMachine &m, const SDL_FRect &game);
 	int terrain_byte(int code, bool secondary) const;

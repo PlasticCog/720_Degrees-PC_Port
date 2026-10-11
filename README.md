@@ -97,6 +97,10 @@ Press **Tab** in the game. The menu has these tabs:
 * **Sound.** Send any sound command to the sound CPU, replay the commands heard so far, watch the
   level of each sound chip and mute chips.
 * **Memory.** Edit main RAM, keep watches (optionally frozen) and search RAM for values.
+* **Tricks.** How the original game works: its programming tricks (isometric movement, masking,
+  ramps, spins, sprites, interrupts), hidden content and bugs. It shows
+  [docs/programming-tricks.md](docs/programming-tricks.md), built into the game, with a search box
+  and a larger pop-out window.
 
 ## Level editor
 

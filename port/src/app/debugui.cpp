@@ -28,6 +28,11 @@
 
 namespace {
 
+// docs/programming-tricks.md (CMake writes its bytes to tricks_doc.inc)
+const unsigned char TRICKS_MD[] = {
+#include "tricks_doc.inc"
+	0 };
+
 constexpr uint16_t OBJ_VX = 0x04F0, OBJ_VY = 0x0570, OBJ_VZ = 0x05B0, OBJ_X = 0x06F0, OBJ_Y = 0x0730,
 	OBJ_Z = 0x06B0, OBJ_SX = 0x0630, OBJ_SY = 0x0670, OBJ_ACTIVE = 0x0370;
 constexpr uint16_t SK_SPEED = 0x01B4, SK_PHASE = 0x01EB, SK_TERRAIN = 0x0327, SK_ACCEL = 0x02EE, SK_EQUIP = 0x025F;
@@ -235,10 +240,38 @@ void DebugUI::draw(NativeMachine &m, const SDL_FRect &game, RunControl &run, con
 		if (tab(5, "Cheats")) { tab_cheats(m); ImGui::EndTabItem(); }
 		if (tab(6, "Sound")) { tab_sound(m); ImGui::EndTabItem(); }
 		if (tab(7, "Memory")) { tab_memory(m); ImGui::EndTabItem(); }
+		if (tab(8, "Tricks")) { tab_tricks(); ImGui::EndTabItem(); }
 		ImGui::EndTabBar();
 		select_tab = -1;
 	}
 	ImGui::End();
+	if (m_tricks_window)
+	{
+		const ImVec2 ds = ImGui::GetIO().DisplaySize;
+		const float x = ds.x >= 900 ? 490.0f : 10.0f;
+		ImGui::SetNextWindowPos({x, 10}, ImGuiCond_FirstUseEver);
+		ImGui::SetNextWindowSize({std::min(780.0f, ds.x - x - 10), std::min(860.0f, ds.y - 20)}, ImGuiCond_FirstUseEver);
+		if (ImGui::Begin("Programming tricks of 720 Degrees", &m_tricks_window)) m_tricks.draw("window");
+		ImGui::End();
+	}
+}
+
+void DebugUI::tab_tricks()
+{
+	if (!m_tricks_loaded)
+	{
+		m_tricks.load(std::string((const char *)TRICKS_MD, sizeof(TRICKS_MD) - 1));
+		m_tricks_loaded = true;
+	}
+	if (m_tricks.empty()) { ImGui::TextWrapped("The document was not built into this program (docs/programming-tricks.md)."); return; }
+	if (m_tricks_window)
+	{
+		ImGui::TextWrapped("The document is open in its own window.");
+		if (ImGui::Button("Show it here again")) m_tricks_window = false;
+		return;
+	}
+	if (ImGui::SmallButton("Open in a larger window")) m_tricks_window = true;
+	m_tricks.draw("tab");
 }
 
 void DebugUI::tab_game(NativeMachine &m, RunControl &run, const AudioOut &audio, double fps)
