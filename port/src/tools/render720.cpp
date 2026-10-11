@@ -47,6 +47,7 @@ int main(int argc, char **argv)
 		else if (a == "--ram-dump") ram_dump = next();     // per frame: main RAM, MO RAM, x/y scroll
 		else if (a == "--difftest") logic::g_difftest = true;   // compare rewritten routines with the originals
 		else if (a == "--no-rewrite") logic::g_enabled = false; // run only the translated original
+		else if (a == "--translated") logic::use_translation(next());   // these rewritten routines run translated
 		else if (a == "--poke")                            // FRAME:ADDR:VALUE (hex addr/value), main RAM word
 		{
 			const std::string v = next();
