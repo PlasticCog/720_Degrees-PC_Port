@@ -61,20 +61,33 @@ void NativeMachine::reset()
 }
 
 namespace {
+uint64_t g_main_cycles = 0;     // T-11 cycles run since power-on, before the current run()
+int g_run_budget = 0;           // cycles given to the current run()
+
 struct MainRunner {
 	int run(int cycles)
 	{
 		using namespace t11rt;
 		T.icount = cycles;
 		T.aborted = 0;
+		g_run_budget = cycles;
 		coro::switch_to(g_game_fiber);
-		return cycles - T.icount - T.aborted;
+		const int done = cycles - T.icount - T.aborted;
+		g_main_cycles += (uint64_t)done;
+		g_run_budget = T.icount + T.aborted;          // main_cycles_now() stays exact in between
+		return done;
 	}
 };
 struct SoundRunner {
 	SoundCpu &s;
 	int run(int n) { return s.run(n); }
 };
+}
+
+uint64_t main_cycles_now()
+{
+	using namespace t11rt;
+	return g_main_cycles + (uint64_t)(int64_t)(g_run_budget - T.icount - T.aborted);
 }
 
 void NativeMachine::run_frame()

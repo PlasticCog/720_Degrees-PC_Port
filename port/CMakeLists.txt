@@ -176,7 +176,7 @@ endif()
 
 # ---------------------------------------------------------------------------
 # Level data library
-add_library(leveldata STATIC src/level/leveldata.cpp src/level/pieces.cpp)
+add_library(leveldata STATIC src/level/leveldata.cpp src/level/pieces.cpp src/level/sprites.cpp)
 target_include_directories(leveldata PUBLIC src/level)
 target_link_libraries(leveldata PUBLIC board)
 target_include_directories(leveldata PUBLIC src/native)
@@ -215,7 +215,24 @@ if(WIN32)
   enable_language(RC)
   set(D720_ICON_RC ${CMAKE_CURRENT_SOURCE_DIR}/res/720degrees.rc)
 endif()
-add_executable(720degrees WIN32 src/app/main.cpp src/app/input_config.cpp src/app/debugui.cpp ${D720_ICON_RC})
+# the debug menu's "Tricks" tab shows docs/programming-tricks.md, embedded as bytes
+# (generated/tricks_doc.inc, rewritten only when the document changes)
+set(D720_TRICKS_MD ${CMAKE_CURRENT_SOURCE_DIR}/../docs/programming-tricks.md)
+set(D720_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
+set(D720_TRICKS_BYTES "")
+if(EXISTS ${D720_TRICKS_MD})
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${D720_TRICKS_MD})
+  file(READ ${D720_TRICKS_MD} D720_TRICKS_HEX HEX)
+  string(REPEAT "[0-9a-f]" 64 D720_HEX_LINE)
+  string(REGEX REPLACE "(${D720_HEX_LINE})" "\\1\n" D720_TRICKS_HEX "${D720_TRICKS_HEX}")
+  string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," D720_TRICKS_BYTES "${D720_TRICKS_HEX}")
+endif()
+file(WRITE ${D720_GEN_DIR}/tricks_doc.inc.tmp "${D720_TRICKS_BYTES}\n")
+configure_file(${D720_GEN_DIR}/tricks_doc.inc.tmp ${D720_GEN_DIR}/tricks_doc.inc COPYONLY)
+
+add_executable(720degrees WIN32 src/app/main.cpp src/app/input_config.cpp src/app/debugui.cpp src/app/docview.cpp
+  src/app/extras.cpp ${D720_ICON_RC})
+target_include_directories(720degrees PRIVATE ${D720_GEN_DIR})
 target_link_libraries(720degrees PRIVATE gamecore leveldata imgui SDL3::SDL3)
 d720_copy_to_output(720degrees)
 
@@ -228,7 +245,8 @@ d720_copy_to_output(editor720)
 
 add_executable(verify720 src/tools/verify720.cpp)
 target_link_libraries(verify720 PRIVATE gamecore refcpu)
-add_executable(render720 src/tools/render720.cpp)
+add_executable(render720 src/tools/render720.cpp src/app/extras.cpp)
+target_include_directories(render720 PRIVATE src/app)
 target_link_libraries(render720 PRIVATE gamecore leveldata)
 endif()
 
@@ -236,7 +254,7 @@ endif()
 # Tools that do not need the translated code
 add_executable(ref720 src/ref/refmain.cpp)
 target_link_libraries(ref720 PRIVATE refcpu)
-add_executable(leveltool src/tools/leveltool.cpp)
+add_executable(leveltool src/tools/leveltool.cpp src/tools/leveltool_sprites.cpp)
 target_link_libraries(leveltool PRIVATE leveldata board)
 
 if(MINGW)

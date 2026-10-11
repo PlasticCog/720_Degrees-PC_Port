@@ -1,10 +1,22 @@
-// Rewritten routines: sound commands, interrupt setup and screen helpers.
+// Rewritten routines: sound commands, interrupt setup and screen helpers.  They talk to the
+// sound CPU, the interrupts and the video hardware, so they follow the original instruction
+// by instruction: each read and write happens where the original's does and after every
+// instruction its cycles are charged and interrupts may come in (tick at the next
+// instruction's address; see routines_core.cpp).
 #include "logic.h"
 
 namespace logic {
+namespace steps {                                      // defined in routines_core.cpp
+void rts();
+void jsr(uint16_t ret, uint16_t addr);
+void c_save(int n, uint16_t body);
+void c_restore(int n);
+}
+
 namespace {
 
 using namespace t11rt;
+using namespace steps;
 
 uint16_t sext8(uint8_t v) { return (uint16_t)(int16_t)(int8_t)v; }
 
@@ -14,20 +26,68 @@ uint16_t sext8(uint8_t v) { return (uint16_t)(int16_t)(int8_t)v; }
 void send_queued_sound()
 {
 	T.r[0] = sext8(peekb(0x01A0));
+	tick(0x4318, 24);
 	T.r[1] = sext8(peekb(0x01A1));
+	tick(0x431C, 24);
 	fl::cmp(T.r[0], T.r[1]);
-	if (T.r[0] == T.r[1]) return;
+	tick(0x431E, 12);
+	if (T.r[0] == T.r[1])
+	{
+		tick(0x4358, 12);                              // BEQ
+		rts();
+		return;
+	}
+	tick(0x4320, 12);
 	const uint16_t busy = peek(0x1800) & 0x0020;
 	fl::mov(busy);
-	if (busy) return;
+	tick(0x4326, 30);                                  // BIT #0x20,@#IN0
+	if (busy)
+	{
+		tick(0x4358, 12);                              // BNE
+		rts();
+		return;
+	}
+	tick(0x4328, 12);
+	T.r[1] = 0;
+	tick(0x432A, 12);
 	T.r[1] = peekb((uint16_t)(0x0198 + T.r[0]));
-	if (T.r[1] == 0x48) pokeb(0x02BB, (uint8_t)(peekb(0x02BB) + 1));
-	else if (T.r[1] == 0x49) pokeb(0x02BB, (uint8_t)(peekb(0x02BB) - 1));
+	tick(0x432E, 27);
+	tick(0x4332, 18);                                  // CMP R1,#0x48
+	if (T.r[1] == 0x48)
+	{
+		tick(0x4334, 12);
+		pokeb(0x02BB, (uint8_t)(peekb(0x02BB) + 1));
+		tick(0x4338, 27);
+		tick(0x4344, 12);                              // BR
+	}
+	else
+	{
+		tick(0x433A, 12);                              // BNE
+		tick(0x433E, 18);                              // CMP R1,#0x49
+		if (T.r[1] == 0x49)
+		{
+			tick(0x4340, 12);
+			pokeb(0x02BB, (uint8_t)(peekb(0x02BB) - 1));
+			tick(0x4344, 27);
+		}
+		else
+			tick(0x4344, 12);                          // BNE
+	}
 	pokeb(0x1680, (uint8_t)T.r[1]);
-	T.r[0] = (uint16_t)(T.r[0] + 1);
-	T.r[1] = T.r[0] & 7;
-	pokeb(0x01A0, (uint8_t)T.r[1]);
-	f_nzvc(nzb(T.r[1]));
+	tick(0x4348, 27);                                  // MOVB R1,@#SOUND_CMD
+	T.r[0]++;
+	tick(0x434A, 12);
+	T.r[1] = T.r[0];
+	tick(0x434C, 12);
+	T.r[1] &= 7;
+	tick(0x4350, 18);
+	pokeb(0x01A0, 0);
+	tick(0x4354, 27);
+	const uint8_t index = (uint8_t)(peekb(0x01A0) | T.r[1]);
+	pokeb(0x01A0, index);
+	f_nzvc(nzb(index));                                // C is clear from the CLRB
+	tick(0x4358, 27);
+	rts();
 }
 
 // A5:5CC0  queue_effect_sound(int n): sound effect n (table 0x6567, bank B 0x0400) goes to the
@@ -35,26 +95,72 @@ void send_queued_sound()
 // 0x5B11.  Nothing happens when both channels are busy.  Bank B stays at 0x0400.
 uint16_t queue_effect_sound(const Args &a)
 {
-	poke(0x01D4, 0x0400);
-	poke(0x1402, 0x0400);
-	const uint16_t n = a.u(0);
-	const uint8_t s = peekb((uint16_t)(0x6567 + n));
-	if (!s) return n;
-	uint8_t cmd;
-	if (!peekb(0x01A6))
-	{
-		pokeb(0x01A6, s);
-		cmd = peekb((uint16_t)(0x5B0B + s));
-	}
-	else if (!peekb(0x01A7))
-	{
-		pokeb(0x01A7, s);
-		cmd = peekb((uint16_t)(0x5B11 + s));
-	}
+	push(T.r[1]);
+	tick(0x5CC2, 24);
+	T.r[0] = 0x0400;
+	tick(0x5CC6, 18);
+	poke(0x01D4, T.r[0]);
+	tick(0x5CCA, 27);
+	poke(0x1402, T.r[0]);
+	tick(0x5CCE, 27);
+	T.r[0] = a.u(0);
+	tick(0x5CD2, 27);
+	T.r[1] = 0;
+	tick(0x5CD4, 12);
+	T.r[1] = peekb((uint16_t)(0x6567 + T.r[0]));
+	tick(0x5CD8, 27);
+	tick(0x5CDA, 12);                                  // TST R1
+	if (T.r[1] == 0)
+		tick(0x5D04, 12);                              // BEQ
 	else
-		return n;
-	T.r[0] = n;
-	return call(0x8E78, {cmd});
+	{
+		tick(0x5CDC, 12);
+		bool queue = true;
+		const bool busy_a = peekb(0x01A6) != 0;
+		tick(0x5CE0, 24);
+		if (!busy_a)
+		{
+			tick(0x5CE2, 12);
+			pokeb(0x01A6, (uint8_t)T.r[1]);
+			tick(0x5CE6, 27);
+			push(0);
+			tick(0x5CE8, 24);
+			pokeb(T.r[6], peekb((uint16_t)(0x5B0B + T.r[1])));
+			tick(0x5CEC, 36);
+			tick(0x5CFE, 12);                          // BR
+		}
+		else
+		{
+			tick(0x5CEE, 12);                          // BNE
+			const bool busy_b = peekb(0x01A7) != 0;
+			tick(0x5CF2, 24);
+			if (busy_b)
+			{
+				tick(0x5D04, 12);                      // BNE
+				queue = false;
+			}
+			else
+			{
+				tick(0x5CF4, 12);
+				pokeb(0x01A7, (uint8_t)T.r[1]);
+				tick(0x5CF8, 27);
+				push(0);
+				tick(0x5CFA, 24);
+				pokeb(T.r[6], peekb((uint16_t)(0x5B11 + T.r[1])));
+				tick(0x5CFE, 36);
+			}
+		}
+		if (queue)
+		{
+			jsr(0x5D02, 0x8E78);                       // queue_sound
+			pop();
+			tick(0x5D04, 18);                          // TST (SP)+
+		}
+	}
+	T.r[1] = pop();
+	tick(0x5D06, 18);
+	rts();
+	return T.r[0];
 }
 
 // A5:5D86 (assembly): every 16 frames step the sound level 0x01E9 towards the target 0x01E8
@@ -65,24 +171,70 @@ void step_sound_level()
 	const uint8_t target = peekb(0x01E8);
 	T.r[0] = sext8(target);
 	fl::movb(target);
-	if (target & 0x80) return;
-	T.r[1] = peekb(0x01E9);
-	if (peek(0x01C4) & 0x000F)
+	tick(0x5D8A, 24);
+	if (target & 0x80)
 	{
-		fl::cmp(T.r[0], T.r[1]);
-		if (T.r[0] == T.r[1])
-		{
-			pokeb(0x01E8, 0xFF);
-			fl::movb(0xFF);
-		}
+		tick(0x5DCC, 12);                              // BLT
+		rts();
 		return;
 	}
-	const uint8_t level = peekb(0x01E9);
-	pokeb(0x01E9, (uint8_t)((int16_t)T.r[0] > (int16_t)T.r[1] ? level + 1 : level - 1));
+	tick(0x5D8C, 12);
+	const uint16_t phase = peek(0x01C4) & 0x000F;
+	fl::mov(phase);
+	tick(0x5D92, 30);                                  // BIT #0x0F,@#0x01C4
+	if (phase)
+	{
+		tick(0x5DBC, 12);                              // BNE
+		T.r[1] = 0;
+		tick(0x5DBE, 12);
+		T.r[1] = peekb(0x01E9);
+		tick(0x5DC2, 24);
+		fl::cmp(T.r[0], T.r[1]);
+		tick(0x5DC4, 12);
+		if (T.r[0] == T.r[1])
+		{
+			tick(0x5DC6, 12);
+			pokeb(0x01E8, 0xFF);
+			fl::movb(0xFF);
+			tick(0x5DCC, 33);
+		}
+		else
+			tick(0x5DCC, 12);                          // BNE
+		rts();
+		return;
+	}
+	tick(0x5D94, 12);
+	T.r[1] = 0;
+	tick(0x5D96, 12);
+	T.r[1] = peekb(0x01E9);
+	tick(0x5D9A, 24);
+	fl::cmp(T.r[0], T.r[1]);
+	tick(0x5D9C, 12);
+	if ((int16_t)T.r[0] > (int16_t)T.r[1])
+	{
+		tick(0x5D9E, 12);
+		pokeb(0x01E9, fl::incb(peekb(0x01E9)));
+		tick(0x5DA2, 27);
+		tick(0x5DA8, 12);                              // BR
+	}
+	else
+	{
+		tick(0x5DA4, 12);                              // BLE
+		pokeb(0x01E9, fl::decb(peekb(0x01E9)));
+		tick(0x5DA8, 27);
+	}
+	T.r[0] = 0;
+	tick(0x5DAA, 12);
 	T.r[0] = peekb(0x01E9);
-	const uint16_t cmd = peekb((uint16_t)(0x5D82 + T.r[0]));
-	T.r[0] = call(0x8E78, {cmd});
-	fl::tst(cmd);
+	tick(0x5DAE, 24);
+	push(0);
+	tick(0x5DB0, 24);
+	pokeb(T.r[6], rb((uint16_t)(0x5D82 + T.r[0])));
+	tick(0x5DB4, 36);
+	jsr(0x5DB8, 0x8E78);                               // queue_sound
+	fl::tst(pop());
+	tick(0x5DBA, 18);                                  // TST (SP)+
+	rts();
 }
 
 // F:81AA / F:820C: install the interrupt handlers: the eight vectors listed at 0xFC4E get
@@ -90,9 +242,6 @@ void step_sound_level()
 // interrupt enables are off meanwhile and end as 0x000C.  Returns the last vector address.
 uint16_t install_vectors(uint16_t h1, uint16_t h2)
 {
-	poke(0x018C, 0);
-	poke(0x1600, 0);
-	pokeb(0x1800, 0);
 	for (int i = 14; i >= 0; i -= 2)
 	{
 		const uint16_t v = peek((uint16_t)(0xFC4E + i));
@@ -109,105 +258,198 @@ uint16_t install_vectors(uint16_t h1, uint16_t h2)
 	return v;
 }
 
+// the start of both: MOV R1,-(SP), the interrupts off, then the vectors (with the interrupts
+// off nothing sees them being written, so the two loops are charged at once)
+uint16_t install_start(uint16_t pc, uint16_t h1, uint16_t h2)
+{
+	push(T.r[1]);
+	tick((uint16_t)(pc + 2), 24);
+	poke(0x018C, 0);
+	tick((uint16_t)(pc + 6), 27);
+	poke(0x1600, 0);
+	tick((uint16_t)(pc + 10), 27);
+	pokeb(0x1800, 0);
+	tick((uint16_t)(pc + 14), 27);
+	const uint16_t v = install_vectors(h1, h2);
+	tick((uint16_t)(pc + 0x42), 18 + 8 * (42 + 27 + 36 + 18 + 12) + 18 + 4 * (42 + 27 + 36 + 18 + 12));
+	return v;
+}
+
 uint16_t install_interrupts_a(const Args &)
 {
-	const uint16_t r0 = install_vectors(0x84D4, 0xB66E);
+	const uint16_t r0 = install_start(0x81AA, 0x84D4, 0xB66E);
 	pokeb(0x0196, 0);
+	tick(0x81F0, 27);
 	pokeb(0x0191, 0x4D);
+	tick(0x81F6, 33);
 	pokeb(0x0197, 1);
+	tick(0x81FC, 33);
 	poke(0x018C, 0x000C);
-	poke(0x1600, 0x000C);
+	tick(0x8202, 33);
+	poke(0x1600, 0x000C);                              // interrupts on
+	tick(0x8208, 33);
+	T.r[1] = pop();
+	tick(0x820A, 18);
+	rts();
 	return r0;
 }
 
 uint16_t install_interrupts_b(const Args &)
 {
-	install_vectors(0x899C, 0xB9D4);
+	install_start(0x820C, 0x899C, 0xB9D4);
 	pokeb(0x0196, 0);
+	tick(0x8252, 27);
 	pokeb(0x0197, 0);
+	tick(0x8256, 27);
 	pokeb(0x0191, 0x4D);
+	tick(0x825C, 33);
 	poke(0x018C, 0x000C);
-	poke(0x1600, 0x000C);
-	for (int i = 0x3E; i >= 0; i -= 2) poke((uint16_t)(0x05F0 + i), 0);   // F:BA5E clear_object_dy
-	return 0xFFFE;
+	tick(0x8262, 33);
+	poke(0x1600, 0x000C);                              // interrupts on
+	tick(0x8268, 33);
+	jsr(0x826C, 0xBA5E);                               // clear_object_dy
+	T.r[1] = pop();
+	tick(0x826E, 18);
+	rts();
+	return T.r[0];
 }
 
 // F:DB00 (assembly): playfield palette 0x1100-0x119F = the 80 colours at 0x7DAC (bank B 0x1C00)
-// minus sext(0x0EA7), for fading; the banks are restored afterwards
+// minus sext(0x0EA7), for fading; the banks are restored afterwards.  Step by step.
 void fade_playfield_palette()
 {
 	T.r[5] = peek(0x01D2);
-	const uint16_t saved_b = peek(0x01D4);
-	poke(0x01D2, 0x1800);
-	poke(0x1400, 0x1800);
-	poke(0x01D4, 0x1C00);
-	poke(0x1402, 0x1C00);
+	tick(0xDB04, 24);
+	push(peek(0x01D4));
+	tick(0xDB08, 36);
+	T.r[0] = 0x1800;
+	tick(0xDB0C, 18);
+	poke(0x01D2, T.r[0]);
+	tick(0xDB10, 27);
+	poke(0x1400, T.r[0]);
+	tick(0xDB14, 27);
+	T.r[0] = 0x1C00;
+	tick(0xDB18, 18);
+	poke(0x01D4, T.r[0]);
+	tick(0xDB1C, 27);
+	poke(0x1402, T.r[0]);
+	tick(0xDB20, 27);
 	T.r[1] = sext8(peekb(0x0EA7));
-	uint16_t src = 0x7E4C, dst = 0x11A0;
-	for (int n = 0; n < 0x50; n++)
+	tick(0xDB24, 24);
+	T.r[3] = 0x7E4C;
+	tick(0xDB28, 18);
+	T.r[2] = 0x11A0;
+	tick(0xDB2C, 18);
+	T.r[4] = 0x0050;
+	tick(0xDB30, 18);
+	for (;;)
 	{
-		src -= 2;
-		dst -= 2;
-		T.r[0] = fl::sub(peek(src), T.r[1]);
-		poke(dst, T.r[0]);
+		T.r[3] -= 2;
+		T.r[0] = peek(T.r[3]);
+		tick(0xDB32, 21);
+		T.r[0] = fl::sub(T.r[0], T.r[1]);
+		tick(0xDB34, 12);
+		T.r[2] -= 2;
+		poke(T.r[2], T.r[0]);
+		tick(0xDB36, 24);
+		if (--T.r[4] == 0) break;
+		tick(0xDB30, 18);                              // SOB
 	}
-	T.r[2] = dst;
-	T.r[3] = src;
-	T.r[4] = 0;
+	tick(0xDB38, 18);
 	poke(0x01D2, T.r[5]);
+	tick(0xDB3C, 27);
+	const uint16_t saved_b = pop();
 	poke(0x01D4, saved_b);
+	tick(0xDB40, 33);
 	poke(0x1400, peek(0x01D2));
+	tick(0xDB46, 39);
 	poke(0x1402, peek(0x01D4));
-	fl::mov(saved_b);
+	fl::mov(saved_b);                                  // C from the last SUB
+	tick(0xDB4C, 39);
+	rts();
 }
 
 // F:8C12 (assembly): write character R0 with the small font at the text pointer 0x0186 and
 // advance it; 0 only advances.  Codes up to 0x40 map through the table at 0x8CA6 (negative
 // entries are negated), higher codes are code + 0x99; the colour bits 0x0188 are added.
+// Step by step (the play interrupt draws with the same text pointer).
 void put_small_char()
 {
-	uint16_t c = T.r[0];
-	if (c == 0)
+	tick(0x8C14, 12);                                  // TST R0
+	if (T.r[0] == 0)
 	{
+		tick(0x8C16, 12);
 		poke(0x0186, fl::add(peek(0x0186), 2));
+		tick(0x8C1C, 33);
+		rts();
 		return;
 	}
-	c &= 0x007F;
-	bool carry = false;
-	if (c != 0)
+	tick(0x8C1E, 12);                                  // BNE
+	push(T.r[1]);
+	tick(0x8C20, 24);
+	T.r[0] &= 0x007F;
+	tick(0x8C24, 18);
+	tick(0x8C28, 18);                                  // CMP R0,#0
+	bool carry = false;                                // C as the end leaves it
+	if (T.r[0] == 0)
+		tick(0x8C48, 12);                              // BEQ
+	else
 	{
-		if ((int16_t)c > 0x40)
-			c = (uint16_t)(c + 0x99);
+		tick(0x8C2A, 12);
+		tick(0x8C2E, 18);                              // CMP R0,#0x40
+		if ((int16_t)T.r[0] > 0x40)
+		{
+			tick(0x8C40, 12);                          // BGT
+			T.r[0] = (uint16_t)(T.r[0] + 0x0099);
+			tick(0x8C44, 18);
+		}
 		else
 		{
-			const uint16_t t = (uint16_t)(c - 0x20);
-			carry = (t & 0x8000) != 0;                  // ASL
-			c = peek((uint16_t)(0x8CA6 + (uint16_t)(t << 1)));
-			if (c & 0x8000)
+			tick(0x8C30, 12);
+			T.r[0] = (uint16_t)(T.r[0] - 0x0020);
+			tick(0x8C34, 18);
+			carry = (T.r[0] & 0x8000) != 0;
+			T.r[0] = (uint16_t)(T.r[0] << 1);
+			tick(0x8C36, 12);                          // ASL R0
+			T.r[0] = peek((uint16_t)(0x8CA6 + T.r[0]));
+			tick(0x8C3A, 27);
+			if (T.r[0] & 0x8000)
 			{
-				c = (uint16_t)-c;
-				carry = true;                           // NEG of a non-zero value
+				tick(0x8C3C, 12);
+				T.r[0] = (uint16_t)-T.r[0];
+				carry = true;                          // NEG of a non-zero value
+				tick(0x8C3E, 12);
+				tick(0x8C44, 12);                      // BR
 			}
+			else
+				tick(0x8C44, 12);                      // BPL
 		}
-		c |= peek(0x0188);
+		T.r[0] |= peek(0x0188);
+		tick(0x8C48, 24);
 	}
-	const uint16_t p = peek(0x0186);
-	poke(p, c);
-	poke(0x0186, (uint16_t)(p + 2));
-	T.r[0] = c;
+	T.r[1] = peek(0x0186);
+	tick(0x8C4C, 24);
+	ww(T.r[1], T.r[0]);
+	T.r[1] += 2;
+	tick(0x8C4E, 21);
+	poke(0x0186, T.r[1]);
+	tick(0x8C52, 27);
+	T.r[1] = pop();
 	f_nzvc(nzw(T.r[1]) | (carry ? CF : 0));             // MOV (SP)+,R1
+	tick(0x8C54, 18);
+	rts();
 }
 
 }
 
 LOGIC_TABLE(system,
-	asm_routine("A7", 0x4314, "send_queued_sound", send_queued_sound, 116),
-	c_routine("A5", 0x5CC0, "queue_effect_sound", queue_effect_sound, 0, 284),
-	asm_routine("A5", 0x5D86, "step_sound_level", step_sound_level, 58),
-	c_routine("F", 0x81AA, "install_interrupts_a", install_interrupts_a, 0, 1959),
-	c_routine("F", 0x820C, "install_interrupts_b", install_interrupts_b, 0, 3942),
-	asm_routine("F", 0xDB00, "fade_playfield_palette", fade_playfield_palette, 6441),
-	asm_routine("F", 0x8C12, "put_small_char", put_small_char, 287),
+	asm_routine("A7", 0x4314, "send_queued_sound", send_queued_sound, 0),
+	c_routine("A5", 0x5CC0, "queue_effect_sound", queue_effect_sound, 0, 0),
+	asm_routine("A5", 0x5D86, "step_sound_level", step_sound_level, 0),
+	c_routine("F", 0x81AA, "install_interrupts_a", install_interrupts_a, 0, 0),
+	c_routine("F", 0x820C, "install_interrupts_b", install_interrupts_b, 0, 0),
+	asm_routine("F", 0xDB00, "fade_playfield_palette", fade_playfield_palette, 0),
+	asm_routine("F", 0x8C12, "put_small_char", put_small_char, 0),
 )
 
 }
