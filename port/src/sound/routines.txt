@@ -33,6 +33,8 @@
 461D  cmd_none
 461E  cmd_mask
 4656  voice_list
+4B70  slide
+4C1B  ym_values
 4FF5  wait_ym
 57AC  nmi
 5831  speech_init
