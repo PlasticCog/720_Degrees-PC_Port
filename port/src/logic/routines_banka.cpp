@@ -264,8 +264,9 @@ void draw_map_strip()
 	tick(0x41D4, 33);                                  // for a memory destination)
 	for (;;)
 	{
+		const bool cells = peek(local) != 0;
 		tick(0x41D6, 18);                              // TST (SP)
-		if (!peek(local))
+		if (!cells)
 		{
 			tick(0x4254, 12);                          // BEQ
 			break;
@@ -371,15 +372,17 @@ void draw_map_strip()
 	poke(local, peek(0x0F3E));
 	tick(0x4264, 33);
 	poke(local, (uint16_t)(peek(local) - T.r[0]));
+	const bool row = peek(local) != 0;
 	tick(0x4266, 21);
-	if (peek(local))
+	if (row)
 	{
 		tick(0x4268, 12);
 		push(peek(local));                             // MOV (SP),-(SP): the argument
 		tick(0x426A, 30);
 		jsr(0x426E, 0x42BC);                           // step_map_row
+		const bool down = (int16_t)peek(local) >= 0;
 		tick(0x4272, 27);                              // TST 2(SP)
-		if ((int16_t)peek(local) >= 0)
+		if (down)
 		{
 			tick(0x427C, 12);
 			poke(0x0F3E, (uint16_t)(peek(0x0F3E) - 0x1000));
@@ -419,8 +422,9 @@ void draw_map_strip()
 		push(T.r[0]);                                  // MOV R0,-(SP): the argument
 		tick(0x429A, 24);
 		jsr(0x429E, 0x438C);                           // step_map_column
+		const bool right = (int16_t)peek(local) > 0;
 		tick(0x42A2, 27);                              // TST 2(SP)
-		if ((int16_t)peek(local) > 0)
+		if (right)
 		{
 			tick(0x42A4, 12);
 			poke(0x0F3C, (uint16_t)(peek(0x0F3C) + 0x2000));
