@@ -674,7 +674,7 @@ uint16_t set_gate_animation(const Args &)
 		tick(0xD9BE, 18);
 		jsr(0xD9C2, 0x9152);                           // next_random
 		const bool odd = T.r[0] & 1;
-		T.r[0] >>= 1;                                  // ROR (the carry bit in is lost below)
+		T.r[0] = fl::ror(T.r[0]);                      // ROR (the carry bit in is lost below)
 		tick(0xD9C4, 12);
 		if (odd)
 		{
@@ -704,6 +704,7 @@ uint16_t set_gate_animation(const Args &)
 		{
 			tick(0xD9DC, 12);
 			poke((uint16_t)(0x03B0 + T.r[1]), peek((uint16_t)(0x5B8C + T.r[0])));
+			fl::mov(peek((uint16_t)(0x03B0 + T.r[1])));
 			tick(0xD9E2, 45);
 			tick(0xD9EA, 12);                          // BR
 		}
@@ -711,6 +712,7 @@ uint16_t set_gate_animation(const Args &)
 		{
 			tick(0xD9E4, 12);                          // BNE
 			poke((uint16_t)(0x03B0 + T.r[1]), peek((uint16_t)(0x5BAC + T.r[0])));
+			fl::mov(peek((uint16_t)(0x03B0 + T.r[1])));
 			tick(0xD9EA, 45);
 		}
 	}

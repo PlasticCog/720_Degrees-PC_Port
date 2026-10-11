@@ -579,6 +579,7 @@ uint16_t countdown(const Args &a)
 		fl::movb((uint8_t)T.r[2]);
 		tick(0x7E48, 27);
 		pokeb(T.r[1], rb((uint16_t)(0x7C7A + T.r[0])));
+		fl::movb(peekb(T.r[1]));
 		tick(0x7E4C, 36);
 		poke(0x01FE, 0x001E);
 		fl::mov(0x001E);

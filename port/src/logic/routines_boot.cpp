@@ -304,6 +304,7 @@ void selftest_colour_screen()
 		T.r[1] = fl::asl(T.r[1]);
 		tick(0x72E0, 12);
 		poke(0x1086, peek((uint16_t)(0x7050 + T.r[1])));
+		fl::mov(peek((uint16_t)(0x7050 + T.r[1])));
 		tick(0x72E6, 42);
 		for (;;)                                       // until bit 0x40 or the button
 		{
