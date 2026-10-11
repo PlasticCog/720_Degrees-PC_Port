@@ -102,7 +102,8 @@ public:
 	// ---- video output
 	const uint16_t *frame_indices() const { return m_frame.data(); }
 	void frame_rgb(uint32_t *out) const;       // 512x384 ARGB8888
-	uint32_t palette_rgb(int index) const;
+	uint32_t palette_rgb(int index) const;                 // current palette RAM
+	static uint32_t raw_rgb(uint16_t raw);                 // one palette word as ARGB
 	void finish_frame() { update_partial(SCREEN_H - 1); }
 
 	// ---- audio
@@ -168,6 +169,10 @@ public:
 
 	// hooks for tooling
 	std::function<void(uint8_t)> on_sound_command;
+	std::function<void(uint16_t addr, uint16_t data, uint16_t mask)> on_palette_write;   // tooling
+	std::function<void(uint16_t value)> on_in0_read;                                     // tooling
+	std::function<void(uint16_t addr, uint8_t data)> on_sound_cpu_io_write;              // tooling: 6502 writes 0x1800-0x1fff
+	std::function<void(uint16_t addr, uint8_t data)> on_sound_cpu_io_read;               // tooling: 6502 reads 0x1800-0x187f
 	std::function<void(int from, int to, uint32_t addr, int bank)> on_slapstic;
 
 	struct Slapstic { int state = 0, current = 3, loaded = 0; } m_slap;
@@ -180,6 +185,7 @@ private:
 
 	std::array<uint8_t, 0x1000> m_ram{};
 	std::array<uint16_t, 0x100> m_palette{};
+	std::array<uint16_t, 0x100> m_shown_palette{};      // palette as the vertical blank began (frame_rgb)
 	std::array<uint16_t, 0xc00> m_alpha{};
 	std::array<uint16_t, 0x400> m_mo{};
 	std::array<uint16_t, 0x1000> m_pft{}, m_pfb{};
@@ -198,6 +204,12 @@ private:
 	uint8_t m_soundlatch = 0, m_mainlatch = 0;
 	bool m_soundlatch_pending = false, m_mainlatch_pending = false;
 	bool m_sound_reset = true;
+	bool m_sound_irq_restart = false;
+public:
+	// the sound CPU just left reset: its periodic interrupt starts one period later (MAME's
+	// periodic interrupts restart when the CPU is reset); taken by the scheduler
+	bool take_sound_irq_restart() { const bool r = m_sound_irq_restart; m_sound_irq_restart = false; return r; }
+private:
 
 	int m_last_rendered = -1;
 	int m_mo_last_xpos = 0;

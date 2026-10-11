@@ -3,6 +3,7 @@
 #include "nativemachine.h"
 #include "soundchips.h"
 #include "inputscript.h"
+#include <map>
 #include "modloader.h"
 #include "logic.h"
 #include <cstdio>
@@ -27,7 +28,7 @@ static void write_wav(const std::string &path, const std::vector<int16_t> &s, in
 
 int main(int argc, char **argv)
 {
-	std::string roms = "Game", out = ".", script, wav, mod, sound_log, ram_dump;
+	std::string roms = "Game", out = ".", script, wav, mod, sound_log, ram_dump, palette_log, in0_log, sio_log;
 	int frames = 600, png_every = 0, seed = 0, stats_every = 0;
 	struct Poke { int frame; uint16_t addr, value; };
 	std::vector<Poke> pokes;
@@ -44,6 +45,9 @@ int main(int argc, char **argv)
 		else if (a == "--wav") wav = next();
 		else if (a == "--mod") mod = next();
 		else if (a == "--sound-log") sound_log = next();   // "frame command" per sound command
+		else if (a == "--palette-log") palette_log = next(); // "frame scanline addr value" per palette write
+		else if (a == "--in0-log") in0_log = next();
+		else if (a == "--sound-io-log") sio_log = next();   // sound CPU I/O writes with the time in seconds       // changes of the sound status bits as the main CPU reads them
 		else if (a == "--ram-dump") ram_dump = next();     // per frame: main RAM, MO RAM, x/y scroll
 		else if (a == "--difftest") logic::g_difftest = true;   // compare rewritten routines with the originals
 		else if (a == "--no-rewrite") logic::g_enabled = false; // run only the translated original
@@ -69,7 +73,39 @@ int main(int argc, char **argv)
 	int cur_frame = 0;
 	FILE *rdump = ram_dump.empty() ? nullptr : fopen(ram_dump.c_str(), "wb");
 	if (stats_every || slog)
-		m.board.on_sound_command = [&](uint8_t c) { sound_cmds++; if (slog) fprintf(slog, "%d %02X\n", cur_frame, c); };
+		m.board.on_sound_command = [&](uint8_t c) {
+			sound_cmds++;
+			if (slog) fprintf(slog, "%d %02X %llu\n", cur_frame, c, (unsigned long long)main_cycles_now());
+		};
+	FILE *ilog = in0_log.empty() ? nullptr : fopen(in0_log.c_str(), "w");
+	uint16_t last_in0 = 0xffff;
+	if (ilog)
+		m.board.on_in0_read = [&](uint16_t v) {
+			if ((v & 0x30) != last_in0)
+			{
+				last_in0 = v & 0x30;
+				fprintf(ilog, "%d %02X %llu\n", cur_frame, last_in0, (unsigned long long)main_cycles_now());
+			}
+		};
+	FILE *sio = sio_log.empty() ? nullptr : fopen(sio_log.c_str(), "w");
+	std::map<uint16_t, int> last_sread;
+	if (sio)
+	{
+		m.board.on_sound_cpu_io_write = [&](uint16_t a, uint8_t d) {
+			fprintf(sio, "%d %04X %02X %.9f%c", cur_frame, a, d, (double)m.board.chips().now() / Board::SOUND_CLOCK, 10);
+		};
+		m.board.on_sound_cpu_io_read = [&](uint16_t a, uint8_t d) {
+			auto it = last_sread.find(a);
+			if (it != last_sread.end() && it->second == d) return;
+			last_sread[a] = d;
+			fprintf(sio, "%d R%04X %02X %.9f%c", cur_frame, a, d, (double)m.board.chips().now() / Board::SOUND_CLOCK, 10);
+		};
+	}
+	FILE *plog = palette_log.empty() ? nullptr : fopen(palette_log.c_str(), "w");
+	if (plog)
+		m.board.on_palette_write = [&](uint16_t a, uint16_t d, uint16_t) {
+			fprintf(plog, "%d %d %llu %04X %04X\n", cur_frame, m.board.scanline, (unsigned long long)main_cycles_now(), a, d);
+		};
 	InputScript inp;
 	if (!script.empty()) inp.load(script);
 	inp.random_seed = seed;
