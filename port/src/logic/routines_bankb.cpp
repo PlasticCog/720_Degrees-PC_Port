@@ -2048,6 +2048,224 @@ void park_mode_step()
 	}
 }
 
+// ---------------------------------------------------------------------------------------------
+// Park set-up, tickets and the turn change (B3)
+
+// B3:6A1C  load_demo_park(int park): the park view for the attract mode's park demo: map
+// (A5:4000 with the two bytes of the tables 0x5666 / 0x566A for the park, bank A 0x1800), tile
+// bank from 0x566E (F:EEE6), then F:BA2E, F:CFD6 and F:D19C.  Returns the last result.
+uint16_t load_demo_park(const Args &a)
+{
+	const SavedRegs saved(3);
+	const uint16_t park = a.u(0);
+	const uint16_t b = peekb((uint16_t)(0x5666 + park));
+	const uint16_t c = peekb((uint16_t)(0x566A + park));
+	poke(0x01D2, 0x1800);
+	poke(0x1400, 0x1800);
+	push(0);
+	push(b);
+	push(c);
+	call(0x4000, {});
+	poke(0x01D2, 0x3800);
+	poke(0x1400, 0x3800);
+	ww(T.r[6], peekb((uint16_t)(0x566E + park)));
+	call(0xEEE6, {});                                  // set_tile_bank
+	call(0xBA2E, {});
+	call(0xCFD6, {});
+	const uint16_t r0 = call(0xD19C, {});
+	T.r[6] = (uint16_t)(T.r[6] + 6);
+	return r0;
+}
+
+// B3:7140: count the rounds of the game kind 0x0F30 (after 4: all parks open again, 0x0F29 =
+// 0, and 0x018E = 1) and choose the difficulty 0x0F2D of the next park from F:90BA: with a
+// medal of grade 0xC0 already won at the park (0x0261 + park, also the second player's
+// 0x029F) the level rises on the first round; otherwise it is set to -(level + 1) (at most
+// 10) when not positive or on a new round.  0x0F2E gets its absolute value (returned).
+uint16_t choose_park_level(const Args &)
+{
+	const SavedRegs saved(2);
+	uint16_t r0 = (uint16_t)(sext8(peekb(0x0F30)) + 1);
+	pokeb(0x0F30, (uint8_t)r0);
+	if ((uint8_t)r0 == 4)
+	{
+		pokeb(0x0F30, 0);
+		pokeb(0x0F29, 0);
+		pokeb(0x018E, 1);
+	}
+	const uint16_t park = peekb(0x0F31);
+	r0 = peekb(0x01F6) ? peekb((uint16_t)(0x029F + park)) : 0;
+	r0 |= peekb((uint16_t)(0x0261 + park));
+	enum { SET_LEVEL, NEW_LEVEL, KEEP } step;
+	if ((r0 & 0x00C0) && (int8_t)peekb(0x0F2D) < 0)
+		step = peekb(0x0F30) ? SET_LEVEL : NEW_LEVEL;
+	else if (call(0x90BA, {}) == 1)
+		step = peekb(0x0F30) ? SET_LEVEL : NEW_LEVEL;
+	else if ((int8_t)peekb(0x0F2D) <= 0 || peekb(0x0F30))
+		step = KEEP;
+	else
+		step = NEW_LEVEL;
+	if (step == SET_LEVEL)
+		pokeb(0x0F2D, (uint8_t)call(0x90BA, {}));
+	else if (step == NEW_LEVEL)
+	{
+		r0 = (uint16_t)(call(0x90BA, {}) + 1);
+		if ((int16_t)r0 >= 10)
+			r0 = 10;
+		else
+			r0 = (uint16_t)(call(0x90BA, {}) + 1);
+		pokeb(0x0F2D, (uint8_t)-r0);
+	}
+	r0 = sext8(peekb(0x0F2D));
+	if ((int16_t)r0 < 0) r0 = (uint16_t)-r0;
+	pokeb(0x0F2E, (uint8_t)r0);
+	return r0;
+}
+
+// B3:7E98: the landing score on screen 3: unless the skater crashed (0x031F = 1), the
+// trick class 0x01F1 gives a first-time bonus (table 0x5F40, bank A 0x2000; counted in
+// 0x0FB4), plus 0x01F2; with terrain bit 0x40 (0x0324) also points for air time and turn
+// (table 0x5F00, F:90A6).  Half of it (rounded) is converted by F:F064 into time added to
+// 0x0F34 (time bar flagged).  Bank A ends as 0x3800, which is returned.
+uint16_t score_landing_screen3(const Args &)
+{
+	const SavedRegs saved(2);
+	poke(0x01D2, 0x2000);
+	poke(0x1400, 0x2000);
+	if (peekb(0x031F) != 1)
+	{
+		uint16_t r1 = 0;
+		const uint16_t trick = peekb(0x01F1);
+		const uint16_t counter = (uint16_t)(0x0FB4 + trick);
+		if (!peekb(counter))
+		{
+			r1 = peekb((uint16_t)(0x5F40 + trick));
+			pokeb(counter, (uint8_t)(peekb(counter) + 1));
+		}
+		r1 = (uint16_t)(r1 + peekb(0x01F2));
+		if (peekb(0x0324) & 0x40)
+		{
+			uint16_t air = (uint16_t)((int16_t)(uint16_t)(peek(0x01C4) - peek(0x0FAC)) >> 4);
+			if ((int16_t)air > 7) air = 7;
+			uint16_t turn = peek(0x02F4);
+			if ((int16_t)turn < 0) turn = (uint16_t)-turn;
+			uint16_t r0 = call(0x90A6, {0x0090, turn});
+			if ((int16_t)r0 > 7) r0 = 7;
+			r0 = (uint16_t)((r0 << 3) + air);
+			r1 = (uint16_t)(r1 + peekb((uint16_t)(0x5F00 + r0)));
+		}
+		const uint16_t n = call(0xF064, {(uint16_t)((int16_t)(uint16_t)(r1 + 1) >> 1)});
+		poke(0x0F34, (uint16_t)(peek(0x0F34) + peek((uint16_t)(0xFCFC + (uint16_t)(n << 1)))));
+		pokeb(0x0FA2, (uint8_t)(peekb(0x0FA2) | 0x04));
+	}
+	poke(0x01D2, 0x3800);
+	poke(0x1400, 0x3800);
+	return 0x3800;
+}
+
+// B3:72CA  add_tickets(int n): tickets 0x025B += n (at most 4).  In Skate City the ticket
+// marks of the current player are drawn (A5:4984, mode 1, sound 0x5F; 0x0ED6 cleared) or
+// erased (mode 0) for the change.  Returns the new count before the limit.
+uint16_t add_tickets(const Args &a)
+{
+	const SavedRegs saved(3);
+	const uint16_t n = a.u(0);
+	const bool gain = (int16_t)n > 0;
+	if (gain) call(0x8E78, {0x005F});                 // queue_sound
+	if (!peekb(0x0F59))
+	{
+		poke(0x0188, peek((uint16_t)(0x51DE + (uint16_t)(sext8(peekb(0x01F5)) << 1))));
+		poke(0x01D2, 0x1800);
+		poke(0x1400, 0x1800);
+		if (gain)
+		{
+			const int16_t sum = (int16_t)(sext8(peekb(0x025B)) + n);
+			const int16_t last = sum > 4 ? 4 : sum;
+			for (int16_t i = (int16_t)(sext8(peekb(0x025B)) + 1); i <= last; i++)
+				call(0x4984, {0x0001, (uint16_t)i, sext8(peekb(0x01F5))});
+			pokeb(0x0ED6, 0);
+		}
+		else if ((int16_t)n < 0)
+		{
+			const int16_t sum = (int16_t)(sext8(peekb(0x025B)) + n + 1);
+			const int16_t last = sum > 0 ? sum : 1;
+			for (int16_t i = (int16_t)sext8(peekb(0x025B)); i >= last; i--)
+				call(0x4984, {0x0000, (uint16_t)i, sext8(peekb(0x01F5))});
+		}
+		poke(0x01D2, 0x3800);
+		poke(0x1400, 0x3800);
+	}
+	const uint16_t r0 = (uint16_t)(sext8(peekb(0x025B)) + n);
+	pokeb(0x025B, (uint8_t)r0);
+	if ((int8_t)(uint8_t)r0 > 4) pokeb(0x025B, 4);
+	return r0;
+}
+
+// B3:6D40: next turn / next park: in a game kind with a next park (B3:7140), the time is
+// restarted (F:F028 add_time(0)); the screen is set up (F:8328 with the start position of
+// the park 0x027A, or of the town while 0x0F29 is clear, tables 0x5646-0x5664), tile bank
+// 0x567A + park, trick counters reset (B3:7DD6), in a two-player game the game kind steps
+// (0x0F2B + 1, & 3), ticket bits (A7:55DE), F:D19C, interrupts (F:81AA), F:8F74, the status
+// line (B3:7446) and the park state cleared.  Returns the status line's result.
+uint16_t next_turn(const Args &)
+{
+	const SavedRegs saved(5);
+	if ((peekb(0x0F2B) || !peekb(0x01F6)) && peekb(0x0F26)) call(0x7140, {});   // choose_park_level
+	poke(0x0EAA, 0x0001);
+	if (peekb(0x0F26)) call(0xF028, {0x0000});         // add_time
+	uint16_t w1, w2, b1, b2;
+	if (!peekb(0x0F29))
+	{
+		w1 = peek(0x564E);
+		w2 = peek(0x5658);
+		b1 = peekb(0x565E);
+		b2 = peekb(0x5664);
+	}
+	else
+	{
+		const uint16_t park = peekb(0x027A), i = (uint16_t)(park << 1);
+		w1 = peek((uint16_t)(0x5646 + i));
+		w2 = peek((uint16_t)(0x5650 + i));
+		b1 = peekb((uint16_t)(0x565A + park));
+		b2 = peekb((uint16_t)(0x5660 + park));
+	}
+	push(w1);
+	push(w2);
+	push(0);
+	push(0);
+	push(b1);
+	push(b2);
+	call(0x8328, {});
+	ww(T.r[6], peek((uint16_t)(0x567A + (uint16_t)(peekb(0x027A) << 1))));
+	call(0xEEE6, {});                                  // set_tile_bank
+	ww(T.r[6], 0);
+	call(0x7DD6, {});                                  // update_table_0fb4
+	pokeb(0x0EA4, 0);
+	pokeb(0x0ED8, 0);
+	if (peekb(0x01F6) && peekb(0x0F2B) != 4)
+	{
+		const uint16_t kind = (uint16_t)((peekb(0x0F2B) + 1) & 0x0003);
+		pokeb(0x0F2B, 0);
+		pokeb(0x0F2B, (uint8_t)(peekb(0x0F2B) | kind));
+	}
+	ww(T.r[6], 3);
+	call(0x55DE, {});                                  // update_ticket_bits
+	call(0xD19C, {});
+	call(0x81AA, {});                                  // install_interrupts_a
+	call(0x8F74, {});
+	pokeb(0x0F26, 0);
+	const uint16_t r0 = call(0x7446, {});              // draw_status_line
+	pokeb(0x0F28, 0);
+	pokeb(0x0F27, 0);
+	pokeb(0x0279, 0);
+	poke(0x01FE, 0x001E);
+	pokeb(0x0ED6, 0);
+	pokeb(0x0F2A, (uint8_t)(peekb(0x0F2A) & ~0x3F));
+	pokeb(0x018F, 0);
+	T.r[6] = (uint16_t)(T.r[6] + 12);
+	return r0;
+}
+
 }
 
 LOGIC_TABLE(bankb,
@@ -2075,6 +2293,11 @@ LOGIC_TABLE(bankb,
 	c_routine("B3", 0x7446, "draw_status_line", draw_status_line, 0, 5183),
 	asm_routine("B6", 0x7942, "follow_skater_scroll", follow_skater_scroll, 1623),
 	asm_routine("B3", 0x65FE, "park_mode_step", park_mode_step, 115),
+	c_routine("B3", 0x6A1C, "load_demo_park", load_demo_park, 0, 300),
+	c_routine("B3", 0x7140, "choose_park_level", choose_park_level, 0, 300),
+	c_routine("B3", 0x7E98, "score_landing_screen3", score_landing_screen3, 0, 300),
+	c_routine("B3", 0x72CA, "add_tickets", add_tickets, 0, 300),
+	c_routine("B3", 0x6D40, "next_turn", next_turn, 0, 600),
 )
 
 }

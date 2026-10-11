@@ -240,3 +240,8 @@ F:CA4C  update_map_object_slot
 F:BC52  check_map_objects_in_view
 F:C8AA  tick_map_object_timers
 F:CB24  update_objects
+B3:6A1C load_demo_park
+B3:7140 choose_park_level
+B3:7E98 score_landing_screen3
+B3:72CA add_tickets
+B3:6D40 next_turn
