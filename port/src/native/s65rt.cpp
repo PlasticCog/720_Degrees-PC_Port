@@ -61,6 +61,7 @@ bool sin_shadow(uint16_t pc)
 static void take_int(uint16_t vector, bool brk)
 {
 	const uint16_t ret = S.pc;
+	const uint8_t s0 = S.s;
 	spush((uint8_t)(ret >> 8));
 	spush((uint8_t)ret);
 	spush((uint8_t)((S.p & ~FB) | FU | (brk ? FB : 0)));
@@ -70,6 +71,10 @@ static void take_int(uint16_t vector, bool brk)
 	sync6_slow(S.pc);
 	sshadow_push(ret);
 	sdispatch();
+	// an RTS used as a jump inside the handler comes back with the PC it jumped to: while the
+	// interrupt's return address is still on the stack, the handler goes on there (otherwise
+	// every frame up to the dispatcher of sound_root would be left on the way)
+	while (S.pc != ret && S.s < s0) sdispatch();
 	sshadow_pop();
 }
 

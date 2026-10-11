@@ -26,6 +26,8 @@ namespace sound {
 enum : uint8_t {
 	RTI = 1,         // interrupt handler: returns with RTI
 	NOTEST = 2,      // never returns (the main loop): runs, but is not compared
+	INNER = 4,       // starts inside a routine of the translation (reached by a jump there):
+	                 // an entry only for the build without the translation
 };
 
 using Fn = void (*)();
@@ -94,6 +96,15 @@ void jsr(uint16_t pc, uint16_t target);
 void rts();
 void rti();
 void jmp(uint16_t target);
+// RTS used as a jump (the address pushed before): on to the code there, which returns to this
+// routine's caller
+void rts_jump();
+// continue the program at pc, abandoning the routine and its callers up to one that expects pc
+[[noreturn]] inline void leave_to(uint16_t pc)
+{
+	S.pc = pc;
+	throw Unwound{};
+}
 
 // called by the generated wrappers; false = run the original translation
 bool enter(int index);

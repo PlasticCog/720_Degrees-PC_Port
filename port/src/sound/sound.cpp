@@ -18,6 +18,7 @@ extern const int s65_total_instructions;
 namespace sound {
 
 const Routine *sound_core(int &count);
+const Routine *sound_main(int &count);
 
 namespace {
 
@@ -33,7 +34,7 @@ struct Slot {
 
 struct Table { const char *name; TableFn fn; };
 const Table TABLES[] = {
-	{"core", sound_core},
+	{"core", sound_core}, {"main", sound_main},
 };
 
 std::vector<Routine> &registry()
@@ -74,7 +75,7 @@ void init()
 	{
 		bool listed = false;
 		for (int i = 0; i < s65_original_count; i++) listed |= r.addr == s65_originals[i].addr;
-		if (!listed) fprintf(stderr, "sound: %04X (%s) is not listed in routines.txt\n", r.addr, r.name);
+		if (!listed && !(r.flags & INNER)) fprintf(stderr, "sound: %04X (%s) is not listed in routines.txt\n", r.addr, r.name);
 	}
 #endif
 	g_entries.clear();
@@ -125,6 +126,9 @@ std::string step_text(const std::vector<uint64_t> &v, size_t i)
 // replacement (the original's reads replayed, its writes only recorded); compare and continue
 // with the original's result.  A call that does not finish within the step limit waits for an
 // interrupt: it is run for real instead (the chips have seen the original's writes up to there).
+// The call ends where it returns to its caller (an interrupt handler: to the interrupted
+// code), also when it got there through an RTS used as a jump (an address pushed before), which
+// the translation leaves to the dispatcher.
 void difftest(Slot &s)
 {
 	static std::array<uint8_t, 0x1000> r0, r1, r2;
@@ -132,6 +136,12 @@ void difftest(Slot &s)
 	static std::vector<IoEvent> io_o, io_w;
 	const Ctx c0 = S;
 	memcpy(r0.data(), SR, 0x1000);
+	auto stacked = [&](int k) { return SR[0x100 | (uint8_t)(c0.s + k)]; };
+	const uint16_t ret = (s.r->flags & RTI) ? (uint16_t)(stacked(2) | stacked(3) << 8)
+	                                        : (uint16_t)((stacked(1) | stacked(2) << 8) + 1);
+	auto to_return = [&]() {
+		while (S.pc != ret) sdispatch();
+	};
 	const int sh0 = sshadow_top;
 	g_testing = true;
 	g_atomic6 = true;
@@ -159,7 +169,11 @@ void difftest(Slot &s)
 	g_trace6 = &o;
 	g_io_mode = 1;
 	g_original_side = true;
-	try { s.orig->fn(); }
+	try
+	{
+		s.orig->fn();
+		to_return();
+	}
 	catch (const Timeout6 &)
 	{
 		S = c0;
@@ -185,7 +199,11 @@ void difftest(Slot &s)
 	std::string d;
 	int n = 0;
 	auto note = [&](const std::string &x) { if (n++ < 8) d += (d.empty() ? "" : ", ") + x; };
-	try { s.r->fn(); }
+	try
+	{
+		s.r->fn();
+		to_return();
+	}
 	catch (const Timeout6 &) { note("did not finish"); }
 	catch (const Unwound &) { note(fmt("left at %04X", S.pc)); }
 	io_w.swap(g_io_events);
@@ -249,12 +267,17 @@ void jsr(uint16_t pc, uint16_t target)
 {
 	cyc(6);
 	const uint16_t ret = (uint16_t)(pc + 2), next = (uint16_t)(pc + 3);
+	const uint8_t s0 = S.s;
 	push((uint8_t)(ret >> 8));
 	push((uint8_t)ret);
 	step(target);
 	S.pc = target;
 	sshadow_push(next);
 	sdispatch();
+	// an RTS used as a jump inside the callee comes back here with the PC it jumped to (the
+	// translation leaves that to its dispatcher): while the return address is still on the
+	// stack, the callee goes on there
+	while (S.pc != next && S.s < s0) sdispatch();
 	sshadow_pop();
 	if (S.pc != next) throw Unwound{};
 }
@@ -282,6 +305,12 @@ void jmp(uint16_t target)
 	cyc(3);
 	step(target);
 	S.pc = target;
+	sdispatch();
+}
+
+void rts_jump()
+{
+	rts();
 	sdispatch();
 }
 

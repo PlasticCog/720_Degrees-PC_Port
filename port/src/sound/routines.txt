@@ -3,7 +3,17 @@
 # the replacement; the original translation is kept for comparison.
 #
 # Check a change with:  render720 --frames N --random SEED --difftest
+4000  reset
+4142  bad_ram_page
+415F  rom_checksum
 4183  ack_irq
+4187  irq
+41C8  irq_work
+41EB  sound_reset
+429A  node_list
+42CB  node_take
+42DC  node_addr
+42FE  node_free
 4FF5  wait_ym
 F47B  count_8c
 F488  times10

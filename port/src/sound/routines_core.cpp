@@ -139,9 +139,130 @@ void store_and_delay()
 	rts();
 }
 
+// The note nodes: 4-byte nodes from 0x0815 on (node n at 0x0815 + 4 * (n - 1)), linked through
+// their first byte; 0x14 is the first free one.
+
+// 42DC: the address of node A in 0x15 / 0x16 (A - 1 in 0x0E, Y = 0); A kept
+void node_addr()
+{
+	cyc(3); push(S.a); step(0x42DD);                   // PHA
+	cyc(2); S.y = S.a; nz(S.y); step(0x42DE);          // TAY
+	cyc(2); S.y--; nz(S.y); step(0x42DF);              // DEY
+	cyc(3); SR[0x15] = S.y; step(0x42E1);
+	cyc(3); SR[0x0E] = S.y; step(0x42E3);
+	cyc(2); S.y = 0x00; nz(S.y); step(0x42E5);
+	cyc(3); SR[0x16] = S.y; step(0x42E7);
+	cyc(5); SR[0x15] = op_asl(SR[0x15]); step(0x42E9);
+	cyc(5); SR[0x16] = op_rol(SR[0x16]); step(0x42EB);
+	cyc(5); SR[0x15] = op_asl(SR[0x15]); step(0x42ED);
+	cyc(5); SR[0x16] = op_rol(SR[0x16]); step(0x42EF);
+	cyc(2); S.a = 0x15; nz(S.a); step(0x42F1);
+	cyc(2); S.p &= ~FC; step(0x42F2);                  // CLC
+	cyc(3); op_adc(SR[0x15]); step(0x42F4);
+	cyc(3); SR[0x15] = S.a; step(0x42F6);
+	cyc(2); S.a = 0x08; nz(S.a); step(0x42F8);
+	cyc(3); op_adc(SR[0x16]); step(0x42FA);
+	cyc(3); SR[0x16] = S.a; step(0x42FC);
+	cyc(4); S.a = pull(); nz(S.a); step(0x42FD);       // PLA
+	rts();
+}
+
+// 429A: all nodes free: node n links to n + 1, up to 0xC8 or the end of page 0x0A; the last
+// one ends the list
+void node_list()
+{
+	cyc(2); S.a = 0x01; nz(S.a); step(0x429C);
+	cyc(3); SR[0x14] = S.a; step(0x429E);
+	jsr(0x429E, 0x42DC);                               // node_addr
+	cyc(2); S.a = 0x02; nz(S.a); step(0x42A3);
+	for (;;)
+	{
+		cyc(6); wr((uint16_t)(zp16(0x15) + S.y), S.a); step(0x42A5);   // STA ($15),Y
+		cyc(2); S.x = S.a; nz(S.x); step(0x42A6);      // TAX
+		cyc(2); S.x++; nz(S.x); step(0x42A7);          // INX
+		cyc(3); S.a = SR[0x15]; nz(S.a); step(0x42A9);
+		cyc(2); S.p &= ~FC; step(0x42AA);              // CLC
+		cyc(2); op_adc(0x04); step(0x42AC);
+		cyc(3); SR[0x15] = S.a; step(0x42AE);
+		if (!branch(0x42AE, !(S.p & FC), 0x42B8))
+		{
+			cyc(5); SR[0x16]++; nz(SR[0x16]); step(0x42B2);   // INC $16
+			cyc(2); S.a = 0x0B; nz(S.a); step(0x42B4);
+			cyc(3); op_cmp(S.a, SR[0x16]); step(0x42B6);
+			if (branch(0x42B6, S.p & FZ, 0x42BD))
+				break;
+		}
+		cyc(2); S.a = S.x; nz(S.a); step(0x42B9);      // TXA
+		cyc(2); op_cmp(S.a, 0xC8); step(0x42BB);
+		if (!branch(0x42BB, !(S.p & FC), 0x42A3))
+			break;
+	}
+	cyc(5); SR[0x16]--; nz(SR[0x16]); step(0x42BF);    // DEC $16: back to the last node
+	cyc(3); S.a = SR[0x15]; nz(S.a); step(0x42C1);
+	cyc(2); S.p |= FC; step(0x42C2);                   // SEC
+	cyc(2); op_sbc(0x04); step(0x42C4);
+	cyc(3); SR[0x15] = S.a; step(0x42C6);
+	cyc(2); S.a = 0x00; nz(S.a); step(0x42C8);
+	cyc(6); wr((uint16_t)(zp16(0x15) + S.y), S.a); step(0x42CA);
+	rts();
+}
+
+// 42CB: take the first free node: A = its number (0x15 / 0x16 its address), the list goes on
+// with the one it links to.  With none left behind it A = 0, and the RTS goes astray (the
+// original pushes A without pulling it).
+void node_take()
+{
+	cyc(3); S.a = SR[0x14]; nz(S.a); step(0x42CD);
+	jsr(0x42CD, 0x42DC);                               // node_addr
+	cyc(3); push(S.a); step(0x42D1);                   // PHA
+	cyc(5); S.a = rd(idx(zp16(0x15), S.y)); nz(S.a); step(0x42D3);   // LDA ($15),Y
+	if (branch(0x42D3, S.p & FZ, 0x42D9))
+	{
+		cyc(2); S.a = 0x00; nz(S.a); step(0x42DB);
+		rts();
+		return;
+	}
+	cyc(3); SR[0x14] = S.a; step(0x42D7);
+	cyc(4); S.a = pull(); nz(S.a); step(0x42D8);       // PLA
+	rts();
+}
+
+// 42FE: the two node chains of channel X (0x05E8 and 0x05D0) given back to the free list; Y kept
+void node_free()
+{
+	cyc(2); S.a = S.y; nz(S.a); step(0x42FF);          // TYA
+	cyc(3); push(S.a); step(0x4300);                   // PHA
+	static const struct { uint16_t chain, pc; } part[2] = {{0x05E8, 0x4300}, {0x05D0, 0x4318}};
+	for (const auto &c : part)
+	{
+		for (;;)
+		{
+			cyc(4); S.a = rd(idx(c.chain, S.x)); nz(S.a); step((uint16_t)(c.pc + 3));
+			if (branch((uint16_t)(c.pc + 3), S.p & FZ, (uint16_t)(c.pc + 0x18)))
+				break;
+			jsr((uint16_t)(c.pc + 5), 0x42DC);         // node_addr
+			cyc(3); push(S.a); step((uint16_t)(c.pc + 9));   // PHA
+			cyc(5); S.a = rd(idx(zp16(0x15), S.y)); nz(S.a); step((uint16_t)(c.pc + 0x0B));
+			cyc(5); wr((uint16_t)(c.chain + S.x), S.a); step((uint16_t)(c.pc + 0x0E));
+			cyc(3); S.a = SR[0x14]; nz(S.a); step((uint16_t)(c.pc + 0x10));
+			cyc(6); wr((uint16_t)(zp16(0x15) + S.y), S.a); step((uint16_t)(c.pc + 0x12));
+			cyc(4); S.a = pull(); nz(S.a); step((uint16_t)(c.pc + 0x13));   // PLA
+			cyc(3); SR[0x14] = S.a; step((uint16_t)(c.pc + 0x15));
+			cyc(3); step(c.pc);                        // JMP
+		}
+	}
+	cyc(4); S.a = pull(); nz(S.a); step(0x4331);       // PLA
+	cyc(2); S.y = S.a; nz(S.y); step(0x4332);          // TAY
+	rts();
+}
+
 } // namespace
 
 SOUND_TABLE(core,
+	routine(0x429A, "node_list", node_list),
+	routine(0x42CB, "node_take", node_take),
+	routine(0x42DC, "node_addr", node_addr),
+	routine(0x42FE, "node_free", node_free),
 	routine(0x4183, "ack_irq", ack_irq),
 	routine(0x4FF5, "wait_ym", wait_ym),
 	routine(0xF47B, "count_8c", count_8c),
