@@ -4840,445 +4840,758 @@ uint16_t run_text_script(const Args &a)
 // on the stack (object kind pointer, ramp flag) is kept as the original's.
 void object_contact()
 {
-	Clock k;
-	T.r[6] = (uint16_t)(T.r[6] - 6);                    // SUB #6,SP: the local frame
+	T.r[6] = fl::sub(T.r[6], 0x0006);                  // the local frame
+	tick(0xA514, 18);
 	const uint16_t fp = T.r[6];                        // fp+2: &0x0370[object], fp+4: on the ramp
-	k.add(18);
-	k.at(0xA514);
-	const bool timer = peekb(0x0EA2) != 0;
-	k.add(24, 12);
-	if (!timer)
 	{
-		k.at(0xA51A); poke(0x023A, peek(0x03F0)); k.add(39);
-		k.at(0xA520); poke(0x0238, peek(0x0670)); k.add(39, 12);
+		const uint8_t timer = peekb(0x0EA2);
+		fl::tstb(timer);
+		tick(0xA518, 24);
+		if (!timer)
+		{
+			tick(0xA51A, 12);
+			copy_w(0x03F0, 0x023A, 0xA520);
+			copy_w(0x0670, 0x0238, 0xA526);
+			tick(0xA53A, 12);                          // BR
+		}
+		else
+		{
+			tick(0xA528, 12);                          // BNE
+			set_w(0x023A, 0x7106, 0xA52E);
+			copy_w(0x0670, 0x0238, 0xA534);
+			poke(0x0238, fl::sub(peek(0x0238), peek(0x06B0)));
+			tick(0xA53A, 39);
+		}
 	}
-	else
-	{
-		k.at(0xA528); poke(0x023A, 0x7106); k.add(33);
-		k.at(0xA52E); poke(0x0238, peek(0x0670)); k.add(39);
-		k.at(0xA534); poke(0x0238, (uint16_t)(peek(0x0238) - peek(0x06B0))); k.add(39);
-	}
-	T.r[0] = 0x3800; k.add(18);
-	k.at(0xA53E); poke(0x01D2, T.r[0]); k.add(27);
-	k.at(0xA542); poke(0x1400, T.r[0]); k.add(27);
-	T.r[0] = 0x0400; k.add(18);
-	k.at(0xA54A); poke(0x01D4, T.r[0]); k.add(27);
-	k.at(0xA54E); poke(0x1402, T.r[0]); k.add(27);
-	k.call(0x5684, 0xA556);
-	T.r[1] = T.r[0]; k.add(12);
-	k.at(0xA558); poke(0x01D2, 0); k.add(27);
-	k.at(0xA55C); poke(0x1400, 0); k.add(27, 12, 12);
-	auto finish = [&]() {                              // A8CC: ADD #6,SP; RTS
-		k.add(18);
-		T.r[6] = fl::add(T.r[6], 6);
-		k.leave();
-	};
-	auto store_object = [&]() {                        // A8B4: MOVB R1,@#0x0334; BR
-		k.at(0xA8B4); pokeb(0x0334, (uint8_t)T.r[1]); k.add(27, 12);
-		finish();
-	};
+	bank_a(0xA53A, 0x3800);
+	bank_b(0xA546, 0x0400);
+	jsr(0xA556, 0x5684);                               // the object touched
+	T.r[1] = T.r[0];
+	fl::mov(T.r[1]);
+	tick(0xA558, 12);
+	clr_w(0x01D2, 0xA55C);
+	clr_w(0x1400, 0xA560);
+	fl::tst(T.r[1]);
+	tick(0xA562, 12);
 	if ((int16_t)T.r[1] <= 0)
 	{
-		k.add(18);
-		k.at(0xA8BA);
+		tick(0xA564, 12);                              // none: the contact timers run out
+		tick(0xA8BA, 18);                              // JMP
 		const uint8_t t = peekb(0x0EA2);
-		k.add(24, 12);
-		if (t)
+		fl::tstb(t);
+		tick(0xA8BE, 24);
+		if (!t)
+			tick(0xA8C4, 12);                          // BEQ
+		else
 		{
-			k.at(0xA8C0); pokeb(0x0EA2, (uint8_t)(peekb(0x0EA2) - 1)); k.add(27);
+			tick(0xA8C0, 12);
+			pokeb(0x0EA2, fl::decb(peekb(0x0EA2)));
+			tick(0xA8C4, 27);
 		}
-		k.at(0xA8C4); pokeb(0x0EA1, 0); k.add(27);
-		k.at(0xA8C8); pokeb(0x0334, 0); k.add(27);
-		finish();
-		return;
+		clr_b(0x0EA1, 0xA8C8);
+		clr_b(0x0334, 0xA8CC);
+		goto finish;
 	}
-	poke((uint16_t)(fp + 2), 0x0370);
-	poke((uint16_t)(fp + 2), (uint16_t)(0x0370 + T.r[1]));
-	k.add(36, 30, 12);
-	auto kind = [fp]() -> uint16_t { return peekb(peek((uint16_t)(fp + 2))); };
-	k.at(0xA574); T.r[0] = kind(); k.add(33);
-	poke((uint16_t)(fp + 4), 0); k.add(30);
-	k.at(0xA57C);
-	const bool ramp = peekb(0x01EA) != 0;
-	k.add(24, 12);
-	if (ramp)
 	{
-		poke((uint16_t)(fp + 4), (uint16_t)(peek((uint16_t)(fp + 4)) + 1));
-		k.add(30, 12);
-	}
-	else
-	{
-		k.at(0xA588); T.r[3] = peek(0x06B2); k.add(24);
-		k.at(0xA58C); T.r[3] = (uint16_t)(T.r[3] - peek(0x06B0)); k.add(24);
-		T.r[2] = 0; k.add(12);
-		k.at(0xA592); T.r[2] = peekb((uint16_t)(0x6631 + T.r[0])); k.add(27);
-		T.r[2] = (uint16_t)(T.r[2] << 8); k.add(12, 12, 12, 12);
-		if ((int16_t)T.r[3] > (int16_t)T.r[2])
-		{
-			k.add(18);
-			finish();
-			return;
-		}
-	}
-	k.at(0xA5A2); T.r[0] = peekb((uint16_t)(0x61DA + T.r[0])); k.add(27, 18);
-	T.r[2] = (uint16_t)(T.r[0] << 1); k.add(12, 12, 27);
-	// CLR R0, JSR F:AD70 (object 0 in front of R1?), ROR, BCC, MOV #4 / #12: the direction
-	auto facing = [&](uint16_t jsr, uint16_t ret) -> uint16_t {
-		T.r[0] = 0; k.add(12);
-		k.call(0xAD70, ret);
-		(void)jsr;
-		const bool front = (T.r[0] & 1) != 0;
-		T.r[0] = ror(T.r[0]);
-		k.add(12, 12, 18, (front ? 12 : 0));
-		return front ? 4 : 12;
-	};
-	switch (T.r[0])
-	{
-	case 2: case 7:
-	{
-		T.r[0] = 0; k.add(12);
-		k.at(0xA5BA); T.r[0] = peekb(0x0334); k.add(24, 12, 12);
-		if (T.r[0] == T.r[1])
-		{
-			k.add(18);
-			store_object();
-			return;
-		}
-		k.at(0xA5C2);
-		const bool riding = peekb(0x031E) != 0;
-		k.add(24, 12);
-		if (!riding)
-		{
-			T.r[0] = facing(0xA5CA, 0xA5CE);
-			k.at(0xA5DC); pokeb(0x031D, (uint8_t)T.r[0]); k.add(27);
-		}
-		k.at(0xA5E0); pokeb(0x01F8, peekb(0x031D)); k.add(39);
-		k.at(0xA5E6); poke(0x01B4, 0x0514); k.add(33);
-		k.call(0xA2F0, 0xA5F0);                 // skater_land
-		T.r[0] = 0; k.add(12);
-		k.at(0xA5F2); T.r[0] = kind(); k.add(33, 18, 12);
-		if (T.r[0] != 4)
-		{
-			k.add(18);
-			store_object();
-			return;
-		}
-		push(0); k.add(24);
-		k.at(0xA5FE); poke(T.r[6], peekb((uint16_t)(0x0390 + T.r[1]))); k.add(36);
-		k.call(0xCF5E, 0xA606);
-		k.call(0xE222, 0xA60A);                 // state1_to_8
-		k.add(12, 12, 12, 12, 18);                            // BR, BR, BR, BR, TST (SP)+
-		T.r[6] = (uint16_t)(T.r[6] + 2);
-		fl::tst(rw((uint16_t)(T.r[6] - 2)));
-		store_object();
-		return;
-	}
-	case 3: case 4:
-	{
-		push(0x0067); k.add(30);
-		k.call(0x8E78, 0xA6AE);                 // queue_sound
-		T.r[2] = (uint16_t)(T.r[1] << 1); k.add(12, 12);
-		k.at(0xA6B2); poke((uint16_t)(0x03F0 + T.r[2]), 0); k.add(30);
-		poke(T.r[6], T.r[1]); k.add(21);
-		push(0); k.add(24);
-		k.at(0xA6BA); poke(T.r[6], peekb(0x5CDE)); k.add(33);
-		k.call(0xB602, 0xA6C2);
-		k.at(0xA6C2); pokeb((uint16_t)(0x04B0 + T.r[1]), (uint8_t)(peekb((uint16_t)(0x04B0 + T.r[1])) | 0x08)); k.add(36);
-		T.r[0] = 7; k.add(18);
-		k.at(0xA6CC); pokeb((uint16_t)(0x0790 + T.r[1]), 7); k.add(30);
-		k.at(0xA6D0); pokeb((uint16_t)(0x0770 + T.r[1]), 7); k.add(30);
-		k.at(0xA6D4); poke((uint16_t)(0x0430 + T.r[2]), 0x0080); k.add(36);
-		T.r[0] = 0; k.add(12);
-		k.at(0xA6DC); T.r[0] = kind(); k.add(33);
-		T.r[0] = (uint16_t)((T.r[0] - 0x48) << 1); k.add(18, 12);
-		k.at(0xA6E6); poke(T.r[6], peek((uint16_t)(0xFCFA + T.r[0]))); k.add(36);
-		k.call(0xEF24, 0xA6EE);
-		fl::cmp(rw(T.r[6]), rw((uint16_t)(T.r[6] + 2)));
-		T.r[6] = (uint16_t)(T.r[6] + 4);
-		k.add(24, 12, 18);
-		store_object();
-		return;
-	}
-	case 5:
-	{
-		k.at(0xA6F2);
-		const bool carried = peekb(0x0EA0) != 0;
-		k.add(24, 12);
-		if (!carried)
-		{
-			k.at(0xA6F8);
-			const bool mode1 = peekb(0x031F) == 1;
-			k.add(30, 12);
-			if (mode1)
-				k.add(12);
+		tick(0xA568, 12);                              // BGT
+		poke((uint16_t)(fp + 2), 0x0370);
+		fl::mov(0x0370);
+		tick(0xA56E, 36);
+		poke((uint16_t)(fp + 2), fl::add(peek((uint16_t)(fp + 2)), T.r[1]));
+		tick(0xA572, 30);
+		// CLR Rr at pc; BISB @k(SP),Rr: the kind of the object (on at pc + 6)
+		auto kind = [fp](uint16_t pc, int r) {
+			T.r[r] = 0;
+			fl::clr();
+			tick((uint16_t)(pc + 2), 12);
+			T.r[r] = (uint16_t)(T.r[r] | fl::logicb(peekb(peek((uint16_t)(fp + 2)))));
+			tick((uint16_t)(pc + 6), 33);
+		};
+		// CLR R0 at pc; BISB @#a,R0 (on at pc + 6)
+		auto byte = [](uint16_t pc, uint16_t a) {
+			T.r[0] = 0;
+			fl::clr();
+			tick((uint16_t)(pc + 2), 12);
+			T.r[0] = (uint16_t)(T.r[0] | fl::logicb(peekb(a)));
+			tick((uint16_t)(pc + 6), 24);
+		};
+		// CLR R0 at pc, JSR F:AD70 (object 0 in front of R1?), ROR R0, BCC, MOV #4 / #12: the
+		// direction in R0, on at pc + 0x14
+		auto facing = [](uint16_t pc) {
+			T.r[0] = 0;
+			fl::clr();
+			tick((uint16_t)(pc + 2), 12);
+			jsr((uint16_t)(pc + 6), 0xAD70);           // sprite_in_front
+			const bool front = (T.r[0] & 1) != 0;
+			T.r[0] = fl::ror(T.r[0]);
+			tick((uint16_t)(pc + 8), 12);
+			if (front)
+			{
+				tick((uint16_t)(pc + 0x0A), 12);
+				T.r[0] = 0x0004;
+				fl::mov(T.r[0]);
+				tick((uint16_t)(pc + 0x0E), 18);
+				tick((uint16_t)(pc + 0x14), 12);       // BR
+			}
 			else
 			{
-				k.at(0xA700); pokeb(0x0EA0, (uint8_t)T.r[1]); k.add(27);
-				k.at(0xA704); pokeb(0x0EA0, (uint8_t)-peekb(0x0EA0)); k.add(27);
+				tick((uint16_t)(pc + 0x10), 12);       // BCC
+				T.r[0] = 0x000C;
+				fl::mov(T.r[0]);
+				tick((uint16_t)(pc + 0x14), 18);
 			}
-		}
-		k.add(18);
-		store_object();
-		return;
-	}
-	case 6:
-	{
-		T.r[0] = 0; k.add(12);
-		k.at(0xA60E); T.r[0] = peekb(0x0334); k.add(24, 12, 12);
-		if (T.r[0] == T.r[1])
+		};
+		kind(0xA572, 0);
+		poke((uint16_t)(fp + 4), 0);
+		fl::clr();
+		tick(0xA57C, 30);
+		const uint8_t ramp = peekb(0x01EA);
+		fl::tstb(ramp);
+		tick(0xA580, 24);
+		if (ramp)
 		{
-			k.add(18);
-			store_object();
-			return;
-		}
-		k.at(0xA616); T.r[0] = peek(0x06B2); k.add(24);
-		k.at(0xA61A); T.r[0] = (uint16_t)(T.r[0] - peek(0x06B0)); k.add(24, 18, 12);
-		if ((int16_t)T.r[0] < 0x0380)
-		{
-			T.r[0] = facing(0xA626, 0xA62A);
-			k.at(0xA638); pokeb(0x031D, (uint8_t)T.r[0]); k.add(27);
-			k.at(0xA63C); pokeb(0x01F8, (uint8_t)T.r[0]); k.add(27);
-			k.at(0xA640); poke(0x01B4, 0x0514); k.add(33);
-			k.call(0xA2F0, 0xA64A);             // skater_land
-			k.add(12);
+			tick(0xA582, 12);
+			poke((uint16_t)(fp + 4), fl::inc(peek((uint16_t)(fp + 4))));
+			tick(0xA586, 30);
+			tick(0xA5A2, 12);                          // BR
 		}
 		else
 		{
-			T.r[0] = 0; k.add(12);
-			k.at(0xA64E); T.r[0] = peekb(0x0E6C); k.add(24, 12, 12);
-			if (T.r[0])
+			tick(0xA588, 12);                          // in the air: too far above it?
+			T.r[3] = peek(0x06B2);
+			fl::mov(T.r[3]);
+			tick(0xA58C, 24);
+			T.r[3] = fl::sub(T.r[3], peek(0x06B0));
+			tick(0xA590, 24);
+			T.r[2] = 0;
+			fl::clr();
+			tick(0xA592, 12);
+			T.r[2] = (uint16_t)(T.r[2] | fl::logicb(peekb((uint16_t)(0x6631 + T.r[0]))));
+			tick(0xA596, 27);
+			T.r[2] = fl::swab(T.r[2]);
+			tick(0xA598, 12);
+			T.r[2] &= 0xFF00;
+			fl::clr();
+			tick(0xA59A, 12);
+			fl::cmp(T.r[3], T.r[2]);
+			tick(0xA59C, 12);
+			if ((int16_t)T.r[3] > (int16_t)T.r[2])
 			{
-				push(T.r[0]); k.add(24);
-				k.call(0xF064, 0xA65C);
-				T.r[0] = 0; k.add(12);
-				k.at(0xA65E); T.r[0] = peekb(0x0E6C); k.add(24);
-				T.r[0] = (uint16_t)(T.r[0] << 1); k.add(12);
-				k.at(0xA664); poke(T.r[6], peek((uint16_t)(0xFCFA + T.r[0]))); k.add(36);
-				k.call(0xEF24, 0xA66C);
-				k.at(0xA66C);
-				const bool same = kind() == peekb(0x0E6B);
-				k.add(45, 12);
-				if (same)
+				tick(0xA59E, 12);
+				tick(0xA8CC, 18);                      // JMP
+				goto finish;
+			}
+			tick(0xA5A2, 12);                          // BLE
+		}
+		T.r[0] = sext8(peekb((uint16_t)(0x61DA + T.r[0])));   // the type of the kind
+		fl::movb((uint8_t)T.r[0]);
+		tick(0xA5A6, 27);
+		T.r[0] = fl::logic((uint16_t)(T.r[0] & 0x00FF));
+		tick(0xA5AA, 18);
+		T.r[2] = T.r[0];
+		fl::mov(T.r[2]);
+		tick(0xA5AC, 12);
+		T.r[2] = fl::asl(T.r[2]);
+		tick(0xA5AE, 12);
+		const uint16_t at = fl::add(0xA5B2, peek((uint16_t)(0xFD1C + T.r[2])));
+		tick(at, 27);                                  // ADD 0xFD1C(R2),PC
+		switch (at)
+		{
+		case 0xA5B2:                                   // types 0, 1 (and 13): nothing
+			T.r[0] = 0;
+			fl::clr();
+			tick(0xA5B4, 12);
+			tick(0xA8B4, 18);                          // JMP
+			goto store;
+		case 0xA5B8:                                   // types 2, 7: he lands on it
+		{
+			byte(0xA5B8, 0x0334);
+			fl::cmp(T.r[0], T.r[1]);
+			tick(0xA5C0, 12);
+			if (T.r[0] == T.r[1])
+			{
+				tick(0xA5B4, 12);                      // BEQ: once per object
+				tick(0xA8B4, 18);                      // JMP
+				goto store;
+			}
+			tick(0xA5C2, 12);
+			const uint8_t state = peekb(0x031E);
+			fl::tstb(state);
+			tick(0xA5C6, 24);
+			if (state)
+				tick(0xA5E0, 12);                      // BNE
+			else
+			{
+				tick(0xA5C8, 12);
+				facing(0xA5C8);
+				pokeb(0x031D, (uint8_t)T.r[0]);
+				fl::movb((uint8_t)T.r[0]);
+				tick(0xA5E0, 27);
+			}
+			copy_b(0x031D, 0x01F8, 0xA5E6);
+			set_w(0x01B4, 0x0514, 0xA5EC);
+			jsr(0xA5F0, 0xA2F0);                       // skater_land
+			kind(0xA5F0, 0);
+			fl::cmp(T.r[0], 0x0004);
+			tick(0xA5FA, 18);
+			if (T.r[0] != 4)
+			{
+				tick(0xA5B4, 12);                      // BNE
+				tick(0xA8B4, 18);                      // JMP
+				goto store;
+			}
+			tick(0xA5FC, 12);                          // kind 4 ends the run
+			push(0);
+			fl::clr();
+			tick(0xA5FE, 24);
+			{
+				const uint8_t v = peekb((uint16_t)(0x0390 + T.r[1]));
+				fl::movb(v);
+				pokeb(T.r[6], v);
+			}
+			tick(0xA602, 36);
+			jsr(0xA606, 0xCF5E);
+			jsr(0xA60A, 0xE222);                       // state1_to_8
+			tick(0xA6A4, 12);                          // BR
+			tick(0xA782, 12);                          // BR
+			tick(0xA862, 12);                          // BR
+			tick(0xA8B2, 12);                          // BR
+			drop(0xA8B2);
+			goto store;
+		}
+		case 0xA6A6:                                   // types 3, 4: the object is hit
+			push(0x0067);
+			fl::mov(0x0067);
+			tick(0xA6AA, 30);
+			jsr(0xA6AE, 0x8E78);                       // queue_sound(0x67)
+			T.r[2] = T.r[1];
+			fl::mov(T.r[2]);
+			tick(0xA6B0, 12);
+			T.r[2] = fl::asl(T.r[2]);
+			tick(0xA6B2, 12);
+			poke((uint16_t)(0x03F0 + T.r[2]), 0);
+			fl::clr();
+			tick(0xA6B6, 30);
+			poke(T.r[6], T.r[1]);
+			fl::mov(T.r[1]);
+			tick(0xA6B8, 21);
+			push(0);
+			fl::clr();
+			tick(0xA6BA, 24);
+			{
+				const uint8_t v = peekb(0x5CDE);
+				fl::movb(v);
+				pokeb(T.r[6], v);
+			}
+			tick(0xA6BE, 33);
+			jsr(0xA6C2, 0xB602);
+			{
+				const uint16_t a = (uint16_t)(0x04B0 + T.r[1]);
+				pokeb(a, fl::logicb((uint8_t)(peekb(a) | 0x08)));
+			}
+			tick(0xA6C8, 36);
+			T.r[0] = 0x0007;
+			fl::mov(T.r[0]);
+			tick(0xA6CC, 18);
+			pokeb((uint16_t)(0x0790 + T.r[1]), (uint8_t)T.r[0]);
+			fl::movb((uint8_t)T.r[0]);
+			tick(0xA6D0, 30);
+			pokeb((uint16_t)(0x0770 + T.r[1]), (uint8_t)T.r[0]);
+			fl::movb((uint8_t)T.r[0]);
+			tick(0xA6D4, 30);
+			poke((uint16_t)(0x0430 + T.r[2]), 0x0080);
+			fl::mov(0x0080);
+			tick(0xA6DA, 36);
+			kind(0xA6DA, 0);
+			T.r[0] = fl::sub(T.r[0], 0x0048);
+			tick(0xA6E4, 18);
+			T.r[0] = fl::asl(T.r[0]);
+			tick(0xA6E6, 12);
+			{
+				const uint16_t v = peek((uint16_t)(0xFCFA + T.r[0]));   // the animation
+				fl::mov(v);
+				poke(T.r[6], v);
+			}
+			tick(0xA6EA, 36);
+			jsr(0xA6EE, 0xEF24);
+			drop2(0xA6EE);
+			tick(0xA708, 12);                          // BR
+			tick(0xA8B4, 18);                          // JMP
+			goto store;
+		case 0xA6F2:                                   // type 5: he rides it
+		{
+			const uint8_t carrier = peekb(0x0EA0);
+			fl::tstb(carrier);
+			tick(0xA6F6, 24);
+			if (carrier)
+				tick(0xA708, 12);                      // BNE
+			else
+			{
+				tick(0xA6F8, 12);
+				const uint8_t mode = peekb(0x031F);
+				fl::cmpb(mode, 0x01);
+				tick(0xA6FE, 30);
+				if (mode == 1)
 				{
-					k.at(0xA674); pokeb(0x0E6C, (uint8_t)(peekb(0x0E6C) - 1)); k.add(27);
+					tick(0xA756, 12);                  // BEQ (onto the BEQ at 0xA756)
+					tick(0xA708, 12);
 				}
-				k.at(0xA678); pokeb(0x0E6B, (uint8_t)kind()); k.add(48);
-				T.r[6] = (uint16_t)(T.r[6] + 2); k.add(18);
+				else
+				{
+					tick(0xA700, 12);
+					pokeb(0x0EA0, (uint8_t)T.r[1]);
+					fl::movb((uint8_t)T.r[1]);
+					tick(0xA704, 27);
+					pokeb(0x0EA0, fl::negb(peekb(0x0EA0)));
+					tick(0xA708, 27);
+				}
 			}
+			tick(0xA8B4, 18);                          // JMP
+			goto store;
 		}
-		T.r[0] = 0x3800; k.add(18);
-		k.at(0xA684); poke(0x01D2, T.r[0]); k.add(27);
-		k.at(0xA688); poke(0x1400, T.r[0]); k.add(27);
-		T.r[0] = 0x3C00; k.add(18);
-		k.at(0xA690); poke(0x01D4, T.r[0]); k.add(27);
-		k.at(0xA694); poke(0x1402, T.r[0]); k.add(27);
-		push(T.r[1]); k.add(24);
-		k.call(0x4ECC, 0xA69E);
-		poke(T.r[6], T.r[1]); k.add(21);
-		k.call(0xD47C, 0xA6A4);
-		k.add(12, 12, 12, 18);
-		T.r[6] = (uint16_t)(T.r[6] + 2);
-		fl::tst(rw((uint16_t)(T.r[6] - 2)));
-		store_object();
-		return;
-	}
-	case 8:
-	{
-		push(0x0061); k.add(30);
-		k.call(0x8E78, 0xA714);                 // queue_sound
-		T.r[0] = 0; k.add(12);
-		k.at(0xA716); T.r[0] = kind(); k.add(33);
-		T.r[0] = (uint16_t)(T.r[0] - 0x38); k.add(18);
-		k.at(0xA71E); T.r[2] = sext8(peekb((uint16_t)(0xFD10 + T.r[0]))); k.add(27);
-		poke(T.r[6], T.r[2]); k.add(21);
-		k.call(0xF002, 0xA728);
-		poke(T.r[6], 0); k.add(21);
-		k.at(0xA72A); poke(T.r[6], peekb((uint16_t)(0x0390 + T.r[1]))); k.add(36);
-		k.call(0xCF5E, 0xA732);
-		k.add(12, 12, 18);
-		T.r[6] = (uint16_t)(T.r[6] + 2);
-		fl::tst(rw((uint16_t)(T.r[6] - 2)));
-		store_object();
-		return;
-	}
-	case 9:
-	{
-		T.r[0] = 0; k.add(12);
-		k.at(0xA736); T.r[0] = kind(); k.add(33, 18, 12);
-		if (T.r[0] == 0x14)
+		case 0xA60C:                                   // type 6: bumped
 		{
-			T.r[0] = 7;
-			k.add(18, 12);
-		}
-		else
-		{
-			T.r[0] = 0x0F;
-			k.add(18);
-		}
-		k.at(0xA74A); pokeb(0x0329, (uint8_t)T.r[0]); k.add(27);
-		T.r[2] = 0; k.add(12);
-		k.at(0xA750); T.r[2] = peekb(0x0328); k.add(24, 12, 12);
-		if (T.r[2] == T.r[0])
-		{
-			k.add(18);
-			store_object();
-			return;
-		}
-		k.at(0xA758); pokeb(0x0328, (uint8_t)T.r[0]); k.add(27, 33, 12);
-		if (peek((uint16_t)(fp + 4)) & 1)
-		{
-			push(T.r[0]); k.add(24);
-			k.call(0x9E52, 0xA76A);             // slope_table_value
-			poke(T.r[6], T.r[0]); k.add(21);
-			k.call(0x9EEE, 0xA770);             // skater_deflect
-		}
-		else
-		{
-			push(0x0008); k.add(30);
-			T.r[0] = 0; k.add(12);
-			k.at(0xA778); T.r[0] = peekb(0x031D); k.add(24);
-			poke(T.r[6], (uint16_t)(rw(T.r[6]) ^ T.r[0])); k.add(21);
-			k.call(0x9E96, 0xA782);             // skater_bounce
-		}
-		k.add(12, 12, 18);
-		T.r[6] = (uint16_t)(T.r[6] + 2);
-		fl::tst(rw((uint16_t)(T.r[6] - 2)));
-		store_object();
-		return;
-	}
-	case 10:
-	{
-		push(T.r[1]); k.add(24);
-		k.call(0xA8D2, 0xA78A);
-		T.r[4] = T.r[0]; k.add(12);
-		T.r[0] = 0; k.add(12);
-		k.at(0xA78E); T.r[0] = kind(); k.add(33);
-		T.r[0] = (uint16_t)(T.r[0] - 0x1A); k.add(18);
-		T.r[5] = (uint16_t)(T.r[4] << 1); k.add(12, 12);
-		T.r[2] = (uint16_t)(0x03B0 + T.r[5]); k.add(18, 12);
-		poke(fp, T.r[1]);
-		poke(fp, (uint16_t)(T.r[1] << 1)); k.add(30, 30);
-		push(0x03B0);
-		poke(T.r[6], (uint16_t)(rw(T.r[6]) + rw((uint16_t)(T.r[6] + 4))));
-		T.r[3] = pop(); k.add(30, 36, 18);
-		bool far = true;
-		k.add(18, 12);
-		if ((int16_t)T.r[0] >= 5) k.add(18, 12);
-		if ((int16_t)T.r[0] < 5 || (int16_t)T.r[0] > 7)
-		{
-			T.r[0] = 0; k.add(12);
-			k.call(0xAD70, 0xA7C4);
-			far = !(T.r[0] & 1);
-			T.r[0] = ror(T.r[0]);
-			k.add(12, 12);
-		}
-		if (!far)
-		{
-			k.at(0xA7C8); poke(T.r[2], (uint16_t)(peek(T.r[2]) + 2)); k.add(27);
-			k.at(0xA7CC); poke(T.r[3], (uint16_t)(peek(T.r[3]) + 2)); k.add(27);
-			T.r[0] = 0x0018; k.add(18, 12);
-		}
-		else
-		{
-			k.at(0xA7D6); poke(0x0F20, (uint16_t)(peek(0x0F20) + 6)); k.add(33);
-			k.at(0xA7DC);
-			const bool over = (int16_t)peek(0x0F20) > 0x0080;
-			k.add(30, 12);
-			if (over)
+			byte(0xA60C, 0x0334);
+			fl::cmp(T.r[0], T.r[1]);
+			tick(0xA614, 12);
+			if (T.r[0] == T.r[1])
 			{
-				k.at(0xA7E4); poke(0x0F20, 0x0080); k.add(33);
+				tick(0xA5B4, 12);                      // BEQ: once per object
+				tick(0xA8B4, 18);                      // JMP
+				goto store;
 			}
-			k.at(0xA7EA); pokeb(0x0FA2, (uint8_t)(peekb(0x0FA2) | 0x04)); k.add(33);
-			k.at(0xA7F0); poke(T.r[2], (uint16_t)(peek(T.r[2]) + 4)); k.add(27);
-			k.at(0xA7F4); poke(T.r[3], (uint16_t)(peek(T.r[3]) + 4)); k.add(27);
-			T.r[0] = 0x0017; k.add(18);
+			tick(0xA616, 12);
+			T.r[0] = peek(0x06B2);
+			fl::mov(T.r[0]);
+			tick(0xA61A, 24);
+			T.r[0] = fl::sub(T.r[0], peek(0x06B0));
+			tick(0xA61E, 24);
+			fl::cmp(T.r[0], 0x0380);
+			tick(0xA622, 18);
+			if ((int16_t)T.r[0] < 0x0380)
+			{
+				tick(0xA624, 12);                      // near the height of the skater: as 2
+				facing(0xA624);
+				pokeb(0x031D, (uint8_t)T.r[0]);
+				fl::movb((uint8_t)T.r[0]);
+				tick(0xA63C, 27);
+				pokeb(0x01F8, (uint8_t)T.r[0]);
+				fl::movb((uint8_t)T.r[0]);
+				tick(0xA640, 27);
+				set_w(0x01B4, 0x0514, 0xA646);
+				jsr(0xA64A, 0xA2F0);                   // skater_land
+				tick(0xA680, 12);                      // BR
+			}
+			else
+			{
+				tick(0xA64C, 12);                      // BGE: the queued event 0x0E6C
+				byte(0xA64C, 0x0E6C);
+				fl::tst(T.r[0]);
+				tick(0xA654, 12);
+				if (!T.r[0])
+					tick(0xA680, 12);                  // BEQ
+				else
+				{
+					tick(0xA656, 12);
+					push(T.r[0]);
+					fl::mov(T.r[0]);
+					tick(0xA658, 24);
+					jsr(0xA65C, 0xF064);
+					byte(0xA65C, 0x0E6C);
+					T.r[0] = fl::asl(T.r[0]);
+					tick(0xA664, 12);
+					{
+						const uint16_t v = peek((uint16_t)(0xFCFA + T.r[0]));
+						fl::mov(v);
+						poke(T.r[6], v);
+					}
+					tick(0xA668, 36);
+					jsr(0xA66C, 0xEF24);
+					const uint8_t k = peekb(peek((uint16_t)(T.r[6] + 4)));
+					const uint8_t last = peekb(0x0E6B);
+					fl::cmpb(k, last);
+					tick(0xA672, 45);
+					if (k != last)
+						tick(0xA678, 12);              // BNE
+					else
+					{
+						tick(0xA674, 12);
+						pokeb(0x0E6C, fl::decb(peekb(0x0E6C)));
+						tick(0xA678, 27);
+					}
+					{
+						const uint8_t v = peekb(peek((uint16_t)(T.r[6] + 4)));
+						fl::movb(v);
+						pokeb(0x0E6B, v);
+					}
+					tick(0xA67E, 48);
+					drop(0xA67E);
+				}
+			}
+			bank_a(0xA680, 0x3800);
+			bank_b(0xA68C, 0x3C00);
+			push(T.r[1]);
+			fl::mov(T.r[1]);
+			tick(0xA69A, 24);
+			jsr(0xA69E, 0x4ECC);
+			poke(T.r[6], T.r[1]);
+			fl::mov(T.r[1]);
+			tick(0xA6A0, 21);
+			jsr(0xA6A4, 0xD47C);
+			tick(0xA782, 12);                          // BR
+			tick(0xA862, 12);                          // BR
+			tick(0xA8B2, 12);                          // BR
+			drop(0xA8B2);
+			goto store;
 		}
-		k.at(0xA7FC); pokeb(peek((uint16_t)(fp + 2)), (uint8_t)T.r[0]); k.add(36);
-		k.at(0xA800); pokeb((uint16_t)(0x0370 + T.r[4]), (uint8_t)T.r[0]); k.add(30);
-		k.at(0xA804); pokeb((uint16_t)(0x0490 + T.r[1]), (uint8_t)(peekb((uint16_t)(0x0490 + T.r[1])) | 0x18)); k.add(36);
-		k.at(0xA80A); pokeb((uint16_t)(0x0490 + T.r[4]), (uint8_t)(peekb((uint16_t)(0x0490 + T.r[4])) | 0x18)); k.add(36);
-		T.r[0] = peek(fp); k.add(27);
-		k.at(0xA814); poke((uint16_t)(0x0430 + T.r[0]), 0x0010); k.add(36);
-		k.at(0xA81A); poke((uint16_t)(0x0430 + T.r[5]), 0x000F); k.add(36);
-		k.add(12, 18);
-		T.r[6] = (uint16_t)(T.r[6] + 2);
-		fl::tst(rw((uint16_t)(T.r[6] - 2)));
-		store_object();
-		return;
-	}
-	case 11:
-	{
-		push(T.r[1]); k.add(24);
-		k.call(0xA8D2, 0xA828);
-		T.r[3] = T.r[0]; k.add(12);
-		T.r[4] = (uint16_t)(T.r[3] << 1); k.add(12, 12);
-		k.at(0xA82E); poke((uint16_t)(0x03B0 + T.r[4]), (uint16_t)(peek((uint16_t)(0x03B0 + T.r[4])) + 2)); k.add(36);
-		T.r[0] = (uint16_t)(T.r[1] << 1); k.add(12, 12);
-		k.at(0xA838); poke((uint16_t)(0x03B0 + T.r[0]), (uint16_t)(peek((uint16_t)(0x03B0 + T.r[0])) + 2)); k.add(36);
-		T.r[5] = 0x0018; k.add(18);
-		k.at(0xA842); pokeb(peek((uint16_t)(fp + 2)), 0x18); k.add(36);
-		k.at(0xA846); pokeb((uint16_t)(0x0370 + T.r[3]), 0x18); k.add(30);
-		k.at(0xA84A); pokeb((uint16_t)(0x0490 + T.r[1]), (uint8_t)(peekb((uint16_t)(0x0490 + T.r[1])) | 0x18)); k.add(36);
-		k.at(0xA850); pokeb((uint16_t)(0x0490 + T.r[3]), (uint8_t)(peekb((uint16_t)(0x0490 + T.r[3])) | 0x18)); k.add(36);
-		k.at(0xA856); poke((uint16_t)(0x0430 + T.r[0]), 0x0010); k.add(36);
-		k.at(0xA85C); poke((uint16_t)(0x0430 + T.r[4]), 0x000F); k.add(36);
-		k.add(12, 18);
-		T.r[6] = (uint16_t)(T.r[6] + 2);
-		fl::tst(rw((uint16_t)(T.r[6] - 2)));
-		store_object();
-		return;
-	}
-	case 12:
-	{
-		k.at(0xA864);
-		const bool level = peek(0x06B2) == peek(0x06B0);
-		k.add(36, 12);
-		if (!level)
+		case 0xA70C:                                   // type 8
+			push(0x0061);
+			fl::mov(0x0061);
+			tick(0xA710, 30);
+			jsr(0xA714, 0x8E78);                       // queue_sound(0x61)
+			kind(0xA714, 0);
+			T.r[0] = fl::sub(T.r[0], 0x0038);
+			tick(0xA71E, 18);
+			T.r[2] = sext8(peekb((uint16_t)(0xFD10 + T.r[0])));
+			fl::movb((uint8_t)T.r[2]);
+			tick(0xA722, 27);
+			poke(T.r[6], T.r[2]);
+			fl::mov(T.r[2]);
+			tick(0xA724, 21);
+			jsr(0xA728, 0xF002);
+			poke(T.r[6], 0);
+			fl::clr();
+			tick(0xA72A, 21);
+			{
+				const uint8_t v = peekb((uint16_t)(0x0390 + T.r[1]));
+				fl::movb(v);
+				pokeb(T.r[6], v);
+			}
+			tick(0xA72E, 36);
+			jsr(0xA732, 0xCF5E);
+			tick(0xA820, 12);                          // BR
+			tick(0xA8B2, 12);                          // BR
+			drop(0xA8B2);
+			goto store;
+		case 0xA734:                                   // type 9: bounce or deflect
+			kind(0xA734, 0);
+			fl::cmp(T.r[0], 0x0014);
+			tick(0xA73E, 18);
+			if (T.r[0] == 0x14)
+			{
+				tick(0xA740, 12);
+				T.r[0] = 0x0007;
+				fl::mov(T.r[0]);
+				tick(0xA744, 18);
+				tick(0xA74A, 12);                      // BR
+			}
+			else
+			{
+				tick(0xA746, 12);                      // BNE
+				T.r[0] = 0x000F;
+				fl::mov(T.r[0]);
+				tick(0xA74A, 18);
+			}
+			pokeb(0x0329, (uint8_t)T.r[0]);
+			fl::movb((uint8_t)T.r[0]);
+			tick(0xA74E, 27);
+			T.r[2] = 0;
+			fl::clr();
+			tick(0xA750, 12);
+			T.r[2] = (uint16_t)(T.r[2] | fl::logicb(peekb(0x0328)));
+			tick(0xA754, 24);
+			fl::cmp(T.r[2], T.r[0]);
+			tick(0xA756, 12);
+			if (T.r[2] == T.r[0])
+			{
+				tick(0xA708, 12);                      // BEQ
+				tick(0xA8B4, 18);                      // JMP
+				goto store;
+			}
+			tick(0xA758, 12);
+			pokeb(0x0328, (uint8_t)T.r[0]);
+			fl::movb((uint8_t)T.r[0]);
+			tick(0xA75C, 27);
+			fl::logic(peek((uint16_t)(fp + 4)) & 0x0001);
+			tick(0xA762, 33);
+			if (peek((uint16_t)(fp + 4)) & 0x0001)
+			{
+				tick(0xA764, 12);                      // on the ramp: deflected
+				push(T.r[0]);
+				fl::mov(T.r[0]);
+				tick(0xA766, 24);
+				jsr(0xA76A, 0x9E52);                   // slope_table_value
+				poke(T.r[6], T.r[0]);
+				fl::mov(T.r[0]);
+				tick(0xA76C, 21);
+				jsr(0xA770, 0x9EEE);                   // skater_deflect
+				tick(0xA862, 12);                      // BR
+			}
+			else
+			{
+				tick(0xA772, 12);                      // BEQ: bounced the other way
+				push(0x0008);
+				fl::mov(0x0008);
+				tick(0xA776, 30);
+				byte(0xA776, 0x031D);
+				poke(T.r[6], fl::logic((uint16_t)(peek(T.r[6]) ^ T.r[0])));
+				tick(0xA77E, 21);
+				jsr(0xA782, 0x9E96);                   // skater_bounce
+				tick(0xA862, 12);                      // BR
+			}
+			tick(0xA8B2, 12);                          // BR
+			drop(0xA8B2);
+			goto store;
+		case 0xA784:                                   // type 10: the pair change kind
 		{
-			store_object();
-			return;
+			push(T.r[1]);
+			fl::mov(T.r[1]);
+			tick(0xA786, 24);
+			jsr(0xA78A, 0xA8D2);                       // partner_object
+			T.r[4] = T.r[0];
+			fl::mov(T.r[4]);
+			tick(0xA78C, 12);
+			kind(0xA78C, 0);
+			T.r[0] = fl::sub(T.r[0], 0x001A);
+			tick(0xA796, 18);
+			T.r[5] = T.r[4];
+			fl::mov(T.r[5]);
+			tick(0xA798, 12);
+			T.r[5] = fl::asl(T.r[5]);
+			tick(0xA79A, 12);
+			T.r[2] = 0x03B0;
+			fl::mov(T.r[2]);
+			tick(0xA79E, 18);
+			T.r[2] = fl::add(T.r[2], T.r[5]);
+			tick(0xA7A0, 12);
+			poke(fp, T.r[1]);
+			fl::mov(T.r[1]);
+			tick(0xA7A4, 30);
+			poke(fp, fl::asl(peek(fp)));
+			tick(0xA7A8, 30);
+			push(0x03B0);
+			fl::mov(0x03B0);
+			tick(0xA7AC, 30);
+			poke(T.r[6], fl::add(peek(T.r[6]), peek((uint16_t)(T.r[6] + 4))));
+			tick(0xA7B0, 36);
+			T.r[3] = pop();
+			fl::mov(T.r[3]);
+			tick(0xA7B2, 18);
+			bool near = false;
+			fl::cmp(T.r[0], 0x0005);
+			tick(0xA7B6, 18);
+			bool look = (int16_t)T.r[0] < 5;
+			if (look)
+				tick(0xA7BE, 12);                      // BLT
+			else
+			{
+				tick(0xA7B8, 12);
+				fl::cmp(T.r[0], 0x0007);
+				tick(0xA7BC, 18);
+				look = (int16_t)T.r[0] > 7;
+				tick(look ? 0xA7BE : 0xA7D6, 12);      // BLE
+			}
+			if (look)
+			{
+				T.r[0] = 0;
+				fl::clr();
+				tick(0xA7C0, 12);
+				jsr(0xA7C4, 0xAD70);                   // sprite_in_front
+				near = (T.r[0] & 1) != 0;
+				T.r[0] = fl::ror(T.r[0]);
+				tick(0xA7C6, 12);
+				tick(near ? 0xA7C8 : 0xA7D6, 12);      // BCC
+			}
+			if (near)
+			{
+				poke(T.r[2], fl::add(peek(T.r[2]), 0x0002));
+				tick(0xA7CC, 27);
+				poke(T.r[3], fl::add(peek(T.r[3]), 0x0002));
+				tick(0xA7D0, 27);
+				T.r[0] = 0x0018;
+				fl::mov(T.r[0]);
+				tick(0xA7D4, 18);
+				tick(0xA7FC, 12);                      // BR
+			}
+			else
+			{
+				poke(0x0F20, fl::add(peek(0x0F20), 0x0006));   // points, at most 0x80
+				tick(0xA7DC, 33);
+				const uint16_t points = peek(0x0F20);
+				fl::cmp(points, 0x0080);
+				tick(0xA7E2, 30);
+				if ((int16_t)points <= 0x0080)
+					tick(0xA7EA, 12);                  // BLE
+				else
+				{
+					tick(0xA7E4, 12);
+					set_w(0x0F20, 0x0080, 0xA7EA);
+				}
+				pokeb(0x0FA2, fl::logicb((uint8_t)(peekb(0x0FA2) | 0x04)));
+				tick(0xA7F0, 33);
+				poke(T.r[2], fl::add(peek(T.r[2]), 0x0004));
+				tick(0xA7F4, 27);
+				poke(T.r[3], fl::add(peek(T.r[3]), 0x0004));
+				tick(0xA7F8, 27);
+				T.r[0] = 0x0017;
+				fl::mov(T.r[0]);
+				tick(0xA7FC, 18);
+			}
+			pokeb(peek((uint16_t)(T.r[6] + 4)), (uint8_t)T.r[0]);
+			fl::movb((uint8_t)T.r[0]);
+			tick(0xA800, 36);
+			pokeb((uint16_t)(0x0370 + T.r[4]), (uint8_t)T.r[0]);
+			fl::movb((uint8_t)T.r[0]);
+			tick(0xA804, 30);
+			{
+				const uint16_t a = (uint16_t)(0x0490 + T.r[1]);
+				pokeb(a, fl::logicb((uint8_t)(peekb(a) | 0x18)));
+			}
+			tick(0xA80A, 36);
+			{
+				const uint16_t a = (uint16_t)(0x0490 + T.r[4]);
+				pokeb(a, fl::logicb((uint8_t)(peekb(a) | 0x18)));
+			}
+			tick(0xA810, 36);
+			T.r[0] = peek((uint16_t)(T.r[6] + 2));
+			fl::mov(T.r[0]);
+			tick(0xA814, 27);
+			poke((uint16_t)(0x0430 + T.r[0]), 0x0010);
+			fl::mov(0x0010);
+			tick(0xA81A, 36);
+			poke((uint16_t)(0x0430 + T.r[5]), 0x000F);
+			fl::mov(0x000F);
+			tick(0xA820, 36);
+			tick(0xA8B2, 12);                          // BR
+			drop(0xA8B2);
+			goto store;
 		}
-		k.at(0xA86C); T.r[0] = peek(0x01B4); k.add(24, 12);
-		if ((int16_t)T.r[0] < 0)
+		case 0xA822:                                   // type 11: the pair change kind
+			push(T.r[1]);
+			fl::mov(T.r[1]);
+			tick(0xA824, 24);
+			jsr(0xA828, 0xA8D2);                       // partner_object
+			T.r[3] = T.r[0];
+			fl::mov(T.r[3]);
+			tick(0xA82A, 12);
+			T.r[4] = T.r[3];
+			fl::mov(T.r[4]);
+			tick(0xA82C, 12);
+			T.r[4] = fl::asl(T.r[4]);
+			tick(0xA82E, 12);
+			poke((uint16_t)(0x03B0 + T.r[4]), fl::add(peek((uint16_t)(0x03B0 + T.r[4])), 0x0002));
+			tick(0xA834, 36);
+			T.r[0] = T.r[1];
+			fl::mov(T.r[0]);
+			tick(0xA836, 12);
+			T.r[0] = fl::asl(T.r[0]);
+			tick(0xA838, 12);
+			poke((uint16_t)(0x03B0 + T.r[0]), fl::add(peek((uint16_t)(0x03B0 + T.r[0])), 0x0002));
+			tick(0xA83E, 36);
+			T.r[5] = 0x0018;
+			fl::mov(T.r[5]);
+			tick(0xA842, 18);
+			pokeb(peek((uint16_t)(T.r[6] + 4)), (uint8_t)T.r[5]);
+			fl::movb((uint8_t)T.r[5]);
+			tick(0xA846, 36);
+			pokeb((uint16_t)(0x0370 + T.r[3]), (uint8_t)T.r[5]);
+			fl::movb((uint8_t)T.r[5]);
+			tick(0xA84A, 30);
+			{
+				const uint16_t a = (uint16_t)(0x0490 + T.r[1]);
+				pokeb(a, fl::logicb((uint8_t)(peekb(a) | 0x18)));
+			}
+			tick(0xA850, 36);
+			{
+				const uint16_t a = (uint16_t)(0x0490 + T.r[3]);
+				pokeb(a, fl::logicb((uint8_t)(peekb(a) | 0x18)));
+			}
+			tick(0xA856, 36);
+			poke((uint16_t)(0x0430 + T.r[0]), 0x0010);
+			fl::mov(0x0010);
+			tick(0xA85C, 36);
+			poke((uint16_t)(0x0430 + T.r[4]), 0x000F);
+			fl::mov(0x000F);
+			tick(0xA862, 36);
+			tick(0xA8B2, 12);                          // BR
+			drop(0xA8B2);
+			goto store;
+		case 0xA864:                                   // type 12: a bump on level ground
 		{
-			T.r[0] = (uint16_t)-T.r[0];
-			k.add(12);
+			const uint16_t z = peek(0x06B2), ground = peek(0x06B0);
+			fl::cmp(z, ground);
+			tick(0xA86A, 36);
+			if (z != ground)
+			{
+				tick(0xA8B4, 12);                      // BNE
+				goto store;
+			}
+			tick(0xA86C, 12);
+			T.r[0] = peek(0x01B4);
+			fl::mov(T.r[0]);
+			tick(0xA870, 24);
+			if ((int16_t)T.r[0] >= 0)
+				tick(0xA874, 12);                      // BGE
+			else
+			{
+				tick(0xA872, 12);
+				T.r[0] = fl::neg(T.r[0]);
+				tick(0xA874, 12);
+			}
+			fl::cmp(T.r[0], 0x0180);
+			tick(0xA878, 18);
+			if ((int16_t)T.r[0] < 0x0180)
+			{
+				tick(0xA8B4, 12);                      // BLT: not fast enough
+				goto store;
+			}
+			tick(0xA87A, 12);
+			T.r[0] = 0x0002;
+			fl::mov(T.r[0]);
+			tick(0xA87E, 18);
+			pokeb((uint16_t)(0x0790 + T.r[1]), (uint8_t)T.r[0]);
+			fl::movb((uint8_t)T.r[0]);
+			tick(0xA882, 30);
+			pokeb((uint16_t)(0x0770 + T.r[1]), (uint8_t)T.r[0]);
+			fl::movb((uint8_t)T.r[0]);
+			tick(0xA886, 30);
+			bank_b(0xA886, 0x2C00);
+			T.r[0] = sext8(peekb(0x025D));             // the board
+			fl::movb((uint8_t)T.r[0]);
+			tick(0xA896, 24);
+			T.r[0] = fl::asl(T.r[0]);
+			tick(0xA898, 12);
+			poke(0x05B2, fl::add(peek(0x05B2), peek((uint16_t)(0x7CA4 + T.r[0]))));
+			tick(0xA89E, 42);
+			fl::logic(peek((uint16_t)(fp + 4)) & 0x0001);
+			tick(0xA8A4, 33);
+			if (!(peek((uint16_t)(fp + 4)) & 0x0001))
+				tick(0xA8AA, 12);                      // BEQ
+			else
+			{
+				tick(0xA8A6, 12);
+				jsr(0xA8AA, 0x9F8A);                   // skater_jump
+			}
+			push(0x007B);
+			fl::mov(0x007B);
+			tick(0xA8AE, 30);
+			jsr(0xA8B2, 0x8E78);                       // queue_sound(0x7B)
+			drop(0xA8B2);
+			goto store;
 		}
-		k.add(18, 12);
-		if ((int16_t)T.r[0] < 0x0180)
-		{
-			store_object();
-			return;
+		default:                                       // kinds beyond the types
+			leave_to(at);
 		}
-		T.r[0] = 2; k.add(18);
-		k.at(0xA87E); pokeb((uint16_t)(0x0790 + T.r[1]), 2); k.add(30);
-		k.at(0xA882); pokeb((uint16_t)(0x0770 + T.r[1]), 2); k.add(30);
-		T.r[0] = 0x2C00; k.add(18);
-		k.at(0xA88A); poke(0x01D4, T.r[0]); k.add(27);
-		k.at(0xA88E); poke(0x1402, T.r[0]); k.add(27);
-		k.at(0xA892); T.r[0] = sext8(peekb(0x025D)); k.add(24);
-		T.r[0] = (uint16_t)(T.r[0] << 1); k.add(12);
-		k.at(0xA898); poke(0x05B2, (uint16_t)(peek(0x05B2) + peek((uint16_t)(0x7CA4 + T.r[0])))); k.add(42, 33, 12);
-		if (peek((uint16_t)(fp + 4)) & 1)
-		{
-			k.call(0x9F8A, 0xA8AA);             // skater_jump
-		}
-		push(0x007B); k.add(30);
-		k.call(0x8E78, 0xA8B2);                 // queue_sound
-		k.add(18);
-		T.r[6] = (uint16_t)(T.r[6] + 2);
-		fl::tst(rw((uint16_t)(T.r[6] - 2)));
-		store_object();
-		return;
 	}
-	default:
-		// types 0 and 1 do nothing; 13 is the next table's first word (0, as type 0) and
-		// higher kinds of the table are not object types
-		T.r[0] = 0;
-		k.add(12, 18);
-		store_object();
-		return;
-	}
+store:
+	pokeb(0x0334, (uint8_t)T.r[1]);                    // the object handled
+	fl::movb((uint8_t)T.r[1]);
+	tick(0xA8B8, 27);
+	tick(0xA8CC, 12);                                  // BR
+finish:
+	T.r[6] = fl::add(T.r[6], 0x0006);
+	tick(0xA8D0, 18);
+	rts();
 }
 
 // F:9E96  skater_bounce(int dir): new direction dir (0x3F: the opposite one), speed 0x160,
