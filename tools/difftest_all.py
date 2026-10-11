@@ -11,9 +11,10 @@ original's cycles per call (input for tools/update_cycles.py) and keeps the firs
 of each routine with the scenario it came from.  Exit status 1 if anything mismatched.
 
 Scenarios: the attract mode without input, random play with three seeds, each of the four parks (entered by setting the park
-number 0x027A and the game phase 0x0F26 = 1), the ticket gate event (0x032A = 1), a series of
-other terrain events, power-on with the test switch held (self test) and a game ending with a
-high score (initials entry).
+number 0x027A and the game phase 0x0F26 = 1), the ticket gate event (0x032A = 1) played until
+the park ends, a series of other terrain events, the trick moves, power-on with the test switch
+held (self test, and its controller screens), a game ending with a high score (initials
+entry), the controller turned during the attract mode and a two-player game.
 
 --record-coverage runs the scenarios on the reference model (ref720 --coverage) and adds
 what they execute to re/coverage/main_cov.txt, main_edges.txt, sound_cov.txt and
@@ -41,7 +42,7 @@ def scenarios(selftest_script):
          ('random11', 12000, ['--random', '11'])]
     for p in range(4):
         s.append(('park%d' % p, 6000, ['--random', '5', '--poke', '1200:027A:010%d' % p, '--poke', '1200:0F26:0001']))
-    s.append(('gate', 6000, ['--random', '3', '--poke', '1000:032A:0001', '--poke', '1100:0F26:0001']))
+    s.append(('gate', 20000, ['--random', '3', '--poke', '1000:032A:0001', '--poke', '1100:0F26:0001']))
     ev = ['--random', '3']
     for e in EVENTS:
         ev += ['--poke', e]
@@ -69,6 +70,23 @@ def scenarios(selftest_script):
         fh.write('\n'.join(lines) + '\n')
     s.append(('rotary', 7800, ['--script', rotary]))
     s.append(('hiscore', 6000, ['--random', '3', '--poke', '2500:023E:9999', '--poke', '2500:0240:0009']))
+    # the attract mode's look at the controller (B3:620C): a fast turn backwards, later one
+    # forwards, each starting the title again
+    turns = os.path.join(os.path.dirname(selftest_script), 'turns.txt')
+    lines = ['%d rotate -8' % f for f in range(2400, 2500)] + ['%d rotate 8' % f for f in range(3400, 3500)]
+    with open(turns, 'w') as fh:
+        fh.write('\n'.join(lines) + '\n')
+    s.append(('turns', 6000, ['--script', turns]))
+    # a two-player game (four coins, then button 2) with the ticket gate event, played to the
+    # end without input
+    two = os.path.join(os.path.dirname(selftest_script), 'twoplayer.txt')
+    lines = []
+    for f in (100, 160, 220, 280):
+        lines += ['%d coin1 1' % f, '%d coin1 0' % (f + 6)]
+    lines += ['700 b2 1', '706 b2 0']
+    with open(two, 'w') as fh:
+        fh.write('\n'.join(lines) + '\n')
+    s.append(('twoplayer', 15000, ['--script', two, '--poke', '1500:032A:0001', '--poke', '1600:0F26:0001']))
     return s
 
 
