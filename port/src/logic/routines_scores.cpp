@@ -508,16 +508,19 @@ void selftest_charset_screen()
 	// the digits 0-9 (counter register r) drawn by draw at the loop at pc
 	auto digits = [](uint16_t pc, int r, uint16_t draw) {
 		T.r[r] = 0x0030;
+		fl::mov(T.r[r]);
 		tick(pc, 18);
 		for (;;)
 		{
 			T.r[0] = T.r[r];
+			fl::mov(T.r[0]);
 			tick((uint16_t)(pc + 2), 12);
 			jsr((uint16_t)(pc + 6), draw);
-			poke(0x0186, (uint16_t)(peek(0x0186) + 2));
+			poke(0x0186, fl::add(peek(0x0186), 2));
 			tick((uint16_t)(pc + 0x0C), 33);
-			T.r[r]++;
+			T.r[r] = fl::inc(T.r[r]);
 			tick((uint16_t)(pc + 0x0E), 12);
+			fl::cmp(T.r[r], 0x0039);
 			tick((uint16_t)(pc + 0x12), 18);           // CMP Rr,#0x39
 			if ((int16_t)T.r[r] > 0x39) break;
 			tick(pc, 12);                              // BLE
@@ -527,33 +530,39 @@ void selftest_charset_screen()
 	// the letters 0x41-0x5E, ten per line (line step, next colour), drawn by draw at pc
 	auto letters = [](uint16_t pc, uint16_t line_step, uint16_t draw) {
 		T.r[1] = 0x000A;
+		fl::mov(T.r[1]);
 		tick((uint16_t)(pc - 4), 18);
 		T.r[2] = 0x0041;
+		fl::mov(T.r[2]);
 		tick(pc, 18);
 		for (;;)
 		{
+			fl::cmp(T.r[1], 0x000A);
 			tick((uint16_t)(pc + 4), 18);              // CMP R1,#10
 			if (T.r[1] == 0x000A)
 			{
 				tick((uint16_t)(pc + 6), 12);
-				poke(0x0186, (uint16_t)(peek(0x0186) + line_step));
+				poke(0x0186, fl::add(peek(0x0186), line_step));
 				tick((uint16_t)(pc + 0x0C), 33);
 				T.r[1] = 0;
+				fl::clr();
 				tick((uint16_t)(pc + 0x0E), 12);
-				poke(0x0188, (uint16_t)(peek(0x0188) + 0x2000));
+				poke(0x0188, fl::add(peek(0x0188), 0x2000));
 				tick((uint16_t)(pc + 0x14), 33);
 			}
 			else
 				tick((uint16_t)(pc + 0x14), 12);       // BNE
-			T.r[1]++;
+			T.r[1] = fl::inc(T.r[1]);
 			tick((uint16_t)(pc + 0x16), 12);
 			T.r[0] = T.r[2];
+			fl::mov(T.r[0]);
 			tick((uint16_t)(pc + 0x18), 12);
 			jsr((uint16_t)(pc + 0x1C), draw);
-			poke(0x0186, (uint16_t)(peek(0x0186) + 2));
+			poke(0x0186, fl::add(peek(0x0186), 2));
 			tick((uint16_t)(pc + 0x22), 33);
-			T.r[2]++;
+			T.r[2] = fl::inc(T.r[2]);
 			tick((uint16_t)(pc + 0x24), 12);
+			fl::cmp(T.r[2], 0x005E);
 			tick((uint16_t)(pc + 0x28), 18);           // CMP R2,#0x5E
 			if ((int16_t)T.r[2] > 0x5E) break;
 			tick(pc, 12);                              // BLE

@@ -8713,7 +8713,9 @@ uint16_t trick_moves(const Args &)
 			break;
 		case 1:
 		{
-			const bool five = peekb(0x07B2) == 5;
+			const uint8_t v = peekb(0x07B2);
+			fl::cmpb(v, 5);
+			const bool five = v == 5;
 			tick(0x566E, 30);                          // CMPB @#0x07B2,#5
 			if (!five)
 			{
@@ -8758,7 +8760,9 @@ uint16_t trick_moves(const Args &)
 		}
 		case 2:
 		{
-			const bool five = peekb(0x07B2) == 5;
+			const uint8_t v = peekb(0x07B2);
+			fl::cmpb(v, 5);
+			const bool five = v == 5;
 			tick(0x569A, 30);                          // CMPB @#0x07B2,#5
 			if (five)
 			{
@@ -8804,7 +8808,9 @@ uint16_t trick_moves(const Args &)
 			break;
 		case 4:
 		{
-			const bool frame = peekb(0x07B2) != 0;
+			const uint8_t v = peekb(0x07B2);
+			fl::tstb(v);
+			const bool frame = v != 0;
 			tick(0x56CA, 24);                          // TSTB @#0x07B2
 			if (!frame)
 			{
@@ -8967,7 +8973,9 @@ uint16_t trick_moves(const Args &)
 			break;
 		case 17:
 		{
-			const bool full = peekb(0x0327) == 7;
+			const uint8_t v = peekb(0x0327);
+			fl::cmpb(v, 7);
+			const bool full = v == 7;
 			tick(0x57CA, 30);                          // CMPB @#0x0327,#7
 			if (full)
 			{
@@ -13406,7 +13414,9 @@ void game_over_states()
 	for (uint16_t pc = 0x5F58; pc <= 0x5F74; pc = (uint16_t)(pc + 0x1C))
 	{
 		// the parks of player 1 / 2 (0x0F2E / 0x0F2F), the other's second
-		const bool second = peekb(0x01F5) != 0;
+		const uint8_t v = peekb(0x01F5);
+		fl::tstb(v);
+		const bool second = v != 0;
 		tick((uint16_t)(pc + 4), 24);                  // TSTB @#0x01F5
 		const uint16_t first = pc == 0x5F58 ? 0x0F2E : 0x0F2F;
 		const uint16_t other = pc == 0x5F58 ? 0x0F2F : 0x0F2E;
