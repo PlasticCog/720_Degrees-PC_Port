@@ -35,7 +35,10 @@
 4656  voice_list
 4B70  slide
 4C1B  ym_values
+4D07  pair_lists
+4E6D  ym_channel
 4FF5  wait_ym
+5012  player
 57AC  nmi
 5831  speech_init
 5883  speech

@@ -982,12 +982,434 @@ l4C6E:
 	rts();
 }
 
+// 4D07: the two voice lists Y and Y + 1 of a channel pair (the chips other than the YM2151):
+// each list's values (4656) with the louder (priority 0x06E9 / 0x06EA against the threshold
+// 0x13) kept; returns the volume bits in A, carry set when the second list wins
+void pair_lists()
+{
+	tya(0x4D08);
+	pha(0x4D09);
+	iny(0x4D0A);
+	lda(imm(0x00), 0x4D0C);
+	static const uint16_t zero[9] = {0x06EC, 0x06ED, 0x06E9, 0x06EA, 0x06F0, 0x06EF, 0x06F6, 0x06F7, 0x06F8};
+	for (int i = 0; i < 9; i++) sta(wab(zero[i]), (uint16_t)(0x4D0F + 3 * i));
+	lda(imm(0xFF), 0x4D29);
+	sta(wab(0x06FA), 0x4D2C);
+	sta(wab(0x06FB), 0x4D2F);
+	sta(wab(0x06FC), 0x4D32);
+	ldx(aby(0x06C0), 0x4D35);
+	if (!beq(0x4D35, 0x4D7E))
+	{
+		// the second list first, its values put aside
+		dex(0x4D38);
+		sty(wab(0x06F4), 0x4D3B);
+		jsr(0x4D3B, 0x4656);                           // voice_list
+		lda(ab(0x06E9), 0x4D41);
+		sta(wab(0x06EC), 0x4D44);
+		cmp(zp(0x13), 0x4D46);
+		lda(imm(0x00), 0x4D48);
+		if (!bcc(0x4D48, 0x4D59))
+		{
+			lda(ab(0x06F6), 0x4D4D);
+			sta(wab(0x06F8), 0x4D50);
+			lda(ab(0x06FA), 0x4D53);
+			sta(wab(0x06FC), 0x4D56);
+			lda(ab(0x06EF), 0x4D59);
+		}
+		sta(wab(0x06ED), 0x4D5C);
+		lda(ab(0x06F1), 0x4D5F);
+		sta(wab(0x06EE), 0x4D62);
+		lda(imm(0x00), 0x4D64);
+		static const uint16_t again[6] = {0x06E9, 0x06EA, 0x06F0, 0x06EF, 0x06F6, 0x06F7};
+		for (int i = 0; i < 6; i++) sta(wab(again[i]), (uint16_t)(0x4D67 + 3 * i));
+		lda(imm(0xFF), 0x4D78);
+		sta(wab(0x06FA), 0x4D7B);
+		sta(wab(0x06FB), 0x4D7E);
+	}
+	pla(0x4D7F);
+	tay(0x4D80);
+	ldx(aby(0x06C0), 0x4D83);
+	if (!beq(0x4D83, 0x4D8C))
+	{
+		dex(0x4D86);
+		sty(wab(0x06F4), 0x4D89);
+		jsr(0x4D89, 0x4656);                           // voice_list
+	}
+	lda(ab(0x06E9), 0x4D8F);
+	cmp(ab(0x06EA), 0x4D92);
+	if (!bcs(0x4D92, 0x4D97)) lda(ab(0x06EA), 0x4D97);
+	cmp(zp(0x13), 0x4D99);
+	if (!bcs(0x4D99, 0x4DB1))
+	{
+		// both too quiet: silence
+		lda(imm(0x00), 0x4D9D);
+		static const uint16_t quiet[4] = {0x06EF, 0x06F0, 0x06F6, 0x06F7};
+		for (int i = 0; i < 4; i++) sta(wab(quiet[i]), (uint16_t)(0x4DA0 + 3 * i));
+		lda(imm(0xFF), 0x4DAB);
+		sta(wab(0x06FA), 0x4DAE);
+		sta(wab(0x06FB), 0x4DB1);
+	}
+	lda(ab(0x06E9), 0x4DB4);
+	cmp(ab(0x06EC), 0x4DB7);
+	if (!bcc(0x4DB7, 0x4DBC)) sta(wab(0x06EC), 0x4DBC);
+	lda(ab(0x06EA), 0x4DBF);
+	cmp(ab(0x06EC), 0x4DC2);
+	if (!bcc(0x4DC2, 0x4DD9))
+	{
+		lda(imm(0x00), 0x4DC6);
+		sta(wab(0x06EF), 0x4DC9);
+		lda(ab(0x06FB), 0x4DCC);
+		and_(ab(0x06FD), 0x4DCF);
+		sta(wab(0x06FD), 0x4DD2);
+		lda(ab(0x06F7), 0x4DD5);
+		ora(ab(0x06F9), 0x4DD8);
+		rts();
+		return;
+	}
+	lda(ab(0x06EE), 0x4DDC);
+	sta(wab(0x06F3), 0x4DDF);
+	lda(ab(0x06F1), 0x4DE2);
+	sta(wab(0x06F2), 0x4DE5);
+	lda(ab(0x06ED), 0x4DE8);
+	sta(wab(0x06F0), 0x4DEB);
+	lda(ab(0x06FA), 0x4DEE);
+	and_(ab(0x06FC), 0x4DF1);
+	and_(ab(0x06FD), 0x4DF4);
+	sta(wab(0x06FD), 0x4DF7);
+	lda(ab(0x06F6), 0x4DFA);
+	ora(ab(0x06F8), 0x4DFD);
+	ora(ab(0x06F9), 0x4E00);
+	rts();
+}
+
+// the four values of a channel pair to the block at (0x08) from offset y
+void pair_values(uint16_t pc, uint8_t y)
+{
+	ldy(imm(y), (uint16_t)(pc + 2));
+	lda(ab(0x06F2), (uint16_t)(pc + 5));
+	sta(wiy(0x08), (uint16_t)(pc + 7));
+	iny((uint16_t)(pc + 8));
+	iny((uint16_t)(pc + 9));
+	lda(ab(0x06F3), (uint16_t)(pc + 0x0C));
+	sta(wiy(0x08), (uint16_t)(pc + 0x0E));
+	dey((uint16_t)(pc + 0x0F));
+	lda(ab(0x06EF), (uint16_t)(pc + 0x12));
+	sta(wiy(0x08), (uint16_t)(pc + 0x14));
+	iny((uint16_t)(pc + 0x15));
+	iny((uint16_t)(pc + 0x16));
+	lda(ab(0x06F0), (uint16_t)(pc + 0x19));
+	sta(wiy(0x08), (uint16_t)(pc + 0x1B));
+}
+
+// 4E01 (jumped to by 5012): the player of a chip with channel pairs: both pairs of player X
+// (lists from 0x57A9[X]) into its block at (0x08), the volume bits at offset 8
+void player_pairs()
+{
+	lda(imm(0x00), 0x4E03);
+	sta(wab(0x06F9), 0x4E06);
+	lda(imm(0xFF), 0x4E08);
+	sta(wab(0x06FD), 0x4E0B);
+	txa(0x4E0C);
+	pha(0x4E0D);
+	lda(abx(0x57A9), 0x4E10);
+	pha(0x4E11);
+	tay(0x4E12);
+	iny(0x4E13);
+	iny(0x4E14);
+	jsr(0x4E14, 0x4D07);                               // pair_lists: the second pair
+	if (!bcc(0x4E17, 0x4E1B)) ora(imm(0x28), 0x4E1B);
+	sta(wab(0x06F9), 0x4E1E);
+	pair_values(0x4E1E, 0x04);
+	pla(0x4E3A);
+	tay(0x4E3B);
+	jsr(0x4E3B, 0x4D07);                               // the first pair
+	if (!bcc(0x4E3E, 0x4E42)) ora(imm(0x50), 0x4E42);
+	sta(wab(0x06F9), 0x4E45);
+	pla(0x4E46);
+	tax(0x4E47);
+	lda(ab(0x06F9), 0x4E4A);
+	and_(ab(0x06FD), 0x4E4D);
+	ldy(imm(0x08), 0x4E4F);
+	sta(wiy(0x08), 0x4E51);
+	pair_values(0x4E51, 0x00);
+	rts();
+}
+
+// 4E6D: YM2151 channel 0x0714 with its voice list Y: the list's values (4656), then, for its
+// last slot (0x17 = 0), the registers 0x20 (connection), 0x30 (key fraction), 0x38 (modulation)
+// and when flagged (0x0707 bit 0) the key on (register 8); when loud enough (0x06EA >= 0x13)
+// and flagged (bit 1) the key code 0x28 (0x5A88 by the note) and the four operators' total
+// levels 0x60-0x7F from the voice's levels, the volume 0x0700 less 0x5BEA and the key scaling
+// tables (0x5798, 0xC0CC, 0x5AEA), within 0..0x7F; flagged (bit 2) the key on again (0x78)
+void ym_channel()
+{
+	ldx(aby(0x06C0), 0x4E70);
+	if (!bne(0x4E70, 0x4E73))
+	{
+		rts();
+		return;
+	}
+	dex(0x4E74);
+	lda(imm(0x00), 0x4E76);
+	sta(wab(0x06EA), 0x4E79);
+	sta(wab(0x06F1), 0x4E7C);
+	sty(wab(0x06F4), 0x4E7F);
+	jsr(0x4E7F, 0x4656);                               // voice_list
+	lda(zp(0x17), 0x4E84);
+	if (!beq(0x4E84, 0x4E87))
+	{
+		rts();
+		return;
+	}
+	// a register: Y = its base + 0x0714, the value from 0x0715 + Y
+	auto reg = [](uint16_t pc, uint8_t base, bool clc_first) {
+		if (clc_first)
+		{
+			clc((uint16_t)(pc + 1));
+			lda(imm(base), (uint16_t)(pc + 3));
+		}
+		else
+		{
+			lda(imm(base), (uint16_t)(pc + 2));
+			clc((uint16_t)(pc + 3));
+		}
+		adc(ab(0x0714), (uint16_t)(pc + 6));
+		tay((uint16_t)(pc + 7));
+		jsr((uint16_t)(pc + 7), 0x4FF5);              // wait_ym
+		sty(wab(0x1850), (uint16_t)(pc + 0x0D));
+		lda(aby(0x0715), (uint16_t)(pc + 0x10));
+		sta(wab(0x1851), (uint16_t)(pc + 0x13));
+	};
+	reg(0x4E87, 0x20, true);
+	reg(0x4E9A, 0x30, false);
+	reg(0x4EAD, 0x38, false);
+	lsr(mab(0x0707), 0x4EC3);
+	if (!bcc(0x4EC3, 0x4ED3))
+	{
+		ldy(imm(0x08), 0x4EC7);
+		jsr(0x4EC7, 0x4FF5);                           // wait_ym
+		sty(wab(0x1850), 0x4ECD);
+		lda(ab(0x0714), 0x4ED0);
+		sta(wab(0x1851), 0x4ED3);
+	}
+	lda(ab(0x06EA), 0x4ED6);
+	cmp(zp(0x13), 0x4ED8);
+	if (bcc(0x4ED8, 0x4E72))
+	{
+		rts();
+		return;
+	}
+	lsr(mab(0x0707), 0x4EDD);
+	if (bcc(0x4EDD, 0x4E72))
+	{
+		rts();
+		return;
+	}
+	ldx(ab(0x06F1), 0x4EE2);
+	if (beq(0x4EE2, 0x4E72))
+	{
+		rts();
+		return;
+	}
+	// the key code
+	clc(0x4EE5);
+	lda(ab(0x0714), 0x4EE8);
+	adc(imm(0x28), 0x4EEA);
+	tay(0x4EEB);
+	jsr(0x4EEB, 0x4FF5);                               // wait_ym
+	sty(wab(0x1850), 0x4EF1);
+	lda(abx(0x5A88), 0x4EF4);
+	sta(waby(0x0715), 0x4EF7);
+	sta(wab(0x1851), 0x4EFA);
+	sta(wab(0x06F1), 0x4EFD);
+	// the operators' levels
+	lda(imm(0x20), 0x4EFF);
+	clc(0x4F00);
+	adc(ab(0x0714), 0x4F03);
+	tax(0x4F04);
+	lda(abx(0x0715), 0x4F07);
+	and_(imm(0x07), 0x4F09);
+	tax(0x4F0A);
+	lda(abx(0x5798), 0x4F0D);                          // which operators are carriers
+	sta(wzp(0x0F), 0x4F0F);
+	ldy(imm(0x06), 0x4F11);
+	sty(wzp(0x0C), 0x4F13);
+	lda(ab(0x0707), 0x4F16);
+	lsr_a(0x4F17);
+	lsr_a(0x4F18);
+	tax(0x4F19);
+	lda(abx(0x5BEA), 0x4F1C);
+	sta(wab(0x06EB), 0x4F1F);
+	lda(aby(0x0700), 0x4F22);
+	sec(0x4F23);
+	sbc(ab(0x06EB), 0x4F26);
+	if (!bmi(0x4F26, 0x4F2C))
+	{
+		if (!bvc(0x4F28, 0x4F2C)) lda(imm(0x80), 0x4F2C);
+	}
+	sta(wzp(0x0E), 0x4F2E);
+	sta(wzp(0x10), 0x4F30);
+	cmp(imm(0x80), 0x4F32);
+	bool store = true;
+	if (beq(0x4F32, 0x4F3D))
+		lda(imm(0x7F), 0x4F3F);
+	else if (bcc(0x4F34, 0x4F41))
+		store = false;
+	else
+	{
+		eor(imm(0xFF), 0x4F38);
+		clc(0x4F39);
+		adc(imm(0x01), 0x4F3B);
+		if (!bne(0x4F3B, 0x4F3F)) lda(imm(0x7F), 0x4F3F);
+	}
+	if (store) sta(wzp(0x0E), 0x4F41);
+	asl(mzp(0x0E), 0x4F43);
+	for (;;)
+	{
+		ldy(zp(0x0C), 0x4F45);
+		lda(aby(0x06FF), 0x4F48);
+		for (uint16_t pc = 0x4F49; pc <= 0x4F4C; pc++) lsr_a(pc);
+		sta(wab(0x06EB), 0x4F4F);
+		lda(ab(0x06F1), 0x4F52);
+		ora(aby(0x06FE), 0x4F55);
+		tay(0x4F56);
+		lda(aby(0xC0CC), 0x4F59);
+		eor(ab(0x06EB), 0x4F5C);
+		and_(imm(0xF0), 0x4F5E);
+		eor(ab(0x06EB), 0x4F61);
+		tay(0x4F62);
+		lda(aby(0x5AEA), 0x4F65);
+		sta(wab(0x06E8), 0x4F68);
+		ldy(zp(0x0C), 0x4F6A);
+		lda(aby(0x06FF), 0x4F6D);
+		eor(zp(0x0E), 0x4F6F);
+		and_(imm(0x0F), 0x4F71);
+		eor(zp(0x0E), 0x4F73);
+		tay(0x4F74);
+		lda(aby(0x5AEA), 0x4F77);
+		sta(wzp(0x11), 0x4F79);
+		rol(mzp(0x0F), 0x4F7B);
+		if (!bcs(0x4F7B, 0x4F7F)) asl(mzp(0x11), 0x4F7F);
+		lda(zp(0x10), 0x4F81);
+		if (!bpl(0x4F81, 0x4F8C))
+		{
+			lda(zp(0x11), 0x4F85);
+			eor(imm(0xFF), 0x4F87);
+			clc(0x4F88);
+			adc(imm(0x01), 0x4F8A);
+			sta(wzp(0x11), 0x4F8C);
+		}
+		clc(0x4F8D);
+		lda(zp(0x0C), 0x4F8F);
+		asl_a(0x4F90);
+		asl_a(0x4F91);
+		adc(ab(0x0714), 0x4F94);
+		adc(imm(0x60), 0x4F96);
+		tay(0x4F97);
+		jsr(0x4F97, 0x4FF5);                           // wait_ym
+		sty(wab(0x1850), 0x4F9D);
+		clc(0x4F9E);
+		jsr(0x4F9E, 0x4FF5);
+		lda(aby(0x0715), 0x4FA4);
+		adc(ab(0x06E8), 0x4FA7);
+		bool loudest = true;                           // 0x7F (the quietest)
+		if (!bmi(0x4FA7, 0x4FB4))
+		{
+			clc(0x4FAA);
+			adc(zp(0x11), 0x4FAC);
+			if (bpl(0x4FAC, 0x4FB6))
+				loudest = false;
+			else if (!bvs(0x4FAE, 0x4FB4))
+			{
+				lda(imm(0x00), 0x4FB2);
+				beq(0x4FB2, 0x4FB6);                   // BEQ (always)
+				loudest = false;
+			}
+		}
+		if (loudest) lda(imm(0x7F), 0x4FB6);
+		sta(wab(0x1851), 0x4FB9);
+		dec(mzp(0x0C), 0x4FBB);
+		dec(mzp(0x0C), 0x4FBD);
+		if (bmi(0x4FBD, 0x4FC2))
+			break;
+		jmp_to(0x4F43);
+	}
+	lsr(mab(0x0707), 0x4FC5);
+	if (!bcc(0x4FC5, 0x4FDA))
+	{
+		ldy(imm(0x08), 0x4FC9);
+		jsr(0x4FC9, 0x4FF5);                           // wait_ym
+		sty(wab(0x1850), 0x4FCF);
+		lda(ab(0x0714), 0x4FD2);
+		ora(imm(0x78), 0x4FD4);
+		sta(wab(0x1851), 0x4FD7);
+		sta(waby(0x0715), 0x4FDA);
+	}
+	rts();
+}
+
+// 4FDB (jumped to by 5012): the YM2151 player: channels 7 down to 0 with the voice lists
+// 0x57A9[X] + 7 down
+void player_ym()
+{
+	lda(imm(0x07), 0x4FDD);
+	sta(wab(0x0714), 0x4FE0);
+	clc(0x4FE1);
+	lda(abx(0x57A9), 0x4FE4);
+	adc(imm(0x07), 0x4FE6);
+	tay(0x4FE7);
+	do
+	{
+		tya(0x4FE8);
+		pha(0x4FE9);
+		jsr(0x4FE9, 0x4E6D);                           // ym_channel
+		pla(0x4FED);
+		tay(0x4FEE);
+		dey(0x4FEF);
+		dec(mab(0x0714), 0x4FF2);
+	} while (bpl(0x4FF2, 0x4FE7));
+	rts();
+}
+
+// 5012: the player of chip X (from the IRQ): its block 0x08 / 0x09 and type 0x06F5 (0x57A0 /
+// 0x57A3 / 0x57A6); types 0 and 3 have channel pairs (4E01), the others are the YM2151 (4FDB)
+void player()
+{
+	lda(abx(0x57A0), 0x5015);
+	sta(wzp(0x08), 0x5017);
+	lda(abx(0x57A3), 0x501A);
+	sta(wzp(0x09), 0x501C);
+	lda(abx(0x57A6), 0x501F);
+	sta(wab(0x06F5), 0x5022);
+	bool pairs = beq(0x5022, 0x5028);
+	if (!pairs)
+	{
+		cmp(imm(0x03), 0x5026);
+		pairs = !bne(0x5026, 0x502B);
+	}
+	if (pairs)
+	{
+		jmp_to(0x4E01);
+		player_pairs();
+	}
+	else
+	{
+		jmp_to(0x4FDB);
+		player_ym();
+	}
+}
+
 } // namespace
 
 SOUND_TABLE(music,
 	routine(0x4656, "voice_list", voice_list),
 	routine(0x4B70, "slide", slide),
 	routine(0x4C1B, "ym_values", ym_values),
+	routine(0x4D07, "pair_lists", pair_lists),
+	routine(0x4E01, "player_pairs", player_pairs, INNER),
+	routine(0x4E6D, "ym_channel", ym_channel),
+	routine(0x4FDB, "player_ym", player_ym, INNER),
+	routine(0x5012, "player", player),
 )
 
 } // namespace sound
