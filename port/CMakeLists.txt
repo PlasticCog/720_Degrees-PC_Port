@@ -177,8 +177,8 @@ if(NOT MSVC)
   set_source_files_properties(${T11_GENERATED} src/game/s65_code.cpp PROPERTIES COMPILE_OPTIONS "-O1;-fno-strict-aliasing")
 endif()
 
-# The same without the translated main program: the main CPU runs only the rewritten
-# routines (src/native/dispatch_native.cpp).  The sound CPU program is still the translation.
+# The same without any translated code: both CPUs run only the rewritten routines
+# (src/native/dispatch_native.cpp, src/native/s65dispatch_native.cpp).
 add_library(gamecore_native STATIC
   src/native/t11rt.cpp
   src/native/dispatch_native.cpp
@@ -186,11 +186,9 @@ add_library(gamecore_native STATIC
   ${D720_LOGIC_SOURCES}
   src/native/nativemachine.cpp
   src/native/s65rt.cpp
-  src/native/s65dispatch.cpp
-  src/game/s65_code.cpp
-  src/game/s65_tables.cpp)
+  src/native/s65dispatch_native.cpp)
 target_include_directories(gamecore_native PUBLIC src/native src/game src/logic src/sound)
-target_compile_definitions(gamecore_native PUBLIC D720_NO_TRANSLATION)
+target_compile_definitions(gamecore_native PUBLIC D720_NO_TRANSLATION D720_NO_SOUND_TRANSLATION)
 target_link_libraries(gamecore_native PUBLIC board)
 endif()
 
