@@ -88,6 +88,22 @@ void select_bank(uint16_t pc, uint16_t shadow, uint16_t reg, uint16_t v)
 }
 void bank_a(uint16_t pc, uint16_t v) { select_bank(pc, 0x01D2, 0x1400, v); }
 void bank_b(uint16_t pc, uint16_t v) { select_bank(pc, 0x01D4, 0x1402, v); }
+
+// MOV @#from,@#to (39 cycles) / MOV k(SP),@#to (42; 33 for (SP)) and the step to next
+void copy_w(uint16_t from, uint16_t to, uint16_t next)
+{
+	const uint16_t v = peek(from);
+	fl::mov(v);
+	poke(to, v);
+	tick(next, 39);
+}
+void copy_sp(int k, uint16_t to, uint16_t next)
+{
+	const uint16_t v = peek((uint16_t)(T.r[6] + k));
+	fl::mov(v);
+	poke(to, v);
+	tick(next, k ? 42 : 33);
+}
 // MOV @#a,-(SP) (36 cycles) / MOV k(SP),-(SP) (39) and the step to next
 void push_w(uint16_t a, uint16_t next)
 {
@@ -1643,193 +1659,232 @@ void irq_vblank_play()
 // 0x0196 counts the nesting meanwhile.
 void attract_frame()
 {
-	Clock k;
-	k.at(0x8512); pokeb(0x0196, fl::incb(peekb(0x0196))); k.add(27);
-	static const uint16_t kept[7] = { 0x01D0, 0x01D2, 0x01D4, 0x0186, 0x09B2, 0x09B6, 0x09B4 };
-	for (int i = 0; i < 7; i++)
+	pokeb(0x0196, fl::incb(peekb(0x0196)));
+	tick(0x8516, 27);
+	push_w(0x01D0, 0x851A);                            // kept for the end
+	push_w(0x01D2, 0x851E);
+	push_w(0x01D4, 0x8522);
+	push_w(0x0186, 0x8526);
+	push_w(0x09B2, 0x852A);
+	push_w(0x09B6, 0x852E);
+	push_w(0x09B4, 0x8532);
+	copy_w(0x09AA, 0x09A8, 0x8538);
+	jsr(0x853C, 0x8036);                               // load_scroll_registers
+	bank_a(0x853C, 0x1800);
+	bank_b(0x8548, 0x1C00);
+	jsr(0x8558, 0x7BBC);                               // the palette animation
 	{
-		k.at((uint16_t)(0x8516 + 4 * i));
-		const uint16_t v = peek(kept[i]);
-		fl::mov(v);
-		push(v);
-		k.add(36);
+		const uint8_t level = peekb(0x0F59);
+		fl::cmpb(level, 0x04);
+		tick(0x855E, 30);
+		if (level != 4)
+			tick(0x8564, 12);                          // BNE
+		else
+		{
+			tick(0x8560, 12);
+			jsr(0x8564, 0xDD10);
+		}
 	}
-	k.at(0x8532);
-	{
-		const uint16_t v = peek(0x09AA);
-		fl::mov(v);
-		poke(0x09A8, v);
-	}
-	k.add(39);
-	k.call(0x8036, 0x853C);                            // load_scroll_registers
-	sel_ab(k, 0x853C, 0x1800, 0x1C00);
-	k.call(0x7BBC, 0x8558);                            // animate_palette
-	k.at(0x8558);
-	const uint8_t level = peekb(0x0F59);
-	fl::cmpb(level, 4);
-	k.add(30, 12);
-	if (level == 4) k.call(0xDD10, 0x8564);            // flash_text_colours
-	k.at(0x8564);
 	{
 		const uint8_t state = peekb(0x018F);
 		fl::tstb(state);
-		k.add(24, 12);
-		if (!state)
+		tick(0x8568, 24);
+		if (state)
+			tick(0x857A, 12);                          // BNE
+		else
 		{
-			sel_b(k, 0x856A, 0x3C00);
-			k.call(0x7F52, 0x857A);                    // tick_game_timer
+			tick(0x856A, 12);
+			bank_b(0x856A, 0x3C00);
+			jsr(0x857A, 0x7F52);                       // the game timer
 		}
 	}
-	sel_ab(k, 0x857A, 0x3800, 0x3C00);
-	k.call(0x7A3A, 0x8596);
-	k.call(0x917C, 0x859A);                            // feed_watchdog
-	k.call(0x80A4, 0x859E);                            // read_input_edges
-	k.at(0x859E);
+	bank_a(0x857A, 0x3800);
+	bank_b(0x8586, 0x3C00);
+	jsr(0x8596, 0x7A3A);
+	jsr(0x859A, 0x917C);                               // feed_watchdog
+	jsr(0x859E, 0x80A4);                               // read_input_edges
 	{
-		const uint8_t locked = peekb(0x01A4);
-		fl::tstb(locked);
-		k.add(24, 12);
-		if (!locked)
+		const uint8_t busy = peekb(0x01A4);            // the sound queue unless the sound CPU
+		fl::tstb(busy);                                // is being talked to
+		tick(0x85A2, 24);
+		if (busy)
+			tick(0x85C0, 12);                          // BNE
+		else
 		{
-			sel_ab(k, 0x85A4, 0x3800, 0x3C00);
-			k.call(0x4314, 0x85C0);                    // send_queued_sound
+			tick(0x85A4, 12);
+			bank_a(0x85A4, 0x3800);
+			bank_b(0x85B0, 0x3C00);
+			jsr(0x85C0, 0x4314);
 		}
 	}
-	k.at(0x85C0);
 	{
-		const uint16_t bees = peek(0x0F22);
-		fl::tst(bees);
-		k.add(24, 12);
-		if ((int16_t)bees > 0)
+		const uint16_t bee = peek(0x0F22);             // the bee timer
+		fl::tst(bee);
+		tick(0x85C4, 24);
+		if ((int16_t)bee <= 0)
+			tick(0x85D0, 12);                          // BLE
+		else
 		{
-			k.at(0x85C6);
-			const uint16_t held = peek(0x0180);
-			fl::tst(held);
-			k.add(24, 12);
-			if (!held)
+			tick(0x85C6, 12);
+			const uint16_t frozen = peek(0x0180);
+			fl::tst(frozen);
+			tick(0x85CA, 24);
+			if (frozen)
+				tick(0x85D0, 12);                      // BNE
+			else
 			{
-				k.at(0x85CC); poke(0x0F22, fl::dec(peek(0x0F22))); k.add(27);
+				tick(0x85CC, 12);
+				poke(0x0F22, fl::dec(peek(0x0F22)));
+				tick(0x85D0, 27);
 			}
 		}
 	}
-	k.at(0x85D0);
 	{
-		const uint8_t lv = peekb(0x0F59);
-		fl::tstb(lv);
-		k.add(24, 12);
-		if (!lv)
+		const uint8_t level = peekb(0x0F59);           // the town's zone scan
+		fl::tstb(level);
+		tick(0x85D4, 24);
+		if (level)
+			tick(0x85F2, 12);                          // BNE
+		else
 		{
-			sel_ab(k, 0x85D6, 0x1800, 0x1C00);
-			k.call(0x454A, 0x85F2);                    // scan_zone_switches
+			tick(0x85D6, 12);
+			bank_a(0x85D6, 0x1800);
+			bank_b(0x85E2, 0x1C00);
+			jsr(0x85F2, 0x454A);                       // scan_zone_switches
 		}
 	}
-	k.at(0x85F2);
 	{
-		const uint8_t locked = peekb(0x01A4);
-		fl::tstb(locked);
-		k.add(24, 12);
-		if (!locked)
+		const uint8_t busy = peekb(0x01A4);
+		fl::tstb(busy);
+		tick(0x85F6, 24);
+		if (busy)
+			tick(0x8634, 12);                          // BNE
+		else
 		{
-			k.call(0x8D86, 0x85FC);                    // read_controller
-			k.at(0x85FC);
-			const uint16_t frame = peek(0x01C4);
-			f_nzv(nzw(frame & 0x001F));
-			k.add(30, 12);
-			if (!(frame & 0x001F))
+			// the controller and sound exchange: F:5BD2 every 32 frames, F:910C 16 later
+			tick(0x85F8, 12);
+			jsr(0x85FC, 0x8D86);                       // read_controller
+			const bool off = fl::logic((uint16_t)(peek(0x01C4) & 0x001F)) != 0;
+			tick(0x8602, 30);
+			if (!off)
 			{
-				sel_ab(k, 0x8604, 0x1800, 0x1C00);
-				k.call(0x5BD2, 0x8620);                // poll_sound_status
-				k.add(12);                             // BR
+				tick(0x8604, 12);
+				bank_a(0x8604, 0x1800);
+				bank_b(0x8610, 0x1C00);
+				jsr(0x8620, 0x5BD2);                   // town_music
+				tick(0x8634, 12);                      // BR
 			}
 			else
 			{
-				k.at(0x8622); T.r[0] = peek(0x01C4); fl::mov(T.r[0]); k.add(24);
-				T.r[0] = fl::add(T.r[0], 0x0010); k.add(18);
-				f_nzv(nzw(T.r[0] & 0x001F)); k.add(18, 12);
-				if (!(T.r[0] & 0x001F)) k.call(0x910C, 0x8634);   // read_sound_status
+				tick(0x8622, 12);                      // BNE
+				T.r[0] = peek(0x01C4);
+				fl::mov(T.r[0]);
+				tick(0x8626, 24);
+				T.r[0] = fl::add(T.r[0], 0x0010);
+				tick(0x862A, 18);
+				const bool off2 = fl::logic((uint16_t)(T.r[0] & 0x001F)) != 0;
+				tick(0x862E, 18);
+				if (off2)
+					tick(0x8634, 12);                  // BNE
+				else
+				{
+					tick(0x8630, 12);
+					jsr(0x8634, 0x910C);               // read_sound_status
+				}
 			}
 		}
 	}
-	k.at(0x8634);
-	const uint8_t held = peekb(0x0995);
-	fl::tstb(held);
-	k.add(24, 12);
-	if (!held)
 	{
-		k.at(0x863A);
-		const uint8_t lv = peekb(0x0F59);
-		fl::tstb(lv);
-		k.add(24, 12);
-		if (!lv) k.call(0xBC52, 0x8644);               // check_map_objects_in_view
-		k.at(0x8644);
-		const uint8_t lv2 = peekb(0x0F59);
-		fl::cmpb(lv2, 1);
-		k.add(30, 12);
-		if (lv2 <= 1) k.call(0xCB24, 0x8650);          // update_objects
-		sel_ab(k, 0x8650, 0x2400, 0x2800);
-		k.call(0x7B82, 0x866C);                        // track_scroll_blocks
-		k.call(0xA510, 0x8670);                        // object_contact
-		k.at(0x8670);
-		const uint8_t skater = peekb(0x0374);
-		fl::tstb(skater);
-		k.add(24, 12);
-		if (skater)
-		{
-			sel_ab(k, 0x8676, 0x1800, 0x1C00);
-			k.call(0x7AA2, 0x8692);
-		}
-		k.at(0x8692);
-		const uint8_t state = peekb(0x018F);
-		fl::cmpb(state, 4);
-		k.add(30, 12);
-		if (state != 4)
-		{
-			sel_ab(k, 0x869A, 0x3800, 0x3C00);
-			k.call(0x538E, 0x86B6);                    // terrain_event
-			k.call(0x50F8, 0x86BA);                    // fallen_skater
-			k.call(0xE036, 0x86BE);
-			k.add(12);                                 // BR
-		}
+		const uint8_t held = peekb(0x0995);            // the sprites held
+		fl::tstb(held);
+		tick(0x8638, 24);
+		if (held)
+			tick(0x86CC, 12);                          // BNE
 		else
 		{
-			k.at(0x86C0);
-			const uint16_t t = peek(0x0F18);
-			fl::cmp(t, 0xFFFF);
-			k.add(30, 12);
-			if (t != 0xFFFF)
+			tick(0x863A, 12);
+			const uint8_t level = peekb(0x0F59);
+			fl::tstb(level);
+			tick(0x863E, 24);
+			if (level)
+				tick(0x8644, 12);                      // BNE
+			else
 			{
-				k.at(0x86C8); poke(0x0F18, fl::dec(peek(0x0F18))); k.add(27);
+				tick(0x8640, 12);
+				jsr(0x8644, 0xBC52);                   // check_map_objects_in_view
+			}
+			const uint8_t level2 = peekb(0x0F59);
+			fl::cmpb(level2, 0x01);
+			tick(0x864A, 30);
+			if (level2 > 1)
+				tick(0x8650, 12);                      // BHI
+			else
+			{
+				tick(0x864C, 12);
+				jsr(0x8650, 0xCB24);                   // update_objects
+			}
+			bank_a(0x8650, 0x2400);
+			bank_b(0x865C, 0x2800);
+			jsr(0x866C, 0x7B82);                       // the scroll blocks
+			jsr(0x8670, 0xA510);                       // object_contact
+			const uint8_t chaser = peekb(0x0374);
+			fl::tstb(chaser);
+			tick(0x8674, 24);
+			if (!chaser)
+				tick(0x8692, 12);                      // BEQ
+			else
+			{
+				tick(0x8676, 12);
+				bank_a(0x8676, 0x1800);
+				bank_b(0x8682, 0x1C00);
+				jsr(0x8692, 0x7AA2);
+			}
+			const uint8_t state = peekb(0x018F);
+			fl::cmpb(state, 0x04);
+			tick(0x8698, 30);
+			if (state == 4)
+			{
+				tick(0x86C0, 12);                      // BEQ: the demo's countdown 0x0F18
+				const uint16_t left = peek(0x0F18);
+				fl::cmp(left, 0xFFFF);
+				tick(0x86C6, 30);
+				if (left == 0xFFFF)
+					tick(0x86CC, 12);                  // BEQ
+				else
+				{
+					tick(0x86C8, 12);
+					poke(0x0F18, fl::dec(peek(0x0F18)));
+					tick(0x86CC, 27);
+				}
+			}
+			else
+			{
+				tick(0x869A, 12);
+				bank_a(0x869A, 0x3800);
+				bank_b(0x86A6, 0x3C00);
+				jsr(0x86B6, 0x538E);                   // terrain_event
+				jsr(0x86BA, 0x50F8);                   // fallen_skater
+				jsr(0x86BE, 0xE036);                   // countdown_0eb4
+				tick(0x86CC, 12);                      // BR
 			}
 		}
 	}
-	k.at(0x86CC);
-	{
-		const uint16_t v = peek(0x09A8);
-		fl::mov(v);
-		poke(0x09AA, v);
-	}
-	k.add(39);
-	const uint16_t sp = T.r[6];
-	struct Back { uint16_t pc; uint16_t off; uint16_t to; int cycles; };
-	static const Back back[5] = {
-		{0x86D2, 0x0, 0x09B4, 33}, {0x86D6, 0x2, 0x09B6, 42}, {0x86DC, 0x4, 0x09B2, 42},
-		{0x86E2, 0x6, 0x0186, 42}, {0x86E8, 0xA, 0x01D2, 42}};
-	for (const Back &b : back)
-	{
-		k.at(b.pc);
-		const uint16_t v = rw((uint16_t)(sp + b.off));
-		fl::mov(v);
-		poke(b.to, v);
-		k.add(b.cycles);
-	}
-	k.at(0x86EE); { const uint16_t v = peek(0x01D2); fl::mov(v); poke(0x1400, v); } k.add(39);
-	k.at(0x86F4); { const uint16_t v = rw((uint16_t)(sp + 8)); fl::mov(v); poke(0x01D4, v); } k.add(42);
-	k.at(0x86FA); { const uint16_t v = peek(0x01D4); fl::mov(v); poke(0x1402, v); } k.add(39);
-	k.at(0x8700); { const uint16_t v = rw((uint16_t)(sp + 0xC)); fl::mov(v); poke(0x01D0, v); } k.add(42);
-	k.call(0x8096, 0x870A);                            // reselect_video_bank
-	k.at(0x870A); pokeb(0x0196, fl::decb(peekb(0x0196))); k.add(27);
-	T.r[6] = fl::add(T.r[6], 0x000E); k.add(18);
-	k.leave();
+	copy_w(0x09A8, 0x09AA, 0x86D2);                    // put back
+	copy_sp(0, 0x09B4, 0x86D6);
+	copy_sp(2, 0x09B6, 0x86DC);
+	copy_sp(4, 0x09B2, 0x86E2);
+	copy_sp(6, 0x0186, 0x86E8);
+	copy_sp(0x0A, 0x01D2, 0x86EE);
+	copy_w(0x01D2, 0x1400, 0x86F4);
+	copy_sp(8, 0x01D4, 0x86FA);
+	copy_w(0x01D4, 0x1402, 0x8700);
+	copy_sp(0x0C, 0x01D0, 0x8706);
+	jsr(0x870A, 0x8096);                               // reselect_video_bank
+	pokeb(0x0196, fl::decb(peekb(0x0196)));
+	tick(0x870E, 27);
+	T.r[6] = fl::add(T.r[6], 0x000E);
+	tick(0x8712, 18);
+	rts();
 }
 
 // F:84D4 (interrupt, vertical blank in attract mode): count the frame (0x01C4, 0x0192),
@@ -4514,57 +4569,338 @@ void attract_phase(Clock &k, uint8_t phase)
 // the sound CPU marked dead).  Phases 3 and 5 only run with 0x0197 set.
 void attract_loop()
 {
-	Clock k;
-	enum { L8714, L871A, L8726, L8736 } at = L8714;
+	uint16_t at = 0x8714;
 	for (;;)
+	{
 		switch (at)
 		{
-		case L8714:
+		case 0x8714:                                   // a new frame?
 		{
-			k.at(0x8714);
-			const bool frame = peekb(0x0192) != 0;
-			k.add(24, 12);
-			at = frame ? L871A : L8726;
-			break;
-		}
-		case L871A:
-			k.at(0x871A); pokeb(0x0192, 0); k.add(27);
-			k.at(0x871E); pokeb(0x02BA, 0); k.add(27);
-			k.at(0x8722); poke(0x01C2, (uint16_t)(peek(0x01C2) + 1)); k.add(27);
-			at = L8726;
-			break;
-		case L8726:
-			sel_a(k, 0x8726, 0x1800);
-			k.call(0x41CE, 0x8736);             // A5:41CE draw_map_strip
-			at = L8736;
-			break;
-		case L8736:
-		{
-			k.at(0x8736);
-			const bool frame = peekb(0x0192) != 0;
-			k.add(24, 12);
-			if (frame)
+			const uint8_t fresh = peekb(0x0192);
+			fl::tstb(fresh);
+			tick(0x8718, 24);
+			if (!fresh)
 			{
-				at = L871A;
+				tick(0x8726, 12);                      // BEQ
+				at = 0x8726;
 				break;
 			}
-			k.at(0x873C);
+			tick(0x871A, 12);
+			at = 0x871A;
+			break;
+		}
+		case 0x871A:                                   // yes: phase 0 again, the frame counted
+			clr_b(0x0192, 0x871E);
+			clr_b(0x02BA, 0x8722);
+			poke(0x01C2, fl::inc(peek(0x01C2)));
+			tick(0x8726, 27);
+			at = 0x8726;
+			break;
+		case 0x8726:                                   // a strip of the map
+			bank_a(0x8726, 0x1800);
+			jsr(0x8736, 0x41CE);                       // draw_map_strip
+			at = 0x8736;
+			break;
+		case 0x8736:
+		{
+			const uint8_t fresh = peekb(0x0192);
+			fl::tstb(fresh);
+			tick(0x873A, 24);
+			if (fresh)
+			{
+				tick(0x871A, 12);                      // BNE
+				at = 0x871A;
+				break;
+			}
+			tick(0x873C, 12);
 			const uint8_t phase = peekb(0x02BA);
-			k.add(30, 12);
+			fl::cmpb(phase, 0x06);
+			tick(0x8742, 30);
 			if ((int8_t)phase > 6)
 			{
-				at = L8714;
+				tick(0x8714, 12);                      // BGT: all done
+				at = 0x8714;
 				break;
 			}
-			k.at(0x8744); T.r[0] = sext8(peekb(0x02BA)); k.add(24);
-			T.r[0] = (uint16_t)(T.r[0] << 1); k.add(12, 27);
-			attract_phase(k, (uint8_t)(T.r[0] >> 1));
-			k.at(0x8910); T.r[0] = (uint16_t)(sext8(peekb(0x02BA)) + 1); k.add(24, 12);
-			k.at(0x8916); pokeb(0x02BA, (uint8_t)T.r[0]); k.add(27, 18);
-			at = L8736;
+			tick(0x8744, 12);
+			T.r[0] = sext8(peekb(0x02BA));
+			fl::movb((uint8_t)T.r[0]);
+			tick(0x8748, 24);
+			T.r[0] = fl::asl(T.r[0]);
+			tick(0x874A, 12);
+			at = fl::add(0x874E, peek((uint16_t)(0xFC66 + T.r[0])));
+			tick(at, 27);                              // ADD 0xFC66(R0),PC: the phase
 			break;
 		}
+		case 0x874E:                                   // phase 0
+			bank_a(0x874E, 0x3800);
+			bank_b(0x875A, 0x3C00);
+			jsr(0x876A, 0x5BB8);                       // game_over_states
+			bank_a(0x876A, 0x3800);
+			bank_b(0x8776, 0x3C00);
+			jsr(0x8786, 0x5248);
+			tick(0x8884, 12);                          // BR
+			tick(0x8910, 12);                          // BR
+			at = 0x8910;
+			break;
+		case 0x8788:                                   // phase 1: the attract display
+		{
+			const uint8_t game = peekb(0x0F26);
+			fl::cmpb(game, 0x06);
+			tick(0x878E, 30);
+			bool show;
+			if (game == 6)
+			{
+				tick(0x8798, 12);                      // BEQ
+				show = true;
+			}
+			else
+			{
+				tick(0x8790, 12);
+				show = fl::logic((uint16_t)(peek(0x01C2) & 0x000F)) == 0;
+				tick(0x8796, 30);
+				tick(show ? 0x8798 : 0x87CA, 12);      // BNE
+			}
+			if (show)
+			{
+				bank_a(0x8798, 0x3800);
+				bank_b(0x87A4, 0x3C00);
+				T.r[0] = sext8(peekb(0x018F));
+				fl::movb((uint8_t)T.r[0]);
+				tick(0x87B4, 24);
+				bool first;
+				if (!T.r[0])
+				{
+					tick(0x87BC, 12);                  // BEQ
+					first = true;
+				}
+				else
+				{
+					tick(0x87B6, 12);
+					fl::cmp(T.r[0], 0x0001);
+					tick(0x87BA, 18);
+					first = T.r[0] == 1;
+					tick(first ? 0x87BC : 0x87C0, 12); // BNE
+				}
+				if (first)
+					jsr(0x87C0, 0x77B4);
+				const uint8_t state = peekb(0x018F);
+				fl::tstb(state);
+				tick(0x87C4, 24);
+				if (state)
+					tick(0x87CA, 12);                  // BNE
+				else
+				{
+					tick(0x87C6, 12);
+					jsr(0x87CA, 0x78BE);
+				}
+			}
+			bank_a(0x87CA, 0x3800);
+			bank_b(0x87D6, 0x3C00);
+			jsr(0x87E6, 0x79D4);
+			tick(0x88B0, 12);                          // BR
+			tick(0x8910, 12);                          // BR
+			at = 0x8910;
+			break;
 		}
+		case 0x87E8:                                   // phase 2: map slots, messages, B6 screens
+		{
+			const uint8_t level = peekb(0x0F59);
+			fl::cmpb(level, 0x01);
+			tick(0x87EE, 30);
+			if (level == 1)
+			{
+				tick(0x87F0, 12);
+				jsr(0x87F4, 0xBBEC);                   // check_some_map_slots
+				tick(0x881E, 12);                      // BR
+			}
+			else
+			{
+				tick(0x87F6, 12);                      // BNE
+				const uint8_t slots = peekb(0x0E99);
+				fl::tstb(slots);
+				tick(0x87FA, 24);
+				if (!slots)
+					tick(0x881E, 12);                  // BEQ
+				else
+				{
+					tick(0x87FC, 12);
+					const uint8_t level2 = peekb(0x0F59);
+					fl::tstb(level2);
+					tick(0x8800, 24);
+					if (level2)
+						tick(0x881E, 12);              // BNE
+					else
+					{
+						tick(0x8802, 12);
+						bank_a(0x8802, 0x1800);
+						bank_b(0x880E, 0x1C00);
+						jsr(0x881E, 0x48CC);
+					}
+				}
+			}
+			bank_a(0x881E, 0x3800);
+			jsr(0x882E, 0x4C28);                       // show_next_message
+			const uint8_t busy = peekb(0x018E);
+			fl::tstb(busy);
+			tick(0x8832, 24);
+			if (busy)
+			{
+				tick(0x8910, 12);                      // BNE
+				at = 0x8910;
+				break;
+			}
+			tick(0x8834, 12);
+			const uint8_t busy2 = peekb(0x0F36);
+			fl::tstb(busy2);
+			tick(0x8838, 24);
+			if (busy2)
+			{
+				tick(0x8910, 12);                      // BNE
+				at = 0x8910;
+				break;
+			}
+			tick(0x883A, 12);
+			bank_b(0x883A, 0x2800);
+			jsr(0x884A, 0x7F16);
+			jsr(0x884E, 0x7CF6);                       // show_hint
+			jsr(0x8852, 0x7C84);
+			tick(0x8910, 12);                          // BR
+			at = 0x8910;
+			break;
+		}
+		case 0x8854:                                   // phase 3: alternate frames
+		{
+			const uint8_t on = peekb(0x0197);
+			fl::tstb(on);
+			tick(0x8858, 24);
+			if (!on)
+			{
+				tick(0x8910, 12);                      // BEQ
+				at = 0x8910;
+				break;
+			}
+			tick(0x885A, 12);
+			const bool odd = fl::logic((uint16_t)(peek(0x01C2) & 0x0001)) != 0;
+			tick(0x8860, 30);
+			if (!odd)
+			{
+				tick(0x8862, 12);
+				jsr(0x8866, 0xD35E);                   // spawn_counted_object
+				tick(0x8910, 12);                      // BR
+			}
+			else
+			{
+				tick(0x8868, 12);                      // BNE
+				bank_a(0x8868, 0x1800);
+				bank_b(0x8874, 0x1C00);
+				jsr(0x8884, 0x5B46);                   // rolling_sound
+				tick(0x8910, 12);                      // BR
+			}
+			at = 0x8910;
+			break;
+		}
+		case 0x8886:                                   // phase 4
+			bank_a(0x8886, 0x3800);
+			jsr(0x8896, 0x4B84);                       // expire_messages
+			tick(0x8910, 12);                          // BR
+			at = 0x8910;
+			break;
+		case 0x8898:                                   // phase 5: every 4th frame
+		{
+			T.r[0] = peek(0x01C2);
+			fl::mov(T.r[0]);
+			tick(0x889C, 24);
+			T.r[0] = fl::add(T.r[0], 0x0002);
+			tick(0x88A0, 18);
+			const bool off = fl::logic((uint16_t)(T.r[0] & 0x0003)) != 0;
+			tick(0x88A4, 18);
+			if (off)
+			{
+				tick(0x8910, 12);                      // BNE
+				at = 0x8910;
+				break;
+			}
+			tick(0x88A6, 12);
+			const uint8_t on = peekb(0x0197);
+			fl::tstb(on);
+			tick(0x88AA, 24);
+			if (!on)
+			{
+				tick(0x8910, 12);                      // BEQ
+				at = 0x8910;
+				break;
+			}
+			tick(0x88AC, 12);
+			jsr(0x88B0, 0xC8AA);                       // tick_map_object_timers
+			tick(0x8910, 12);                          // BR
+			at = 0x8910;
+			break;
+		}
+		case 0x88B2:                                   // phase 6: every 64th frame, coins and start
+		{
+			const bool off = fl::logic((uint16_t)(peek(0x01C2) & 0x003F)) != 0;
+			tick(0x88B8, 30);
+			if (off)
+			{
+				tick(0x8910, 12);                      // BNE
+				at = 0x8910;
+				break;
+			}
+			tick(0x88BA, 12);
+			const bool normal = fl::logic((uint16_t)(peek(0x1800) & 0x8000)) != 0;
+			tick(0x88C0, 30);
+			if (normal)
+				tick(0x88DE, 12);                      // BNE
+			else
+			{
+				tick(0x88C2, 12);                      // the test switch: the self test
+				bank_a(0x88C2, 0x3800);
+				bank_b(0x88CE, 0x3C00);
+				jsr(0x88DE, 0xF372);                   // enter_selftest
+			}
+			bank_a(0x88DE, 0x3800);
+			bank_b(0x88EA, 0x3C00);
+			jsr(0x88FA, 0x4B3E);
+			const uint8_t state = peekb(0x018F);
+			fl::cmpb(state, 0x04);
+			tick(0x8900, 30);
+			if (state != 4)
+				tick(0x8906, 12);                      // BNE
+			else
+			{
+				tick(0x8902, 12);
+				jsr(0x8906, 0x435A);
+			}
+			const uint8_t dead = peekb(0x01A2);        // the sound CPU marked dead
+			fl::tstb(dead);
+			tick(0x890A, 24);
+			if (!dead)
+				tick(0x8910, 12);                      // BEQ
+			else
+			{
+				tick(0x890C, 12);
+				jsr(0x8910, 0x4B00);
+			}
+			at = 0x8910;
+			break;
+		}
+		case 0x8910:                                   // the next phase
+			T.r[0] = sext8(peekb(0x02BA));
+			fl::movb((uint8_t)T.r[0]);
+			tick(0x8914, 24);
+			T.r[0] = fl::inc(T.r[0]);
+			tick(0x8916, 12);
+			pokeb(0x02BA, (uint8_t)T.r[0]);
+			fl::movb((uint8_t)T.r[0]);
+			tick(0x891A, 27);
+			tick(0x8736, 18);                          // JMP
+			at = 0x8736;
+			break;
+		default:
+			leave_to(at);
+		}
+	}
 }
 
 // F:8F50 / F:8F62 (assembly; waits for the sound CPU): its answer (F:8ED2) must be 0xAA /
