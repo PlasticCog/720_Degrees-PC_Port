@@ -70,6 +70,10 @@ def scenarios(selftest_script):
         fh.write('\n'.join(lines) + '\n')
     s.append(('rotary', 7800, ['--script', rotary]))
     s.append(('hiscore', 6000, ['--random', '3', '--poke', '2500:023E:9999', '--poke', '2500:0240:0009']))
+    # a new entry in both high score tables (A7:45B0 and the sound CPU's commands 0x0F / 0x10,
+    # F83D / F8E1): a score and park count above every entry, just before the first game over
+    s.append(('newscore', 6000, ['--random', '3', '--poke', '3700:023E:7FFF', '--poke', '3700:0240:7FFF',
+                                 '--poke', '3700:0242:7FFF']))
     # the attract mode's look at the controller (B3:620C): a fast turn backwards, later one
     # forwards, each starting the title again
     turns = os.path.join(os.path.dirname(selftest_script), 'turns.txt')
