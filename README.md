@@ -204,8 +204,8 @@ port/src/editor   level editor (SDL3 + Dear ImGui)
 
 * Main and sound programs rewritten and verified against the original; the game and the editor
   run without any translated code. A few paths that no test scenario reaches (for example the
-  self test's fault reports, some music commands and three sound board commands the game never
-  sends) follow the original but have not been compared with it. Video, POKEY, YM2151 and TMS5220 audio done.
+  self test's fault reports, some music commands and three rarely used sound board commands)
+  follow the original but have not been compared with it. Video, POKEY, YM2151 and TMS5220 audio done.
 * Level editor: all maps decode and re-encode exactly. An unedited mod plays pixel-identically to
   the original, and edits show up in the game.
 * Still open: the park palettes, which the colour capture does not reach, and the exact meaning of
