@@ -64,6 +64,9 @@ inline Routine asm_routine(const char *seg, uint16_t addr, const char *name, Asm
 { return Routine{seg, addr, name, nullptr, f, ASM, cycles}; }
 inline Routine irq_routine(const char *seg, uint16_t addr, const char *name, AsmFn f, int cycles)
 { return Routine{seg, addr, name, nullptr, f, ASM | IRQ, cycles}; }
+// an interrupt handler that waits (for the sound CPU, say): not compared when it has to wait
+inline Routine irq_wait_routine(const char *seg, uint16_t addr, const char *name, AsmFn f, int cycles)
+{ return Routine{seg, addr, name, nullptr, f, ASM | IRQ | WAIT, cycles}; }
 // polling routines charge their cycles themselves (tools/update_cycles.py leaves them alone)
 inline Routine wait_routine(const char *seg, uint16_t addr, const char *name, AsmFn f, int cycles)
 { return Routine{seg, addr, name, nullptr, f, ASM | WAIT, cycles}; }
@@ -95,6 +98,14 @@ bool enter(int index);
 // call a routine of the original program (rewritten or translated) with C arguments;
 // returns R0.  Banked routines need their bank selected first, as in the original.
 uint16_t call(uint16_t addr, std::initializer_list<uint16_t> args);
+
+// the same with the original's return address on the stack instead of a marker, for code
+// whose callees (or later readers of stale stack words) see the return address
+uint16_t call_from(uint16_t ret, uint16_t addr, std::initializer_list<uint16_t> args);
+
+// end the routine with a jump to addr (JMP @#addr in the original): addr runs with the stack
+// as it is and returns to this routine's caller.  The native routine must return right after.
+void tail_jump(uint16_t addr);
 
 // memory of the original program (same bus semantics as the translation)
 inline uint16_t peek(uint16_t a) { return t11rt::rw(a); }
