@@ -12,6 +12,7 @@ closely and the frame counters should agree.
 """
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -65,15 +66,18 @@ def main():
         return out
 
     jobs = [(s, r) for s in todo for r in (1, 0)]
-    with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as ex:
-        outs = list(ex.map(run, jobs))
-    for i, sc in enumerate(todo):
-        a = open(outs[2 * i + 1], 'rb').read()
-        b = open(outs[2 * i], 'rb').read()
-        n, fr, fv, vis, frames = compare(a, b)
-        print('%-9s %5d frames  first RAM difference %-5s  first visible %-5s  frames looking different %5d  '
-              'frame counter %04X/%04X%s' % (sc[0], n, fr, fv, vis, frames[0], frames[1],
-                                             '' if frames[0] == frames[1] else '  (differs)'))
+    try:
+        with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as ex:
+            outs = list(ex.map(run, jobs))
+        for i, sc in enumerate(todo):
+            a = open(outs[2 * i + 1], 'rb').read()
+            b = open(outs[2 * i], 'rb').read()
+            n, fr, fv, vis, frames = compare(a, b)
+            print('%-9s %5d frames  first RAM difference %-5s  first visible %-5s  frames looking different %5d  '
+                  'frame counter %04X/%04X%s' % (sc[0], n, fr, fv, vis, frames[0], frames[1],
+                                                 '' if frames[0] == frames[1] else '  (differs)'))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)        # the RAM dumps take about 1 GB
 
 
 if __name__ == '__main__':
