@@ -1,9 +1,10 @@
 """Package a built copy of the game for one platform.
 
-    python tools/package.py [--out dist] [--version X.Y.Z]
+    python tools/package.py [--out dist] [--version X.Y.Z] [--build-dir port/build-release]
 
 Collects the programs the build copied to the repository's top folder (720degrees,
-editor720 and, on Windows, SDL3.dll), an empty Game folder with its README, the README and
+editor720 and, on Windows, SDL3.dll; --build-dir takes them from that build folder instead,
+which other builds cannot overwrite), an empty Game folder with its README, the README and
 the third-party licences into dist/720degrees-<version>-<platform>.zip.  ROM files are
 never included, and the game and the editor contain no translated program code; build with
 -DD720_ROM_FREE=ON (as the releases are) so they also leave out the data generated from the
@@ -41,13 +42,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--out', default=os.path.join(ROOT, 'dist'))
     ap.add_argument('--version', default=None)
+    ap.add_argument('--build-dir', default=None, help='take the programs from this build folder')
     args = ap.parse_args()
+    src = os.path.abspath(args.build_dir) if args.build_dir else ROOT
 
     exe = '.exe' if os.name == 'nt' else ''
     programs = ['720degrees' + exe, 'editor720' + exe]
     if os.name == 'nt':
         programs.append('SDL3.dll')
-    missing = [p for p in programs if not os.path.exists(os.path.join(ROOT, p))]
+    missing = [p for p in programs if not os.path.exists(os.path.join(src, p))]
     if missing:
         sys.exit('not built yet: %s (build first: cmake --build port/build)' % ', '.join(missing))
 
@@ -58,6 +61,8 @@ def main():
     sdl = [os.path.join(ROOT, 'port', 'third_party', d, 'LICENSE.txt')
            for d in sorted(os.listdir(os.path.join(ROOT, 'port', 'third_party'))) if d.startswith('SDL3-')]
     sdl += [os.path.join(ROOT, 'port', 'build', '_deps', 'sdl3-src', 'LICENSE.txt')]
+    if args.build_dir:
+        sdl += [os.path.join(src, '_deps', 'sdl3-src', 'LICENSE.txt')]
     sdl = [p for p in sdl if os.path.exists(p)]
     notices = ['Third-party software in this package\n',
                'SDL3 (zlib licence), Dear ImGui (MIT), ymfm (BSD-3-Clause).\n'
@@ -85,7 +90,7 @@ def main():
 
     with zipfile.ZipFile(zpath, 'w', zipfile.ZIP_DEFLATED) as z:
         for p in programs:
-            add_file(z, os.path.join(ROOT, p), name + '/' + p, executable=not p.endswith('.dll'))
+            add_file(z, os.path.join(src, p), name + '/' + p, executable=not p.endswith('.dll'))
         add_file(z, os.path.join(ROOT, 'README.md'), name + '/README.md')
         add_file(z, os.path.join(ROOT, 'Game', 'README.txt'), name + '/Game/README.txt')
         z.writestr(name + '/THIRD_PARTY_NOTICES.txt', ''.join(notices))

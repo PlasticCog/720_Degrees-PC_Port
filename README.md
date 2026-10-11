@@ -77,7 +77,7 @@ the release builds are, to leave it out:
 ```sh
 cmake -S port -B port/build-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DD720_ROM_FREE=ON
 cmake --build port/build-release --target 720degrees editor720
-python tools/package.py
+python tools/package.py --build-dir port/build-release
 ```
 
 ## Controls

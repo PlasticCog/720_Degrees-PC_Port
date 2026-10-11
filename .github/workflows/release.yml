@@ -65,7 +65,7 @@ jobs:
         run: cmake --build port/build --parallel --target 720degrees editor720
 
       - name: Package
-        run: python3 tools/package.py --version "${TAG#v}"
+        run: python3 tools/package.py --version "${TAG#v}" --build-dir port/build
 
       - name: Attach to the release
         env:
