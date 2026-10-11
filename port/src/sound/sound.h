@@ -28,6 +28,7 @@ enum : uint8_t {
 	NOTEST = 2,      // never returns (the main loop): runs, but is not compared
 	INNER = 4,       // starts inside a routine of the translation (reached by a jump there):
 	                 // an entry only for the build without the translation
+	NMI_END = 8,     // ends the NMI (jumped to by it): pulls X, Y and A and returns with RTI
 };
 
 using Fn = void (*)();

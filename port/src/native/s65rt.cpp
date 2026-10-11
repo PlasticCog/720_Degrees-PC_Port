@@ -24,12 +24,32 @@ int32_t g_io_cyc0 = 0;
 bool g_atomic6 = false;
 std::vector<uint64_t> *g_trace6 = nullptr;
 uint32_t g_steps6 = 0, g_step_limit6 = 0;
+bool g_continue6 = false, g_timed_out6 = false;
+int32_t g_end6 = 0;
+void (*g_reset_hook6)() = nullptr;
+bool g_io_effects = false;
+static uint16_t g_last_read = 0xffff;
+static uint8_t g_last_value = 0;
+static int g_repeats = 0;
 
 uint8_t io_read_slow(uint16_t a)
 {
 	uint8_t v = 0xff;
 	if (g_io_mode == 1)
+	{
 		v = SB->sound_read(a);
+		if ((a & 0xd870) == 0x1860) g_io_effects = true;   // the main CPU's latch taken
+		if (a == g_last_read && v == g_last_value)
+		{
+			if (++g_repeats >= 100) g_steps6 = g_step_limit6;
+		}
+		else
+		{
+			g_last_read = a;
+			g_last_value = v;
+			g_repeats = 0;
+		}
+	}
 	else
 	{
 		// the original's next read (a different address reads 0xFF; the comparison shows it)
@@ -47,7 +67,12 @@ uint8_t io_read_slow(uint16_t a)
 
 void io_write_slow(uint16_t a, uint8_t v)
 {
-	if (g_io_mode == 1) SB->sound_write(a, v);
+	if (g_io_mode == 1)
+	{
+		SB->sound_write(a, v);
+		g_io_effects = true;
+		g_last_read = 0xffff;
+	}
 	g_io_events.push_back({a, v, true, S.cyc - g_io_cyc0});
 }
 
@@ -86,8 +111,13 @@ bool sync6_slow(uint16_t next)
 		if (g_trace6)
 			g_trace6->push_back((uint64_t)next << 48 | (uint64_t)S.s << 40 | (uint64_t)S.p << 32 |
 				(uint64_t)((S.cyc - g_io_cyc0) & 0xff) << 24 | (uint64_t)S.a << 16 | (uint64_t)S.x << 8 | S.y);
-		if (++g_steps6 > g_step_limit6) throw Timeout6{};
-		return true;
+		if (++g_steps6 <= g_step_limit6) return true;
+		if (!g_continue6 || !g_io_effects) throw Timeout6{};
+		g_atomic6 = false;
+		g_trace6 = nullptr;
+		g_io_mode = 0;
+		g_timed_out6 = true;
+		S.end = g_end6;
 	}
 	for (;;)
 	{
@@ -167,6 +197,10 @@ public:
 			S.p = FI | FU;
 			S.pc = (uint16_t)(SROM[0xfffc] | (SROM[0xfffd] << 8));
 			S.nmi_pending = false;
+			g_atomic6 = g_continue6 = g_timed_out6 = false;
+			g_trace6 = nullptr;
+			g_io_mode = 0;
+			if (g_reset_hook6) g_reset_hook6();
 			if (m_fiber) coro::destroy(m_fiber);
 			m_fiber = coro::create(sound_root, nullptr, 1 << 20);
 			g_sound_fiber = m_fiber;

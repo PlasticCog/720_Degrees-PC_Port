@@ -19,6 +19,7 @@ namespace sound {
 
 const Routine *sound_core(int &count);
 const Routine *sound_main(int &count);
+const Routine *sound_command(int &count);
 
 namespace {
 
@@ -34,7 +35,7 @@ struct Slot {
 
 struct Table { const char *name; TableFn fn; };
 const Table TABLES[] = {
-	{"core", sound_core}, {"main", sound_main},
+	{"core", sound_core}, {"main", sound_main}, {"command", sound_command},
 };
 
 std::vector<Routine> &registry()
@@ -81,6 +82,7 @@ void init()
 	g_entries.clear();
 	for (size_t i = 0; i < g_slots.size(); i++)
 		if (g_slots[i].r) g_entries[g_slots[i].r->addr] = (int)i;
+	g_reset_hook6 = []() { g_testing = g_original_side = false; };
 	g_inited = true;
 }
 
@@ -137,8 +139,9 @@ void difftest(Slot &s)
 	const Ctx c0 = S;
 	memcpy(r0.data(), SR, 0x1000);
 	auto stacked = [&](int k) { return SR[0x100 | (uint8_t)(c0.s + k)]; };
-	const uint16_t ret = (s.r->flags & RTI) ? (uint16_t)(stacked(2) | stacked(3) << 8)
-	                                        : (uint16_t)((stacked(1) | stacked(2) << 8) + 1);
+	const uint16_t ret = (s.r->flags & RTI)       ? (uint16_t)(stacked(2) | stacked(3) << 8)
+	                   : (s.r->flags & NMI_END) ? (uint16_t)(stacked(5) | stacked(6) << 8)
+	                                            : (uint16_t)((stacked(1) | stacked(2) << 8) + 1);
 	auto to_return = [&]() {
 		while (S.pc != ret) sdispatch();
 	};
@@ -169,6 +172,10 @@ void difftest(Slot &s)
 	g_trace6 = &o;
 	g_io_mode = 1;
 	g_original_side = true;
+	g_continue6 = true;                                // a wait: the original goes on for real
+	g_timed_out6 = false;
+	g_io_effects = false;
+	g_end6 = c0.end;
 	try
 	{
 		s.orig->fn();
@@ -176,12 +183,25 @@ void difftest(Slot &s)
 	}
 	catch (const Timeout6 &)
 	{
+		// it waits before it has done anything to the chips or latches: from the start again,
+		// for real
+		g_continue6 = false;
 		S = c0;
 		memcpy(SR, r0.data(), 0x1000);
 		sshadow_top = sh0;
 		finish();
 		s.timeouts++;
 		run(s);
+		return;
+	}
+	g_continue6 = false;
+	if (g_timed_out6)
+	{
+		// it waited for the main CPU or an interrupt: not compared, the run goes on from there
+		g_timed_out6 = false;
+		sshadow_top = sh0;
+		finish();
+		s.timeouts++;
 		return;
 	}
 	g_original_side = false;

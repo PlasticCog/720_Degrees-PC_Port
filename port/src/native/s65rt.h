@@ -62,6 +62,19 @@ extern bool g_atomic6;
 extern std::vector<uint64_t> *g_trace6;
 extern uint32_t g_steps6, g_step_limit6;
 struct Timeout6 {};                                // the step limit was reached (a wait)
+// the original side of a test reaching the step limit waits for the main CPU or an interrupt:
+// it goes on as a normal run from there (slices and interrupts, nothing recorded) instead of
+// throwing Timeout6, and g_timed_out6 is set
+extern bool g_continue6, g_timed_out6;
+extern int32_t g_end6;                             // the slice end to go on with
+// called when the sound CPU is reset (its program starts again on a new fiber): a test that
+// was going on is over
+extern void (*g_reset_hook6)();
+// recording: whether the run so far did something to the chips or latches that cannot be taken
+// back (a write, or reading the main CPU's latch), and a wait seen (the same read giving the
+// same value over and over, as in a loop waiting for the main CPU): then the step limit is
+// reached at the next step
+extern bool g_io_effects;
 inline void spush(uint8_t v) { SR[0x100 | S.s] = v; S.s--; }
 inline uint8_t spull() { S.s++; return SR[0x100 | S.s]; }
 
