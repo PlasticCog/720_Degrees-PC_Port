@@ -1,6 +1,7 @@
 // Rewritten routines of the fixed ROM F:D000-FFFF: object slots and their spawning, the
 // object scripts, palette fades, skater animation tables, score and the start buttons.
 #include "logic.h"
+#include <exception>
 
 namespace logic {
 namespace {
@@ -13,11 +14,14 @@ uint16_t sext8(uint8_t v) { return (uint16_t)(int16_t)(int8_t)v; }
 // pushes R1, R2..R(n+1) and its return address (F142 / F150 / F160 / F172), runs the body and
 // restores the registers.  The frame is reproduced because callees can see the stack pointer
 // (F:CE24 records the address of an argument in 0x09B2); callees with a register interface
-// are given the registers the original holds, so they are put back here too.
+// are given the registers the original holds, so they are put back here too (not when an
+// interrupt handler returned elsewhere and the routine is abandoned: Unwound).
 struct Helper {
 	uint16_t r[6], sp;
+	int unwinding;
 	explicit Helper(int n)                             // n registers from R2 on (1..4)
 	{
+		unwinding = std::uncaught_exceptions();
 		static const uint16_t ret[] = {0xF142, 0xF150, 0xF160, 0xF172};
 		for (int i = 1; i < 6; i++) r[i] = T.r[i];
 		sp = T.r[6];
@@ -25,7 +29,12 @@ struct Helper {
 		for (int i = 2; i < 2 + n; i++) push(T.r[i]);
 		push(ret[n - 1]);
 	}
-	~Helper() { for (int i = 1; i < 6; i++) T.r[i] = r[i]; T.r[6] = sp; }
+	~Helper()
+	{
+		if (std::uncaught_exceptions() > unwinding) return;
+		for (int i = 1; i < 6; i++) T.r[i] = r[i];
+		T.r[6] = sp;
+	}
 };
 enum { F138 = 1, F144 = 2, F152 = 3, F162 = 4 };
 
@@ -63,9 +72,11 @@ uint16_t update_marked_slots(const Args &)
 		if ((int16_t)peek((uint16_t)(0x0AF8 + r0)) < 0)
 		{
 			T.r[0] = r0;
+			T.icount -= 30;                            // JSR
 			call(0xC3E6, {});
 		}
 		poke(0x09AA, (uint16_t)(peek(0x09AA) - 1));
+		tick(0xD11E, 126);                             // pass F:D11E-D134
 	}
 	if (peekb(0x0374))
 	{
@@ -84,11 +95,15 @@ uint16_t update_high_slots(const Args &)
 	T.r[2] = a; T.r[3] = b;
 	uint16_t r0 = 0x00FE;
 	for (uint16_t i = 0x00FE; (int16_t)i >= 0x00AF; i--)
+	{
 		if (peekb((uint16_t)(0x09B8 + i)))
 		{
 			T.r[0] = r0; T.r[1] = i;
+			T.icount -= 24 + 30 + 18;                  // push, JSR, pop
 			r0 = call(0xCF5E, {i});
 		}
+		tick(0xD170, 81);                              // pass F:D170-D184
+	}
 	restore_banks(a, b);
 	return r0;
 }
@@ -553,11 +568,15 @@ uint16_t setup_level_slots(const Args &)
 	call(0xD8D2, {});
 	call(0xD880, {});
 	for (int16_t i = 3; i >= 0; i--)
+	{
 		if (peekb((uint16_t)(0x09B8 + i)))
 		{
 			T.r[1] = (uint16_t)i;
+			T.icount -= 24 + 30 + 18;                  // push, JSR, pop
 			call(0xCF5E, {(uint16_t)i});
 		}
+		tick(0xD1DA, 63);                              // pass F:D1DA-D1EA
+	}
 	set_banks(0x0000, 0x0400);
 	for (int16_t i = 3; i >= 0; i--)
 	{
@@ -565,6 +584,7 @@ uint16_t setup_level_slots(const Args &)
 		T.r[0] = (uint16_t)(i << 1);
 		const uint16_t b = peekb((uint16_t)(0x70E4 + i));
 		call(0xCE24, {0, peek((uint16_t)(0x70E8 + 2 * i)), b});
+		tick(0xD204, 219);                             // pass F:D204-D21E
 	}
 	const int16_t done = (int16_t)sext8(peekb(0x0E94));
 	if ((int16_t)peekb(0x0F2E) > done)
@@ -572,13 +592,18 @@ uint16_t setup_level_slots(const Args &)
 		for (int16_t i = 0x00AE; i >= 4; i--)
 		{
 			const uint16_t t = sext8(peekb((uint16_t)(0x09B8 + i)));
-			if (!t) continue;
-			set_banks(0x0000, 0x0400);
-			if (!(peekb((uint16_t)(0x6438 + t)) & 0x01))
+			if (t)
 			{
-				T.r[1] = t; T.r[2] = (uint16_t)i; T.r[3] = t;
-				call(0xCF5E, {(uint16_t)i});
+				set_banks(0x0000, 0x0400);
+				T.icount -= 183;                       // F:D238-D254
+				if (!(peekb((uint16_t)(0x6438 + t)) & 0x01))
+				{
+					T.r[1] = t; T.r[2] = (uint16_t)i; T.r[3] = t;
+					T.icount -= 24 + 30 + 18;          // push, JSR, pop
+					call(0xCF5E, {(uint16_t)i});
+				}
 			}
+			tick(0xD232, 81);                          // rest of the pass F:D232-D264
 		}
 		set_banks(0x0000, 0x0400);
 		uint16_t p = (uint16_t)((uint16_t)(peekb((uint16_t)(0xFDE3 + peekb(0x0F2E))) << 3) + 0x708C - 8);
@@ -587,6 +612,7 @@ uint16_t setup_level_slots(const Args &)
 			T.r[1] = p; T.r[2] = (uint16_t)n;
 			call(0xCE24, {0, peek(p), 0x0001});
 			p = (uint16_t)(p + 2);
+			tick(0xD298, 168);                         // pass F:D298-D2AC
 		}
 		uint16_t q = peek((uint16_t)(0x6B9E + (uint16_t)(peekb(0x0F2E) << 1)));
 		while (peek(q) != 0xFFFF)
@@ -595,15 +621,21 @@ uint16_t setup_level_slots(const Args &)
 			const uint16_t w = peek(q);
 			call(0xCE24, {0, peek((uint16_t)(q + 2)), w});
 			q = (uint16_t)(q + 4);
+			tick(0xD2BA, 207);                         // pass F:D2BA-D2D4
 		}
 		pokeb(0x0E93, 0);
-		for (uint16_t i = 0x14; i >= 1; i--) pokeb((uint16_t)(0x0E7D + i), 0);
+		for (uint16_t i = 0x14; i >= 1; i--)
+		{
+			pokeb((uint16_t)(0x0E7D + i), 0);
+			tick(0xD2DE, 48);                          // pass F:D2DE-D2E2
+		}
 		const uint16_t table = (uint16_t)(0x68D0 + (uint16_t)(peekb(0x0F2E) << 1));
 		for (uint16_t i = 9; i >= 1; i--)
 		{
 			const uint8_t v = peekb((uint16_t)(i + peek(table) - 1));
 			pokeb((uint16_t)(0x0E7D + i), v);
 			pokeb(0x0E93, (uint8_t)(peekb(0x0E93) + v));
+			tick(0xD2F0, 189);                         // pass F:D2F0-D30A
 		}
 		pokeb(0x0E94, peekb(0x0F2E));
 	}
@@ -906,6 +938,7 @@ void fade_sprite_palette()
 		T.r[4] = (uint16_t)(((uint16_t)n << 1) ^ 0x001E);
 		T.r[0] = 0x001E;
 		poke((uint16_t)(0x1020 + T.r[4]), T.r[1]);
+		tick(0xDB76, 141);                             // pass F:DB76-DB8A
 	}
 	if (peekb(0x01F5))
 	{
@@ -920,6 +953,7 @@ void fade_sprite_palette()
 		T.r[4] = (uint16_t)(((uint16_t)n << 1) ^ 0x001E);
 		T.r[0] = 0x001E;
 		poke((uint16_t)(0x1000 + T.r[4]), T.r[1]);
+		tick(0xDBB2, 141);                             // pass F:DBB2-DBC6
 	}
 	T.r[5] = 0xFFFF;
 	poke(0x01D2, rw((uint16_t)(T.r[6] + 2)));
@@ -1257,6 +1291,19 @@ uint8_t run_mode(uint8_t head)
 	return (head & 0x80) ? (b6 ? 3 : 2) : (b6 ? 1 : 0);
 }
 
+// cycles of the original tile pass (F:EB50 / F:E974) up to the mode dispatch: a new run
+// (reading the head byte, by mode) or the next tile of the run (by mode)
+int run_head_cycles(uint8_t head)
+{
+	static const int mode_part[4] = {24 + 39, 24 + 45, 30 + 45 + 57, 30 + 45};
+	return 24 + 162 + ((head & 0x40) ? 12 : 0) + 24 + mode_part[run_mode(head)];
+}
+int run_next_cycles(uint8_t mode)
+{
+	static const int mode_part[4] = {69, 0, 90, 27};
+	return 87 + (mode < 4 ? mode_part[mode] : 0);
+}
+
 // F:EAD4  draw_tile_block(int erase, int *block): block = {packed data, video address (low 7
 // bits: column * 2), rows, columns}; the pointer argument is advanced past the header.  Tiles
 // get the colour bits 0x0188 (or are cleared when erase is set); tile 0x149 is transparent.
@@ -1290,9 +1337,11 @@ uint16_t draw_tile_block(const Args &a)
 			if ((int16_t)n > 0)
 				do
 				{
+					int cycles;                            // the original pass F:EB50-EBF2
 					if (r0 == 0)
 					{
 						const uint8_t head = peekb(r3++);
+						cycles = run_head_cycles(head);
 						pokeb(0x0F5F, head);
 						r0 = sext8(head) & 0x003F;
 						pokeb(0x0F4C, peekb(r3++));
@@ -1301,6 +1350,8 @@ uint16_t draw_tile_block(const Args &a)
 						if (mode == 2) pokeb(0x0F4D, peekb(r3++));
 					}
 					else
+					{
+						cycles = run_next_cycles(peekb(0x0F5F));
 						switch (peekb(0x0F5F))
 						{
 						case 0: pokeb(0x0F4C, peekb(r3++)); break;
@@ -1309,22 +1360,30 @@ uint16_t draw_tile_block(const Args &a)
 						case 3: poke(0x0F4C, (uint16_t)(peek(0x0F4C) + 1)); break;
 						default: break;                    // not set by the run heads
 						}
+					}
+					cycles += 72 + 63;
 					if ((peek(0x0F4C) & 0x03FF) != 0x0149)
 					{
 						const uint16_t at = (uint16_t)((r1 & 0x00FF) | r2);
 						if (!a.u(0))
 						{
+							cycles += 39 + 120;
 							poke(0x0F4C, (uint16_t)(peek(0x0F4C) | peek(0x0188)));
 							poke(at, peek(0x0F4C));
 						}
 						else
+						{
+							cycles += 39 + 57;
 							poke(at, 0);
+						}
 					}
 					r1 = (uint16_t)(r1 + 2);
 					r0 = (uint16_t)(r0 - 1);
+					tick(0xEB50, cycles);                  // interrupts may come in between tiles
 				} while (--n != 0);
 			r1 = (uint16_t)(r1 - back);
 			r2 = (uint16_t)(r2 + 0x0080);
+			tick(0xEB4A, 48 + 87);                         // row: F:EB4A-EB4E, F:EBF4-EC00
 		} while (--rows != 0);
 	restore_banks(sa, sb);
 	return r0;
@@ -1511,9 +1570,11 @@ void unpack_map_block()
 		for (int col = 16; col > 0; col--)
 		{
 			bool repeat = false;                       // mode 1: the same tile again
+			int cycles;                                // the original pass F:E974-EA46
 			if (r[3] == 0)
 			{
 				const uint8_t head = peekb(r[4]++);
+				cycles = run_head_cycles(head);
 				r[3] = sext8(head);
 				pokeb(0x0F5F, head);
 				r[3] &= 0x003F;
@@ -1528,6 +1589,7 @@ void unpack_map_block()
 			else
 			{
 				r[1] = (uint16_t)(sext8(peekb(0x0F5F)) << 1);
+				cycles = run_next_cycles(peekb(0x0F5F));
 				switch (peekb(0x0F5F))
 				{
 				case 0: pokeb(0x0F4C, peekb(r[4]++)); break;
@@ -1539,30 +1601,38 @@ void unpack_map_block()
 			}
 			bool plain;
 			if (repeat)
+			{
+				cycles += 24 + 24;
 				plain = r[2] == 0;                     // the variant computed last time
+			}
 			else
 			{
+				cycles += 12 + 24 + 84;
 				r[0] = 0;
 				r[2] = peek(0x0F4C) & 0x07FF;
 				if ((int16_t)r[2] > 0x000F)
 				{
+					cycles += 36;
 					r[2] = 0;
 					plain = true;
 				}
 				else
 				{
+					cycles += 78;
 					r[1] = (uint16_t)((uint16_t)(r[2] << 1) + peek(0x0F4E));
 					r[2] = peek(r[1]);
 					if (r[2] == 0)
 						plain = true;
 					else
 					{
+						cycles += 78;
 						r[1] = peek(0x0F4C) & 0xF800;
 						r[2] |= r[1];
 						plain = false;
 					}
 				}
 			}
+			cycles += (plain ? 24 : 171) + 144;
 			if (plain)
 				r[1] = peek(0x0F4C);
 			else
@@ -1577,10 +1647,12 @@ void unpack_map_block()
 			pokeb(0x0F50, (uint8_t)(peekb(0x0F50) + 1));
 			pokeb(0x0F50, (uint8_t)(peekb(0x0F50) + 1));
 			r[3] = (uint16_t)(r[3] - 1);
+			tick(0xE974, cycles);                      // interrupts may come in between tiles
 		}
 		r[1] = (uint16_t)(peekb(0x0F50) - 0x0020);
 		pokeb(0x0F50, (uint8_t)r[1]);
 		pokeb(0x0F51, (uint8_t)(peekb(0x0F51) + 1));
+		tick(0xE96E, 36 + 141);                        // row: F:E96E, F:EA48-EA5C
 	}
 	if (objects)
 	{
@@ -1600,6 +1672,7 @@ void unpack_map_block()
 			ww(0x1400, peek(0x01D2));
 			ww(0x1402, peek(0x01D4));
 			r[4] = (uint16_t)(r[4] - 1);
+			tick(0xEA92, 270);                         // F:EA92-EAB4 without F:EC20
 		} while (!(peekb(r[4]) & 0x80));
 	}
 	r[0] = 0x1800;
@@ -1615,8 +1688,8 @@ void unpack_map_block()
 }
 
 LOGIC_TABLE(fhigh,
-	c_routine("F", 0xD0F4, "update_marked_slots", update_marked_slots, 0, 22868),
-	c_routine("F", 0xD15C, "update_high_slots", update_high_slots, 0, 7089),
+	c_routine("F", 0xD0F4, "update_marked_slots", update_marked_slots, 0, 654),
+	c_routine("F", 0xD15C, "update_high_slots", update_high_slots, 0, 519),
 	c_routine("F", 0xD880, "set_park_entry_types", set_park_entry_types, 0, 2776),
 	c_routine("F", 0xD8D2, "set_ticket_entry_types", set_ticket_entry_types, 0, 1851),
 	c_routine("F", 0xD47C, "start_object", start_object, 0, 936),
@@ -1629,19 +1702,19 @@ LOGIC_TABLE(fhigh,
 	c_routine("F", 0xE648, "skater_anim_b", skater_anim_b, 0, 833),
 	c_routine("F", 0xEF24, "add_score", add_score, 0, 1167),
 	c_routine("F", 0xF064, "start_object4", start_object4, 0, 452),
-	c_routine("F", 0xD19C, "setup_level_slots", setup_level_slots, 0, 22830),
+	c_routine("F", 0xD19C, "setup_level_slots", setup_level_slots, 0, 1692),
 	wait_c_routine("F", 0xE78E, "query_on_button_press", query_on_button_press, 21 + 12 + 18 + 18 + 21),
 	asm_routine("F", 0xD35E, "spawn_counted_object", spawn_counted_object, 368),
 	asm_routine("F", 0xD4E4, "offset_to_object_0ea0", offset_to_object_0ea0, 822),
 	asm_routine("F", 0xD566, "contact_object_0ea0", contact_object_0ea0, 864),
-	asm_routine("F", 0xDB4E, "fade_sprite_palette", fade_sprite_palette, 9531),
+	asm_routine("F", 0xDB4E, "fade_sprite_palette", fade_sprite_palette, 507),
 	asm_routine("F", 0xDBE2, "step_palette_fade", step_palette_fade, 57),
 	asm_routine("F", 0xDC3C, "load_palette_block", load_palette_block, 2951),
 	asm_routine("F", 0xDDEC, "run_palette_job", run_palette_job, 58),
 	asm_routine("F", 0xE254, "update_skater_phase", update_skater_phase, 1306),
-	c_routine("F", 0xEAD4, "draw_tile_block", draw_tile_block, 0, 98569),
+	c_routine("F", 0xEAD4, "draw_tile_block", draw_tile_block, 0, 1278),
 	c_routine("F", 0xEC20, "draw_map_object", draw_map_object, 0, 3061),
-	asm_routine("F", 0xE82E, "unpack_map_block", unpack_map_block, 61320),
+	asm_routine("F", 0xE82E, "unpack_map_block", unpack_map_block, 1937),
 )
 
 }
