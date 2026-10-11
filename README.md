@@ -92,12 +92,17 @@ saved in `controls.cfg` in the game's settings folder (`%APPDATA%\Atari\720Degre
 | Jump | Ctrl | A or RT | Left button |
 | Kick | Shift | X or B | Right button |
 | Coin | 5 (left), 6 (right) | View | |
+| Start a one / two player game | 1 / 2 | any button: one player | any button: one player |
 | Pause | P | Menu | |
 | Debug menu / controls / help | Tab / F4 / F1 | | |
 | Service mode / reset / fullscreen | F2 / F3 / F11 or Alt+Enter | | |
 
 Any controller SDL recognises works; the button names follow the Xbox layout. Controllers can be
 connected and removed while the game runs.
+
+On the title screens the arcade game starts two players when Jump is pressed with two credits in.
+Here only the 2 key starts a two-player game; Jump, Kick, the mouse, the gamepad and the 1 key
+start one player (in the continue countdown the start keys continue).
 
 High scores and settings are kept in the game's EEPROM image, saved in the same settings folder
 as `720.eeprom`. DIP switches: `--dsw0 0xNN --dsw1 0xNN`.
@@ -106,14 +111,15 @@ as `720.eeprom`. DIP switches: `--dsw0 0xNN --dsw1 0xNN`.
 
 Press **Tab** in the game. The menu has these tabs:
 
-* **Game.** Pause, single-frame steps, game speed, machine reset, and hiding the playfield, sprite
-  or text layer.
+* **Game.** Pause, single-frame steps, game speed, machine reset, hiding the playfield, sprite
+  or text layer, and the menu size (100-250 %, also for the help and controls windows; saved).
 * **Overlays.** Sprite boxes with their screen coordinates, and a coloured mask of the terrain
   height map. Hover over the game to read the tile and terrain value under the mouse.
 * **Skater.** Position, velocity, speed, kick or jump phase and the terrain under the skater.
 * **Objects.** The game's 32 object slots with world position, height and velocity.
 * **Physics.** Jump power, gravity, kick power, top speed and kick start speed, changed live.
-* **Cheats.** Freeze or refill the timer, add a park ticket, set cash, score and equipment level.
+* **Cheats.** Freeze or refill the timer, add a park ticket, set cash, score and equipment level;
+  no water and no bushes / thorns, which are drawn as the floor around them.
 * **Sound.** Send any sound command to the sound CPU, replay the commands heard so far, watch the
   level of each sound chip and mute chips.
 * **Memory.** Edit main RAM, keep watches (optionally frozen) and search RAM for values.
@@ -138,13 +144,22 @@ The game loads every `.720mod` file in that folder when it starts; `--no-mods` t
 * **Map.** Click a cell to select it. In *Paint blocks* mode, drag to paint the brush block.
   Right-drag pans, the wheel zooms, middle-click picks up the block under the cursor and a
   double-click opens a block in the block editor.
-* **Blocks.** Every block of the level, with how often it is used. Click one to make it the brush.
-  *Make unique* gives the selected cell its own copy, so that editing it does not change other cells.
+* **Blocks.** Every block of the level, in the order the map uses them (or by number), with how
+  often it is used. Click one to make it the brush. *Make unique* gives the selected cell its own
+  copy, so that editing it does not change other cells.
 * **Block editor.** A block is 16 x 16 tiles in two halves. Left-drag paints the brush tile and
   right-click picks up a tile. Each half also has a zone byte: in Skate City its upper bits select
   the tile set used for "bank 1" tiles while that part of the town is on screen.
-* **Tiles.** The tile sheet of the current level. Choose the bank, palette and priority bits of the
-  brush here. Tiles 0 to 15 are ground placeholders, which the game replaces with varied ground tiles.
+* **Library.**
+  * *Prefabs*: whole objects from the level's original maps (ramps, slopes, pools, platforms,
+    walls, markings) and 2 x 2-block sections of long ones (park courses, curbs). Click one, then
+    click on the map to place it (the Stamp tool) or in the block editor.
+  * *Parts*: smaller pieces cut from the original maps' structures.
+  * *Tiles*: each kind's tiles where the maps use them, in blocks of the level with the other
+    tiles dimmed; click a tile to paint with it.
+  * *All tiles*: the raw tile sheet; choose the bank, palette and priority bits of the brush here.
+    Tiles 0 to 15 are ground placeholders, which the game replaces with varied ground tiles.
+  * *Sprites*: every sprite frame and object type.
 * **File menu.** *Save mod* (Ctrl+S), *Open mod* to continue editing, *Export map as PNG* (into
   the `exports` folder).
   **Play test** (F5) starts the game with your current edits only. Undo and redo are Ctrl+Z / Ctrl+Y.

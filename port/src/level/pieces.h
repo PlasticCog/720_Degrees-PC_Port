@@ -29,6 +29,8 @@ struct Piece {
 	PieceKind kind = PieceKind::Marking;
 	int uses = 0;                                   // occurrences in the maps it was taken from
 	int map = 0, x = 0, y = 0;                      // first occurrence (map index, tile position)
+	bool whole = false;                             // a prefab: a whole object (extract_prefabs)
+	bool section = false;                           // a prefab cut from a long structure (2 x 2 blocks)
 };
 
 // terrain byte of a raw tile word as the game sees it (placeholders resolved first)
@@ -38,6 +40,14 @@ PieceKind terrain_kind(int terrain);
 // the pieces of the given maps (one level: they share tile banks and colours); map indices in
 // Piece::map refer to positions in 'maps'.  Sorted by kind, then by size (largest first).
 std::vector<Piece> extract_pieces(const RomSet &roms, const std::vector<const LevelMap *> &maps);
+
+// prefabs: the whole objects of the given maps (ramps, pools, planters, platforms, ...): every
+// connected group of non-floor tiles up to 3 x 3 blocks, after the long networks it may touch
+// (the curbs along the streets, long walls: a part of one kind and colour longer than that) are
+// taken off; those long structures (park courses, curbs) give sections of 2 x 2 blocks on the
+// block grid.  Sorted by kind, then by how often the maps use them.
+std::vector<Piece> extract_prefabs(const RomSet &roms, const std::vector<const LevelMap *> &maps);
+const char *prefab_kind_name(PieceKind k);         // "Ramp or slope", ...
 
 // ARGB pixels (w*8 x h*8) of a piece in the colours of lm; uncovered cells are transparent
 void render_piece(const GfxSet &gfx, const LevelMap &lm, const int8_t random_var[32], const Piece &p,

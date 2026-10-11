@@ -7,8 +7,10 @@
 //                right drag: pan   wheel: zoom   middle click: pick block   double click: edit block
 //   Block editor left click/drag: paint the brush tile (or stamp the brush piece)
 //                right click: pick up a tile
-//   Library      Pieces: structures of the original maps (ramps, ledges, pits, walls,
-//                markings) to stamp; Tiles: single tiles by kind; All tiles: the raw banks
+//   Library      Prefabs: whole objects of the original maps (ramps, pools, platforms, ...)
+//                and 2 x 2-block sections of long ones, to stamp; Parts: smaller pieces of the
+//                structures; Tiles: each kind's tiles in blocks where the maps use them;
+//                All tiles: the raw banks
 //   Map, Stamp   left click: put the brush piece or tile there (shared blocks are copied)
 //   Map, Objects the sprite objects Skate City places (by town stage) and the screens' ones:
 //                left click selects, drag moves (moves the place it stands on), Delete removes;
@@ -42,6 +44,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -247,6 +250,13 @@ struct Editor {
 	SDL_Texture *lib_tile_tex = nullptr;          // atlas of lib_tiles, 32 per row
 	int brush_piece = -1;                         // index into pieces, -1: the brush is brush_tile
 	bool lib_common_only = true;
+	// the Tiles tab: the level's blocks that show each kind's tiles where they belong (a few
+	// blocks covering every tile of the kind), as 16 x 16 pieces
+	std::vector<Piece> lib_blocks;
+	std::vector<std::vector<int>> lib_cover;     // per PieceKind: indices into lib_blocks
+	std::vector<std::vector<PieceKind>> lib_block_kind;   // per lib_blocks entry: each tile's kind
+	std::vector<SDL_Texture *> lib_block_tex;
+	bool blocks_by_place = true;                  // Blocks panel: in the order the map uses them
 
 	// sprites and map objects (sprites.h).  spr is decoded from the levels' ROM image (with the
 	// opened mod), spr_orig from the original; obj_lists / def_moves are the edited state.
@@ -446,6 +456,8 @@ struct Editor {
 	{
 		for (auto *t : piece_tex) if (t) SDL_DestroyTexture(t);
 		piece_tex.assign(pieces.size(), nullptr);
+		for (auto *t : lib_block_tex) if (t) SDL_DestroyTexture(t);
+		lib_block_tex.assign(lib_blocks.size(), nullptr);
 		if (lib_tile_tex) SDL_DestroyTexture(lib_tile_tex);
 		lib_tile_tex = nullptr;
 	}
@@ -459,6 +471,10 @@ struct Editor {
 		for (const LevelMap &m : original.maps)
 			if (m.level == lm.level) maps.push_back(&m);
 		pieces = extract_pieces(roms, maps);
+		{
+			std::vector<Piece> whole = extract_prefabs(roms, maps);
+			pieces.insert(pieces.end(), whole.begin(), whole.end());
+		}
 		brush_piece = -1;
 		// single tiles: every tile word the level's maps use, with how often
 		std::map<std::pair<uint16_t, uint8_t>, LibTile> tiles;
@@ -484,6 +500,7 @@ struct Editor {
 			}
 		lib_tiles.clear();
 		for (auto &kv : tiles) lib_tiles.push_back(kv.second);
+		build_tile_cover(maps, tiles);
 		std::stable_sort(lib_tiles.begin(), lib_tiles.end(), [](const LibTile &a, const LibTile &b) {
 			if (a.kind != b.kind) return a.kind < b.kind;
 			return (a.word & 0x7ff) < (b.word & 0x7ff);
@@ -641,6 +658,167 @@ struct Editor {
 		return clicked;
 	}
 
+	// the Tiles tab: the distinct blocks of the level's maps as 16 x 16 pieces, and for each kind
+	// a few of them that between them show every tile of the kind where the maps use it (greedy:
+	// the block with the most tiles of the kind not shown yet, until all are)
+	void build_tile_cover(const std::vector<const LevelMap *> &maps, const std::map<std::pair<uint16_t, uint8_t>, LibTile> &tiles)
+	{
+		lib_blocks.clear();
+		lib_block_kind.clear();
+		lib_cover.assign((size_t)PieceKind::Count, {});
+		std::map<std::pair<uint16_t, uint8_t>, int> index;      // tile -> number
+		std::vector<PieceKind> tile_kind;
+		for (const auto &kv : tiles)
+		{
+			index.emplace(kv.first, (int)tile_kind.size());
+			tile_kind.push_back(kv.second.kind);
+		}
+		std::set<std::pair<std::vector<uint16_t>, std::vector<uint8_t>>> seen;
+		std::vector<std::vector<int>> block_tiles;                 // per block: its distinct tile numbers
+		for (const LevelMap *m : maps)
+		{
+			std::vector<char> used(m->blocks.size(), 0);
+			for (int c : m->cells)
+				if (c >= 0 && c < (int)used.size()) used[c] = 1;
+			for (size_t bi = 0; bi < m->blocks.size(); bi++)
+			{
+				if (!used[bi]) continue;
+				Piece p;
+				p.w = p.h = 16;
+				p.tiles.resize(256);
+				p.bank1.resize(256);
+				std::vector<PieceKind> kinds(256, PieceKind::Floor);
+				std::vector<int> ids;
+				for (int y = 0; y < 16; y++)
+					for (int x = 0; x < 16; x++)
+					{
+						const BlockHalf &h = m->blocks[bi].half[y / 8];
+						const uint16_t w = h.tiles[(y % 8) * 16 + x];
+						const uint8_t b1 = (uint8_t)m->half_bank1(h);
+						p.tiles[y * 16 + x] = w;
+						p.bank1[y * 16 + x] = b1;
+						const auto it = index.find({(uint16_t)(w & 0x3fff), b1});
+						if (it == index.end()) continue;
+						kinds[y * 16 + x] = tile_kind[it->second];
+						ids.push_back(it->second);
+					}
+				if (!seen.insert({p.tiles, p.bank1}).second) continue;
+				std::sort(ids.begin(), ids.end());
+				ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+				lib_blocks.push_back(std::move(p));
+				lib_block_kind.push_back(std::move(kinds));
+				block_tiles.push_back(std::move(ids));
+			}
+		}
+		for (int k = 0; k < (int)PieceKind::Count; k++)
+		{
+			std::vector<char> shown(tile_kind.size(), 0);
+			for (;;)
+			{
+				int best = -1, best_n = 0;
+				for (size_t b = 0; b < block_tiles.size(); b++)
+				{
+					int n = 0;
+					for (int t : block_tiles[b])
+						if ((int)tile_kind[t] == k && !shown[t]) n++;
+					if (n > best_n) { best_n = n; best = (int)b; }
+				}
+				if (best < 0) break;
+				lib_cover[k].push_back(best);
+				for (int t : block_tiles[best])
+					if ((int)tile_kind[t] == k) shown[t] = 1;
+			}
+		}
+	}
+
+	SDL_Texture *lib_block_texture(int b)
+	{
+		if (b < 0 || b >= (int)lib_blocks.size()) return nullptr;
+		if (lib_block_tex.size() != lib_blocks.size()) lib_block_tex.assign(lib_blocks.size(), nullptr);
+		if (!lib_block_tex[b])
+		{
+			std::vector<uint32_t> px;
+			render_piece(gfx, map(), random_var, lib_blocks[b], px);
+			lib_block_tex[b] = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, 128, 128);
+			SDL_SetTextureScaleMode(lib_block_tex[b], SDL_SCALEMODE_NEAREST);
+			SDL_UpdateTexture(lib_block_tex[b], nullptr, px.data(), 128 * 4);
+		}
+		return lib_block_tex[b];
+	}
+
+	// the brush becomes piece i (a prefab: the map's Stamp tool is chosen to place it)
+	void choose_piece(int i)
+	{
+		brush_piece = i;
+		const Piece &p = pieces[i];
+		if (p.whole)
+		{
+			tool = 2;
+			status = std::string("Brush: ") + prefab_kind_name(p.kind) + ", " + std::to_string(p.w) + " x " +
+				std::to_string(p.h) + " tiles. Click on the map to place it (Stamp), or in the block editor.";
+		}
+		else
+			status = std::string("Brush: ") + piece_kind_name(p.kind) + " piece " + std::to_string(p.w) + "x" + std::to_string(p.h);
+	}
+
+	void ui_prefabs()
+	{
+		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+		ImGui::TextWrapped("Whole objects from this level's original maps: ramps and slopes, pools and pits, "
+			"platforms, walls and markings, as they stand on the map. Click one, then click on the map to "
+			"place it (the Stamp tool) or in the block editor. The number is how often the maps use it.");
+		ImGui::PopStyleColor();
+		ImGui::BeginChild("prefabs", {0, 0}, ImGuiChildFlags_Borders);
+		const float sp = ImGui::GetStyle().ItemSpacing.x;
+		const float avail = ImGui::GetContentRegionAvail().x;
+		const float box = std::max(64.0f, std::floor((avail - 2 * sp) / 3));   // three to a row
+		bool first_group = true;                      // the first group starts open
+		for (int k = 0; k <= (int)PieceKind::Count; k++)
+		{
+			std::vector<int> list;
+			const bool sections = k == (int)PieceKind::Count;
+			for (int i = 0; i < (int)pieces.size(); i++)
+				if (pieces[i].whole && (sections ? pieces[i].section : !pieces[i].section && (int)pieces[i].kind == k)) list.push_back(i);
+			if (list.empty()) continue;
+			char head[96];
+			snprintf(head, sizeof(head), "%s (%zu)###pf%d",
+				sections ? "Sections of long structures: courses, curbs (2 x 2 blocks)" : piece_kind_name((PieceKind)k), list.size(), k);
+			const bool open_first = first_group;
+			first_group = false;
+			if (!ImGui::CollapsingHeader(head, open_first ? ImGuiTreeNodeFlags_DefaultOpen : 0)) continue;
+			float row = 0;
+			for (int i : list)
+			{
+				const Piece &p = pieces[i];
+				const float pw = p.w * 8.0f, ph = p.h * 8.0f;
+				const float s = std::min({box / pw, box / ph, 3.0f});
+				ImGui::PushID(i);
+				if (flow_image(piece_texture(i), {pw * s, ph * s}, {0, 0}, {1, 1}, avail, row, i == brush_piece)) choose_piece(i);
+				const ImVec2 b1 = ImGui::GetItemRectMax();
+				if (p.uses > 1)
+				{
+					char n[16];
+					snprintf(n, sizeof(n), "x%d", p.uses);
+					const ImVec2 ts = ImGui::CalcTextSize(n);
+					ImDrawList *dl = ImGui::GetWindowDrawList();
+					dl->AddRectFilled({b1.x - ts.x - 4, b1.y - ts.y - 2}, b1, IM_COL32(0, 0, 0, 170));
+					dl->AddText({b1.x - ts.x - 2, b1.y - ts.y - 1}, IM_COL32(255, 255, 255, 255), n);
+				}
+				if (ImGui::IsItemHovered())
+				{
+					ImGui::BeginTooltip();
+					ImGui::Text("%s, %d x %d tiles (%.1f x %.1f blocks)", prefab_kind_name(p.kind), p.w, p.h, p.w / 16.0f, p.h / 16.0f);
+					ImGui::Text("used %d time%s in the original maps", p.uses, p.uses == 1 ? "" : "s");
+					const float ts = std::min(3.0f, 360 / std::max(pw, ph));
+					ImGui::Image((ImTextureID)(intptr_t)piece_texture(i), {pw * ts, ph * ts});
+					ImGui::EndTooltip();
+				}
+				ImGui::PopID();
+			}
+		}
+		ImGui::EndChild();
+	}
+
 	void ui_pieces()
 	{
 		ImGui::Checkbox("Common pieces only", &lib_common_only);
@@ -655,7 +833,7 @@ struct Editor {
 		{
 			std::vector<int> list;
 			for (int i = 0; i < (int)pieces.size(); i++)
-				if ((int)pieces[i].kind == k && (!lib_common_only || pieces[i].uses > 1)) list.push_back(i);
+				if (!pieces[i].whole && (int)pieces[i].kind == k && (!lib_common_only || pieces[i].uses > 1)) list.push_back(i);
 			if (list.empty()) continue;
 			char head[96];
 			snprintf(head, sizeof(head), "%s (%zu)###kind%d", piece_kind_name((PieceKind)k), list.size(), k);
@@ -689,37 +867,55 @@ struct Editor {
 	void ui_lib_tiles()
 	{
 		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-		ImGui::TextWrapped("The tiles this level uses, by kind. Click one to paint with it.");
+		ImGui::TextWrapped("Each kind's tiles where the maps use them: blocks of this level that between them "
+			"show every tile of the kind, the other tiles dimmed. Click a tile to paint with it.");
 		ImGui::PopStyleColor();
 		ImGui::BeginChild("libtiles", {0, 0}, ImGuiChildFlags_Borders);
-		SDL_Texture *t = lib_tiles_texture();
+		const float sp = ImGui::GetStyle().ItemSpacing.x;
 		const float avail = ImGui::GetContentRegionAvail().x;
-		const int rows = ((int)lib_tiles.size() + 31) / 32;
-		for (int k = 0; k < (int)PieceKind::Count && t; k++)
+		const float size = std::max(96.0f, std::floor((avail - 2 * sp) / 3));   // three blocks to a row
+		const float cell = size / 16;
+		for (int k = 0; k < (int)PieceKind::Count; k++)
 		{
-			std::vector<int> list;
-			for (int i = 0; i < (int)lib_tiles.size(); i++)
-				if ((int)lib_tiles[i].kind == k) list.push_back(i);
-			if (list.empty()) continue;
-			char head[96];
-			snprintf(head, sizeof(head), "%s (%zu)###tkind%d", k == (int)PieceKind::Floor ? "Floor (varied by the game)" : piece_kind_name((PieceKind)k), list.size(), k);
-			if (!ImGui::CollapsingHeader(head)) continue;
+			if (k >= (int)lib_cover.size() || lib_cover[k].empty()) continue;
+			int count = 0;
+			for (const LibTile &t : lib_tiles) count += (int)t.kind == k;
+			char head[128];
+			snprintf(head, sizeof(head), "%s (%d tiles in %zu blocks)###tk%d",
+				k == (int)PieceKind::Floor ? "Floor (varied by the game)" : piece_kind_name((PieceKind)k), count, lib_cover[k].size(), k);
+			if (!ImGui::CollapsingHeader(head, k == 0 ? ImGuiTreeNodeFlags_DefaultOpen : 0)) continue;
 			float row = 0;
-			for (int i : list)
+			for (int b : lib_cover[k])
 			{
-				const ImVec2 uv0 = {(i % 32) / 32.0f, (float)(i / 32) / rows};
-				const ImVec2 uv1 = {uv0.x + 1 / 32.0f, uv0.y + 1.0f / rows};
-				ImGui::PushID(i);
-				const LibTile &lt = lib_tiles[i];
-				if (flow_image(t, {16, 16}, uv0, uv1, avail, row, brush_piece < 0 && (brush_tile & 0x3fff) == lt.word))
-				{
-					brush_piece = -1;
-					brush_tile = (uint16_t)(lt.word | (pick_prio << 14));
-					pick_bank = (lt.word >> 10) & 1;
-					pick_pal = (lt.word >> 11) & 7;
-				}
+				ImGui::PushID(b);
+				flow_image(lib_block_texture(b), {size, size}, {0, 0}, {1, 1}, avail, row, false);
+				const ImVec2 p0 = ImGui::GetItemRectMin();
+				ImDrawList *dl = ImGui::GetWindowDrawList();
+				for (int i = 0; i < 256; i++)
+					if ((int)lib_block_kind[b][i] != k)
+					{
+						const ImVec2 c0 = {p0.x + (i % 16) * cell, p0.y + (i / 16) * cell};
+						dl->AddRectFilled(c0, {c0.x + cell, c0.y + cell}, IM_COL32(0, 0, 0, 130));
+					}
 				if (ImGui::IsItemHovered())
-					ImGui::SetTooltip("tile %d, bank %d, palette %d, used %d times", lt.word & 0x3ff, (lt.word >> 10) & 1, (lt.word >> 11) & 7, lt.uses);
+				{
+					const ImVec2 m = ImGui::GetIO().MousePos;
+					const int tx = std::clamp((int)((m.x - p0.x) / cell), 0, 15), ty = std::clamp((int)((m.y - p0.y) / cell), 0, 15);
+					const int i = ty * 16 + tx;
+					const uint16_t w = lib_blocks[b].tiles[i];
+					const ImVec2 c0 = {p0.x + tx * cell, p0.y + ty * cell};
+					dl->AddRect(c0, {c0.x + cell, c0.y + cell}, IM_COL32(255, 255, 0, 255), 0, 0, 2);
+					ImGui::SetTooltip("tile %d, bank %d, palette %d%s", w & 0x3ff, (w >> 10) & 1, (w >> 11) & 7,
+						(w & 0x7ff) < 16 ? "\n(ground placeholder: varied by the game)" : "");
+					if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+					{
+						brush_piece = -1;
+						brush_tile = (uint16_t)((w & 0x3fff) | (pick_prio << 14));
+						pick_bank = (w >> 10) & 1;
+						pick_pal = (w >> 11) & 7;
+						status = "Brush: tile " + std::to_string(w & 0x3ff) + " (click in the block editor or use the map's Stamp tool)";
+					}
+				}
 				ImGui::PopID();
 			}
 		}
@@ -1197,12 +1393,28 @@ struct Editor {
 			ImGui::TextDisabled("Click a map cell to select it.");
 		ImGui::Text("Brush: %s", brush_block >= 0 ? ("block " + std::to_string(brush_block)).c_str() : "none");
 		ImGui::Separator();
+		ImGui::Checkbox("In map order", &blocks_by_place);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("The blocks in the order the map uses them (left to right, top to bottom), so that\n"
+			                  "neighbours on the map are neighbours here; unused blocks last.\nUntick for block numbers.");
 		ImGui::BeginChild("thumbs");
 		const float th = 52;
 		const float avail = ImGui::GetContentRegionAvail().x;
 		const int per_row = std::max(1, (int)(avail / (th + 2 * ImGui::GetStyle().FramePadding.x + ImGui::GetStyle().ItemSpacing.x)));
-		for (int i = 0; i < (int)lm.blocks.size(); i++)
+		std::vector<int> order;
+		if (blocks_by_place)
 		{
+			std::vector<char> seen(lm.blocks.size(), 0);
+			for (int c : lm.cells)
+				if (c >= 0 && c < (int)seen.size() && !seen[c]) { seen[c] = 1; order.push_back(c); }
+			for (int i = 0; i < (int)lm.blocks.size(); i++)
+				if (!seen[i]) order.push_back(i);
+		}
+		else
+			for (int i = 0; i < (int)lm.blocks.size(); i++) order.push_back(i);
+		for (int n = 0; n < (int)order.size(); n++)
+		{
+			const int i = order[n];
 			ImGui::PushID(i);
 			const bool sel = i == brush_block;
 			if (sel) ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(220, 180, 0, 255));
@@ -1219,7 +1431,7 @@ struct Editor {
 					lm.blocks[i].objects.empty() ? "" : "\nhas object stamps");
 				if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) edit_block = i;
 			}
-			if ((i + 1) % per_row) ImGui::SameLine();
+			if ((n + 1) % per_row) ImGui::SameLine();
 			ImGui::PopID();
 		}
 		ImGui::EndChild();
@@ -1849,7 +2061,8 @@ struct Editor {
 		if (brush_piece >= 0 && brush_piece < (int)pieces.size())
 		{
 			const Piece &p = pieces[brush_piece];
-			ImGui::Text("Brush: %s piece, %d x %d", piece_kind_name(p.kind), p.w, p.h);
+			if (p.whole) ImGui::Text("Brush: prefab %s, %d x %d tiles", prefab_kind_name(p.kind), p.w, p.h);
+			else ImGui::Text("Brush: %s piece, %d x %d", piece_kind_name(p.kind), p.w, p.h);
 			ImGui::SameLine();
 			if (ImGui::SmallButton("Back to single tile")) brush_piece = -1;
 		}
@@ -1858,7 +2071,8 @@ struct Editor {
 		if (ImGui::BeginTabBar("library"))
 		{
 			auto tab = [&](int i) { return lib_tab_force == i ? ImGuiTabItemFlags_SetSelected : 0; };
-			if (ImGui::BeginTabItem("Pieces", nullptr, tab(0))) { ui_pieces(); ImGui::EndTabItem(); }
+			if (ImGui::BeginTabItem("Prefabs", nullptr, tab(0))) { ui_prefabs(); ImGui::EndTabItem(); }
+			if (ImGui::BeginTabItem("Parts", nullptr, tab(4))) { ui_pieces(); ImGui::EndTabItem(); }
 			if (ImGui::BeginTabItem("Tiles", nullptr, tab(1))) { ui_lib_tiles(); ImGui::EndTabItem(); }
 			if (ImGui::BeginTabItem("All tiles", nullptr, tab(2))) { ui_raw_tiles(); ImGui::EndTabItem(); }
 			if (ImGui::BeginTabItem("Sprites", nullptr, tab(3))) { ui_sprites(); ImGui::EndTabItem(); }

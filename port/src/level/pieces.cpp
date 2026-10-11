@@ -245,6 +245,106 @@ std::vector<Piece> extract_pieces(const RomSet &roms, const std::vector<const Le
 	return out;
 }
 
+const char *prefab_kind_name(PieceKind k)
+{
+	switch (k)
+	{
+	case PieceKind::Ramp: return "Ramp or slope";
+	case PieceKind::Ledge: return "Ledge, platform or block";
+	case PieceKind::Pit: return "Pit, pool or water";
+	case PieceKind::Wall: return "Wall or obstacle";
+	case PieceKind::Marking: return "Marking or decoration";
+	case PieceKind::Floor: return "Floor";
+	default: return "?";
+	}
+}
+
+std::vector<Piece> extract_prefabs(const RomSet &roms, const std::vector<const LevelMap *> &maps)
+{
+	constexpr int MAX_SIDE = 48;                    // 3 blocks
+	constexpr size_t MIN_CELLS = 6;
+	auto fits = [&](const Region &r) { return r.x1 - r.x0 < MAX_SIDE && r.y1 - r.y0 < MAX_SIDE; };
+	std::vector<Piece> found;
+	for (size_t mi = 0; mi < maps.size(); mi++)
+	{
+		const Grid g = build_grid(roms, *maps[mi]);
+		std::vector<int> content;
+		for (int i = 0; i < g.w * g.h; i++)
+			if (g.kind[i] != PieceKind::Floor) content.push_back(i);
+		std::vector<int> mark(g.word.size(), -1);
+		for (int c : content) mark[c] = 0;
+		const auto structures = regions(g, content, mark, 0, [](int, int) { return true; });
+		int stamp = 2;
+		for (const Region &r : structures)
+		{
+			if (r.cells.size() < MIN_CELLS) continue;
+			if (fits(r))
+			{
+				found.push_back(make_piece(g, r.cells, r.x0, r.y0, r.x1, r.y1, (int)mi));
+				continue;
+			}
+			// take off the long networks: parts of one kind and colour that do not fit
+			for (int c : r.cells) mark[c] = stamp;
+			const auto parts = regions(g, r.cells, mark, stamp, [&](int a, int b) {
+				return g.kind[a] == g.kind[b] && ((g.word[a] >> 11) & 7) == ((g.word[b] >> 11) & 7);
+			});
+			stamp += 2;
+			std::vector<int> rest;
+			for (const Region &p : parts)
+			{
+				if (fits(p))
+				{
+					rest.insert(rest.end(), p.cells.begin(), p.cells.end());
+					continue;
+				}
+				// a long structure: sections of 2 x 2 blocks on the block grid
+				for (int y = p.y0 / 16 * 16; y <= p.y1; y += 32)
+					for (int x = p.x0 / 16 * 16; x <= p.x1; x += 32)
+					{
+						std::vector<int> part;
+						int x0 = g.w, y0 = g.h, x1 = -1, y1 = -1;
+						for (int c : p.cells)
+						{
+							const int cx = c % g.w, cy = c / g.w;
+							if (cx < x || cx >= x + 32 || cy < y || cy >= y + 32) continue;
+							part.push_back(c);
+							x0 = std::min(x0, cx); y0 = std::min(y0, cy);
+							x1 = std::max(x1, cx); y1 = std::max(y1, cy);
+						}
+						if (part.size() < 3 * MIN_CELLS) continue;
+						found.push_back(make_piece(g, part, x0, y0, x1, y1, (int)mi));
+						found.back().section = true;
+					}
+			}
+			for (int c : rest) mark[c] = stamp;
+			const auto objects = regions(g, rest, mark, stamp, [](int, int) { return true; });
+			stamp += 2;
+			for (const Region &o : objects)
+				if (o.cells.size() >= MIN_CELLS && fits(o))
+					found.push_back(make_piece(g, o.cells, o.x0, o.y0, o.x1, o.y1, (int)mi));
+		}
+	}
+	std::map<std::tuple<int, int, std::vector<uint16_t>>, size_t> seen;
+	std::vector<Piece> out;
+	for (Piece &p : found)
+	{
+		auto key = std::make_tuple(p.w, p.h, p.tiles);
+		auto it = seen.find(key);
+		if (it != seen.end()) { out[it->second].uses++; continue; }
+		p.uses = 1;
+		p.whole = true;
+		seen.emplace(std::move(key), out.size());
+		out.push_back(std::move(p));
+	}
+	std::stable_sort(out.begin(), out.end(), [](const Piece &a, const Piece &b) {
+		if (a.section != b.section) return b.section;
+		if (a.kind != b.kind) return a.kind < b.kind;
+		if (a.uses != b.uses) return a.uses > b.uses;
+		return a.w * a.h > b.w * b.h;
+	});
+	return out;
+}
+
 void render_piece(const GfxSet &gfx, const LevelMap &lm, const int8_t random_var[32], const Piece &p,
                   std::vector<uint32_t> &px)
 {
