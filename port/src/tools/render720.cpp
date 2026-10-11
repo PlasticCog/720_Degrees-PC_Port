@@ -34,7 +34,7 @@ static void write_wav(const std::string &path, const std::vector<int16_t> &s, in
 int main(int argc, char **argv)
 {
 	std::string roms = "Game", out = ".", script, wav, mod, sound_log, ram_dump, palette_log, in0_log, sio_log, pal_dump,
-		sound_ram_dump, draw_ground, pf_dump;
+		sound_ram_dump, draw_ground, pf_dump, mo_log;
 	bool hide_pf = false, hide_alpha = false;
 	int frames = 600, png_every = 0, seed = 0, stats_every = 0;
 	struct Poke { int frame; uint16_t addr, value; };
@@ -72,7 +72,8 @@ int main(int argc, char **argv)
 			logic::g_cheat_no_bushes |= c.find("no-bushes") != std::string::npos;
 		}
 		else if (a == "--draw-ground") draw_ground = next();   // water, bushes: drawn as ground only (play unchanged)
-		else if (a == "--pf-dump") pf_dump = next();       // with each screenshot: the playfield words, scroll, tile banks
+		else if (a == "--pf-dump") pf_dump = next();
+		else if (a == "--mo-log") mo_log = next();         // per frame: the visible sprite list entries       // with each screenshot: the playfield words, scroll, tile banks
 		else if (a == "--translated") logic::use_translation(next());   // these rewritten routines run translated
 		else if (a == "--poke")                            // FRAME:ADDR:VALUE (hex addr/value), main RAM word
 		{
@@ -129,6 +130,7 @@ int main(int argc, char **argv)
 	m.board.debug.ground_water |= draw_ground.find("water") != std::string::npos;
 	m.board.debug.ground_bushes |= draw_ground.find("bushes") != std::string::npos;
 	FILE *pfdump = pf_dump.empty() ? nullptr : fopen(pf_dump.c_str(), "wb");
+	FILE *molog = mo_log.empty() ? nullptr : fopen(mo_log.c_str(), "w");
 	if (pfdump)                                        // first the tile tables: terrain, event bytes per code
 	{
 		uint8_t t[2][8192];
@@ -203,6 +205,36 @@ int main(int argc, char **argv)
 			fwrite(sc, 2, 2, rdump);
 		}
 		if (pdump) fwrite(m.board.palette_ram(), 2, 0x100, pdump);
+		if (molog)
+		{
+			// frame entry x y height code color empty(1: every pixel transparent)
+			const uint16_t *mo = m.board.mo_ram();
+			bool visited[256] = {};
+			int link = 0, last_x = 0;
+			for (int n = 0; n < 256 && !visited[link]; n++)
+			{
+				const uint16_t *e = &mo[link * 4];
+				visited[link] = true;
+				const int code = (e[1] & 0x7ff) | ((e[0] & 7) << 11);
+				int xpos = (e[2] >> 6) & 0x3ff, ypos = -((e[0] >> 6) & 0x1ff);
+				const int height = ((e[1] >> 11) & 7) + 1;
+				ypos -= height << 4;
+				if (e[1] & 0x8000) xpos = last_x + 16;
+				last_x = xpos;
+				xpos &= 1023;
+				ypos &= 511;
+				if (xpos >= 640) xpos -= 1024;
+				if (ypos >= Board::VTOTAL) ypos -= 512;
+				const int idx = link;
+				link = (e[3] >> 3) & 0xff;
+				if (xpos <= -16 || xpos >= Board::SCREEN_W || ypos >= Board::SCREEN_H || ypos + height * 16 <= 0) continue;
+				bool empty = true;
+				for (int t = 0; t < height && empty; t++)
+					for (int k = 0; k < 256; k++)
+						if (m.board.gfx().sprites[((code + t) & 8191) * 256 + k] != 15) { empty = false; break; }
+				fprintf(molog, "%d %d %d %d %d %d %d %d\n", f + 1, idx, xpos, ypos, height, code, (e[3] >> 12) & 15, empty ? 1 : 0);
+			}
+		}
 		if (sdump) fwrite(m.board.sound_ram(), 1, 0x1000, sdump);
 		if (!snap.empty() || (png_every && (f % png_every) == png_every - 1))
 		{
