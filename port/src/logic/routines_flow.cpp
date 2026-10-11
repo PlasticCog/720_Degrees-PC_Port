@@ -89,6 +89,31 @@ void select_bank(uint16_t pc, uint16_t shadow, uint16_t reg, uint16_t v)
 void bank_a(uint16_t pc, uint16_t v) { select_bank(pc, 0x01D2, 0x1400, v); }
 void bank_b(uint16_t pc, uint16_t v) { select_bank(pc, 0x01D4, 0x1402, v); }
 
+
+// MOV #8,Rr; MOVB @#a,R0; XOR R0,Rr; MOVB Rr,@#a at pc: the direction byte a turned round
+void turn_round(uint16_t pc, int r, uint16_t a)
+{
+	T.r[r] = 0x0008;
+	fl::mov(T.r[r]);
+	tick((uint16_t)(pc + 4), 18);
+	T.r[0] = sext8(peekb(a));
+	fl::movb((uint8_t)T.r[0]);
+	tick((uint16_t)(pc + 8), 24);
+	T.r[r] = fl::logic((uint16_t)(T.r[r] ^ T.r[0]));
+	tick((uint16_t)(pc + 0x0A), 12);
+	pokeb(a, (uint8_t)T.r[r]);
+	fl::movb((uint8_t)T.r[r]);
+	tick((uint16_t)(pc + 0x0E), 27);
+}
+// MOVB @#from,@#to (39 cycles) and the step to next
+void copy_b(uint16_t from, uint16_t to, uint16_t next)
+{
+	const uint8_t v = peekb(from);
+	fl::movb(v);
+	pokeb(to, v);
+	tick(next, 39);
+}
+
 // MOVB @#0x0329,@#0x0328 at pc: the code handled becomes the last one
 void keep_code(uint16_t pc)
 {
@@ -803,20 +828,22 @@ void draw_string_small() { draw_string(0x8B04, 0x8C12); }
 // phase 0x01EB = 8, 0x0330 = 4, and the skater takes off (F:9FB4)
 uint16_t skater_jump(const Args &)
 {
-	Clock k;
-	k.at(0x9F8A);
-	const bool kick4 = peekb(0x01EB) == 4;
-	k.add(30, 12);
-	if (kick4)
+	const uint8_t kick = peekb(0x01EB);
+	fl::cmpb(kick, 0x04);
+	tick(0x9F90, 30);
+	if (kick != 4)
+		tick(0x9F98, 12);                              // BNE
+	else
 	{
-		k.at(0x9F92); poke(0x01B4, peek(0x02E8)); k.add(39);
+		tick(0x9F92, 12);                              // the speed back from 0x02E8
+		copy_w(0x02E8, 0x01B4, 0x9F98);
 	}
-	k.call(0xE238, 0x9F9C);                            // reset_skater_state
-	k.at(0x9F9C); pokeb(0x07B1, 3); k.add(33);
-	k.at(0x9FA2); pokeb(0x01EB, 8); k.add(33);
-	k.at(0x9FA8); pokeb(0x0330, 4); k.add(33);
-	k.call(0x9FB4, 0x9FB2);                            // skater_take_off
-	k.leave();
+	jsr(0x9F9C, 0xE238);                               // reset_skater_state
+	set_b(0x07B1, 0x03, 0x9FA2);
+	set_b(0x01EB, 0x08, 0x9FA8);
+	set_b(0x0330, 0x04, 0x9FAE);
+	jsr(0x9FB2, 0x9FB4);                               // skater_take_off
+	rts();
 	return T.r[0];
 }
 
@@ -1998,64 +2025,98 @@ uint16_t skater_motion_params(const Args &)
 // R1-R3 preserved (F144).
 uint16_t skater_take_off(const Args &)
 {
-	Clock k;
-	k.save(0x9FB4, 3);
-	k.at(0x9FB8); T.r[1] = peek(0x01D2); k.add(24);
-	k.at(0x9FBC); T.r[2] = peek(0x01D4); k.add(24);
-	k.at(0x9FC0); pokeb(0x01EA, 0); k.add(27);
-	sel_ab(k, 0x9FC4, 0x3800, 0x3C00);
-	k.at(0x9FDC);
-	const bool park4 = peekb(0x0F59) == 4;
-	k.add(30, 12);
-	if (!park4) k.call(0x7A9E, 0x9FE8);                // snapshot_skater
-	k.at(0x9FE8);
-	const bool back = (int16_t)peek(0x01B4) < 0;
-	k.add(24, 12);
-	if (back)
+	c_save(2, 0x9FB8);
+	T.r[1] = peek(0x01D2);                             // the banks, put back at the end
+	fl::mov(T.r[1]);
+	tick(0x9FBC, 24);
+	T.r[2] = peek(0x01D4);
+	fl::mov(T.r[2]);
+	tick(0x9FC0, 24);
+	clr_b(0x01EA, 0x9FC4);
+	bank_a(0x9FC4, 0x3800);
+	bank_b(0x9FD0, 0x3C00);
+	const uint8_t park = peekb(0x0F59);
+	fl::cmpb(park, 0x04);
+	tick(0x9FE2, 30);
+	if (park == 4)
+		tick(0x9FE8, 12);                              // BEQ
+	else
 	{
-		T.r[3] = 8; k.add(18);
-		k.at(0x9FF2); T.r[0] = sext8(peekb(0x031D)); k.add(24);
-		T.r[3] ^= T.r[0]; k.add(12);
-		k.at(0x9FF8); pokeb(0x031D, (uint8_t)T.r[3]); k.add(27);
-		k.at(0x9FFC); poke(0x01B4, (uint16_t)-peek(0x01B4)); k.add(27);
+		tick(0x9FE4, 12);
+		jsr(0x9FE8, 0x7A9E);                           // snapshot_skater
 	}
-	k.at(0xA000); poke(0x02E8, peek(0x01B4)); k.add(39);
-	k.call(0x9B82, 0xA00A);                            // skater_motion_params
-	k.call(0x91A6, 0xA00E);                            // skater_velocity
-	k.at(0xA00E);
-	const bool carried = peekb(0x0EA0) != 0;
-	k.add(24, 12);
-	if (carried) k.call(0xD742, 0xA018);
-	k.at(0xA018); push(peek(0x01B4)); k.add(36);
-	k.at(0xA01C); push(peek(0x02EA)); k.add(36);
-	k.call(0x80FA, 0xA024);                            // mul32
-	k.at(0xA024); pokeb(0x01B5, peekb(0x0206)); k.add(39);
-	k.at(0xA02A); pokeb(0x01B4, peekb(0x0205)); k.add(39);
-	k.at(0xA030); poke(T.r[6], peek(0x01B4)); k.add(33);
-	k.at(0xA034); push(peek(0x02EC)); k.add(36);
-	k.call(0x80FA, 0xA03C);
-	k.at(0xA03C); pokeb(0x07F8, peekb(0x0205)); k.add(39);
-	k.at(0xA042); poke(0x05B0, peek(0x0206)); k.add(39);
-	k.at(0xA048);
-	const bool carried2 = peekb(0x0EA0) != 0;
-	k.add(24, 12);
-	if (carried2) k.call(0xD6BE, 0xA052);
-	k.at(0xA052); pokeb(0x0323, 0); k.add(27);
-	k.at(0xA056); poke(0x02F6, peek(0x01C6)); k.add(39);
-	k.at(0xA05C); poke(0x02F6, (uint16_t)(peek(0x02F6) << 1)); k.add(27);
-	k.at(0xA060); poke(0x02F4, 0); k.add(27);
-	k.at(0xA064); poke(0x02F2, 0); k.add(27);
-	k.at(0xA068); poke(0x02EE, t11rt::g_patch_gravity); k.add(33);   // patch point (default 12)
-	poke(T.r[6], 0x004A); k.add(27);
-	k.call(0x8E78, 0xA076);                            // queue_sound
-	k.at(0xA076); poke(0x01D2, T.r[1]); k.add(27);
-	k.at(0xA07A); poke(0x01D4, T.r[2]); k.add(27);
-	k.at(0xA07E); poke(0x1400, peek(0x01D2)); k.add(39);
-	k.at(0xA084); poke(0x1402, peek(0x01D4)); k.add(39);
-	T.r[6] = (uint16_t)(T.r[6] + 6);
-	k.add(18);
-	k.restore(3);
-	k.leave();
+	const uint16_t speed = peek(0x01B4);
+	fl::tst(speed);
+	tick(0x9FEC, 24);
+	if ((int16_t)speed >= 0)
+		tick(0xA000, 12);                              // BGE
+	else
+	{
+		tick(0x9FEE, 12);                              // backwards: the opposite direction
+		turn_round(0x9FEE, 3, 0x031D);
+		poke(0x01B4, fl::neg(peek(0x01B4)));
+		tick(0xA000, 27);
+	}
+	copy_w(0x01B4, 0x02E8, 0xA006);
+	jsr(0xA00A, 0x9B82);                               // skater_motion_params
+	jsr(0xA00E, 0x91A6);                               // skater_velocity
+	const uint8_t carried = peekb(0x0EA0);
+	fl::tstb(carried);
+	tick(0xA012, 24);
+	if (!carried)
+		tick(0xA018, 12);                              // BEQ
+	else
+	{
+		tick(0xA014, 12);
+		jsr(0xA018, 0xD742);
+	}
+	push_w(0x01B4, 0xA01C);                            // speed * jump factor
+	push_w(0x02EA, 0xA020);
+	jsr(0xA024, 0x80FA);                               // mul32
+	copy_b(0x0206, 0x01B5, 0xA02A);
+	copy_b(0x0205, 0x01B4, 0xA030);
+	{
+		const uint16_t v = peek(0x01B4);               // speed * z factor
+		fl::mov(v);
+		poke(T.r[6], v);
+	}
+	tick(0xA034, 33);
+	push_w(0x02EC, 0xA038);
+	jsr(0xA03C, 0x80FA);                               // mul32
+	copy_b(0x0205, 0x07F8, 0xA042);
+	copy_w(0x0206, 0x05B0, 0xA048);
+	const uint8_t carried2 = peekb(0x0EA0);
+	fl::tstb(carried2);
+	tick(0xA04C, 24);
+	if (!carried2)
+		tick(0xA052, 12);                              // BEQ
+	else
+	{
+		tick(0xA04E, 12);
+		jsr(0xA052, 0xD6BE);                           // slope_of_object_0ea0
+	}
+	clr_b(0x0323, 0xA056);                             // the air timers
+	copy_w(0x01C6, 0x02F6, 0xA05C);
+	poke(0x02F6, fl::asl(peek(0x02F6)));
+	tick(0xA060, 27);
+	clr_w(0x02F4, 0xA064);
+	clr_w(0x02F2, 0xA068);
+	set_w(0x02EE, t11rt::g_patch_gravity, 0xA06E);     // patch point (default 12)
+	poke(T.r[6], 0x004A);
+	fl::mov(0x004A);
+	tick(0xA072, 27);
+	jsr(0xA076, 0x8E78);                               // queue_sound(0x4A)
+	poke(0x01D2, T.r[1]);
+	fl::mov(T.r[1]);
+	tick(0xA07A, 27);
+	poke(0x01D4, T.r[2]);
+	fl::mov(T.r[2]);
+	tick(0xA07E, 27);
+	copy_w(0x01D2, 0x1400, 0xA084);
+	copy_w(0x01D4, 0x1402, 0xA08A);
+	T.r[6] = fl::add(T.r[6], 0x0006);
+	tick(0xA08E, 18);
+	c_restore(2);
 	return T.r[0];
 }
 
@@ -4908,41 +4969,55 @@ void object_contact()
 // F:9E96  skater_bounce(int dir): new direction dir (0x3F: the opposite one), speed 0x160,
 // motion values for that direction (F:9B82 with terrain 0x0327 cleared, F:91A6, then again
 // with the terrain), no upward z velocity for object 1; state 0x031E = 2 for 6 (0x031C)
-uint16_t skater_bounce(const Args &a)
+uint16_t skater_bounce(const Args &)
 {
-	Clock k;
-	push(T.r[1]); k.add(24);
-	k.add(33, 12);
-	if (a.u(0) == 0x003F)
+	push(T.r[1]);
+	fl::mov(T.r[1]);
+	tick(0x9E98, 24);
+	const uint16_t dir = peek((uint16_t)(T.r[6] + 4));
+	fl::cmp(dir, 0x003F);
+	tick(0x9E9E, 33);
+	if (dir == 0x003F)
 	{
-		T.r[1] = 8; k.add(18);
-		k.at(0x9EA4); T.r[0] = sext8(peekb(0x031D)); k.add(24);
-		T.r[1] ^= T.r[0]; k.add(12);
-		k.at(0x9EAA); pokeb(0x031D, (uint8_t)T.r[1]); k.add(27, 12);
+		tick(0x9EA0, 12);                              // the opposite direction
+		turn_round(0x9EA0, 1, 0x031D);
+		tick(0x9EB6, 12);                              // BR
 	}
 	else
 	{
-		k.at(0x9EB0); pokeb(0x031D, a.b(0)); k.add(42);
+		tick(0x9EB0, 12);                              // BNE
+		const uint8_t v = peekb((uint16_t)(T.r[6] + 4));
+		fl::movb(v);
+		pokeb(0x031D, v);
+		tick(0x9EB6, 42);
 	}
-	k.at(0x9EB6); poke(0x01B4, 0x0160); k.add(33);
-	k.at(0x9EBC); T.r[1] = sext8(peekb(0x0327)); k.add(24);
-	k.at(0x9EC0); pokeb(0x0327, 0); k.add(27);
-	k.call(0x9B82, 0x9EC8);                            // skater_motion_params
-	k.call(0x91A6, 0x9ECC);                            // skater_velocity
-	k.at(0x9ECC); pokeb(0x0327, (uint8_t)T.r[1]); k.add(27);
-	k.call(0x9B82, 0x9ED4);
-	k.at(0x9ED4);
-	const bool up = (int16_t)peek(0x05B2) > 0;
-	k.add(24, 12);
-	if (up)
+	set_w(0x01B4, 0x0160, 0x9EBC);
+	T.r[1] = sext8(peekb(0x0327));                     // the terrain, put back after F:91A6
+	fl::movb((uint8_t)T.r[1]);
+	tick(0x9EC0, 24);
+	clr_b(0x0327, 0x9EC4);
+	jsr(0x9EC8, 0x9B82);                               // skater_motion_params
+	jsr(0x9ECC, 0x91A6);                               // skater_velocity
+	pokeb(0x0327, (uint8_t)T.r[1]);
+	fl::movb((uint8_t)T.r[1]);
+	tick(0x9ED0, 27);
+	jsr(0x9ED4, 0x9B82);                               // skater_motion_params
+	const uint16_t vz = peek(0x05B2);
+	fl::tst(vz);
+	tick(0x9ED8, 24);
+	if ((int16_t)vz <= 0)
+		tick(0x9EDE, 12);                              // BLE
+	else
 	{
-		k.at(0x9EDA); poke(0x05B2, 0); k.add(27);
+		tick(0x9EDA, 12);                              // no upward z velocity
+		clr_w(0x05B2, 0x9EDE);
 	}
-	k.at(0x9EDE); pokeb(0x031E, 2); k.add(33);
-	k.at(0x9EE4); pokeb(0x031C, 6); k.add(33);
+	set_b(0x031E, 0x02, 0x9EE4);
+	set_b(0x031C, 0x06, 0x9EEA);
 	T.r[1] = pop();
-	k.add(18);
-	k.leave();
+	fl::mov(T.r[1]);
+	tick(0x9EEC, 18);
+	rts();
 	return T.r[0];
 }
 
@@ -4950,84 +5025,139 @@ uint16_t skater_bounce(const Args &a)
 // speed reversed to 0x160 the other way); otherwise the speed keeps its sign and is at least
 // 0x160 (a negative speed takes the opposite heading).  On a ramp (0x01EA == 2) F:A2F0 lands
 // the skater; mode 0x031F == 1 turns a negative speed around.  State 0x031E = 1 for 8.
-uint16_t skater_deflect(const Args &a)
+uint16_t skater_deflect(const Args &)
 {
-	Clock k;
-	k.save(0x9EEE, 2);
-	const uint16_t dir = a.u(0);
-	k.at(0x9EF2); T.r[1] = peek(0x01B4); k.add(24, 33, 12);
-	const uint16_t speed = T.r[1];
-	bool positive, force;
+	c_save(1, 0x9EF2);
+	T.r[1] = peek(0x01B4);                             // the speed
+	fl::mov(T.r[1]);
+	tick(0x9EF6, 24);
+	const uint16_t dir = peek((uint16_t)(T.r[6] + 8));
+	fl::cmp(dir, 0x003F);
+	tick(0x9EFC, 33);
+	bool slow;                                         // the speed becomes 0x160 (else 0xFEA0)
 	if (dir == 0x003F)
 	{
-		k.at(0x9EFE); pokeb(0x031B, peekb(0x031D)); k.add(39, 12, 12);
-		positive = (int16_t)speed < 0;
-		force = true;
-		if (positive) k.add(12);
+		tick(0x9EFE, 12);                              // the current direction, speed reversed
+		copy_b(0x031D, 0x031B, 0x9F04);
+		fl::tst(T.r[1]);
+		tick(0x9F06, 12);
+		if ((int16_t)T.r[1] >= 0)
+		{
+			tick(0x9F28, 12);                          // BGE
+			slow = false;
+		}
+		else
+		{
+			tick(0x9F08, 12);
+			tick(0x9F36, 12);                          // BR
+			slow = true;
+		}
 	}
 	else
 	{
-		k.at(0x9F0A); pokeb(0x031B, (uint8_t)dir); k.add(42, 12, 12);
-		positive = (int16_t)speed >= 0;
-		force = false;
-		if (!positive)
+		tick(0x9F0A, 12);                              // BNE
 		{
-			T.r[2] = 8; k.add(18);
-			T.r[0] = sext8((uint8_t)dir); k.add(27);
-			T.r[2] ^= T.r[0]; k.add(12);
-			k.at(0x9F1E); pokeb(0x031B, (uint8_t)T.r[2]); k.add(27, 18, 12);
+			const uint8_t v = peekb((uint16_t)(T.r[6] + 8));
+			fl::movb(v);
+			pokeb(0x031B, v);
+		}
+		tick(0x9F10, 42);
+		fl::tst(T.r[1]);
+		tick(0x9F12, 12);
+		if ((int16_t)T.r[1] >= 0)
+		{
+			tick(0x9F30, 12);                          // BGE: at least 0x160
+			fl::cmp(T.r[1], 0x0160);
+			tick(0x9F34, 18);
+			if ((int16_t)T.r[1] >= 0x0160)
+			{
+				tick(0x9F3C, 12);                      // BGE
+				goto ramp;
+			}
+			tick(0x9F36, 12);
+			slow = true;
+		}
+		else
+		{
+			tick(0x9F14, 12);                          // backwards: the opposite heading
+			T.r[2] = 0x0008;
+			fl::mov(T.r[2]);
+			tick(0x9F18, 18);
+			T.r[0] = sext8(peekb((uint16_t)(T.r[6] + 8)));
+			fl::movb((uint8_t)T.r[0]);
+			tick(0x9F1C, 27);
+			T.r[2] = fl::logic((uint16_t)(T.r[2] ^ T.r[0]));
+			tick(0x9F1E, 12);
+			pokeb(0x031B, (uint8_t)T.r[2]);
+			fl::movb((uint8_t)T.r[2]);
+			tick(0x9F22, 27);
+			fl::cmp(T.r[1], 0xFEA0);
+			tick(0x9F26, 18);
+			if ((int16_t)T.r[1] <= (int16_t)0xFEA0)
+			{
+				tick(0x9F3C, 12);                      // BLE
+				goto ramp;
+			}
+			tick(0x9F28, 12);
+			slow = false;
 		}
 	}
-	if (positive)
+	if (slow)
+		set_w(0x01B4, 0x0160, 0x9F3C);
+	else
 	{
-		if (!force) k.add(18, 12);
-		if (force || (int16_t)speed < 0x0160)
+		set_w(0x01B4, 0xFEA0, 0x9F2E);
+		tick(0x9F3C, 12);                              // BR
+	}
+ramp:
+	{
+		const uint8_t ramp = peekb(0x01EA);
+		fl::cmpb(ramp, 0x02);
+		tick(0x9F42, 30);
+		if (ramp != 2)
+			tick(0x9F5C, 12);                          // BNE
+		else
 		{
-			k.at(0x9F36); poke(0x01B4, 0x0160); k.add(33);
+			tick(0x9F44, 12);                          // on the ramp he lands
+			const uint16_t speed = peek(0x01B4);
+			fl::tst(speed);
+			tick(0x9F48, 24);
+			if ((int16_t)speed >= 0)
+				tick(0x9F58, 12);                      // BGE
+			else
+			{
+				tick(0x9F4A, 12);
+				turn_round(0x9F4A, 1, 0x031B);
+			}
+			jsr(0x9F5C, 0xA2F0);                       // skater_land
 		}
 	}
-	else if (force || (int16_t)speed > (int16_t)0xFEA0)
 	{
-		k.at(0x9F28); poke(0x01B4, 0xFEA0); k.add(33, 12);
-	}
-	k.at(0x9F3C);
-	const bool ramp2 = peekb(0x01EA) == 2;
-	k.add(30, 12);
-	if (ramp2)
-	{
-		k.at(0x9F44);
-		const bool back = (int16_t)peek(0x01B4) < 0;
-		k.add(24, 12);
-		if (back)
+		const uint8_t mode = peekb(0x031F);
+		fl::cmpb(mode, 0x01);
+		tick(0x9F62, 30);
+		if (mode != 1)
+			tick(0x9F7C, 12);                          // BNE
+		else
 		{
-			T.r[1] = 8; k.add(18);
-			k.at(0x9F4E); T.r[0] = sext8(peekb(0x031B)); k.add(24);
-			T.r[1] ^= T.r[0]; k.add(12);
-			k.at(0x9F54); pokeb(0x031B, (uint8_t)T.r[1]); k.add(27);
-		}
-		k.call(0xA2F0, 0x9F5C);                        // skater_land
-	}
-	k.at(0x9F5C);
-	const bool mode1 = peekb(0x031F) == 1;
-	k.add(30, 12);
-	if (mode1)
-	{
-		k.at(0x9F64);
-		const bool back = (int16_t)peek(0x01B4) < 0;
-		k.add(24, 12);
-		if (back)
-		{
-			T.r[1] = 8; k.add(18);
-			k.at(0x9F6E); T.r[0] = sext8(peekb(0x031B)); k.add(24);
-			T.r[1] ^= T.r[0]; k.add(12);
-			k.at(0x9F74); pokeb(0x031B, (uint8_t)T.r[1]); k.add(27);
-			k.at(0x9F78); poke(0x01B4, (uint16_t)-peek(0x01B4)); k.add(27);
+			tick(0x9F64, 12);                          // mode 1 turns a negative speed around
+			const uint16_t speed = peek(0x01B4);
+			fl::tst(speed);
+			tick(0x9F68, 24);
+			if ((int16_t)speed >= 0)
+				tick(0x9F7C, 12);                      // BGE
+			else
+			{
+				tick(0x9F6A, 12);
+				turn_round(0x9F6A, 1, 0x031B);
+				poke(0x01B4, fl::neg(peek(0x01B4)));
+				tick(0x9F7C, 27);
+			}
 		}
 	}
-	k.at(0x9F7C); pokeb(0x031E, 1); k.add(33);
-	k.at(0x9F82); pokeb(0x031C, 8); k.add(33);
-	k.restore(2);
-	k.leave();
+	set_b(0x031E, 0x01, 0x9F82);
+	set_b(0x031C, 0x08, 0x9F88);
+	c_restore(1);
 	return T.r[0];
 }
 
