@@ -2,6 +2,8 @@
 //   leveltool --roms DIR stats
 //   leveltool --roms DIR png OUTDIR            render every map to PNG (town palette)
 //   leveltool --roms DIR identity OUT.720mod   relocate all levels unchanged (pipeline test)
+//   leveltool --roms DIR sprites|objects|objcheck|objshot ...   sprites and map objects
+//                                              (see leveltool_sprites.cpp)
 #include "leveldata.h"
 #include "board.h"
 #include <cstdio>
@@ -40,21 +42,25 @@ static bool decode_rle(const std::vector<uint8_t> &d, std::array<uint16_t, 128> 
 	return pos == d.size();
 }
 
+int sprite_command(const RomSet &rs, LevelSet &ls, const std::string &cmd, const std::vector<std::string> &args);
+
 int main(int argc, char **argv)
 {
 	std::string roms = "Game", cmd, arg;
+	std::vector<std::string> args;
 	for (int i = 1; i < argc; i++)
 	{
 		std::string a = argv[i];
 		if (a == "--roms" && i + 1 < argc) roms = argv[++i];
 		else if (cmd.empty()) cmd = a;
-		else arg = a;
+		else { arg = a; args.push_back(a); }
 	}
 	RomSet rs;
 	std::string err;
 	if (!rs.load(roms, err)) { fprintf(stderr, "%s\n", err.c_str()); return 1; }
 	LevelSet ls;
 	if (!ls.load(rs, err)) { fprintf(stderr, "%s\n", err.c_str()); return 1; }
+	if (const int r = sprite_command(rs, ls, cmd, args); r >= 0) return r;
 
 	if (cmd == "stats" || cmd.empty())
 	{

@@ -176,7 +176,7 @@ endif()
 
 # ---------------------------------------------------------------------------
 # Level data library
-add_library(leveldata STATIC src/level/leveldata.cpp)
+add_library(leveldata STATIC src/level/leveldata.cpp src/level/sprites.cpp)
 target_include_directories(leveldata PUBLIC src/level)
 target_link_libraries(leveldata PUBLIC board)
 target_include_directories(leveldata PUBLIC src/native)
@@ -236,7 +236,7 @@ endif()
 # Tools that do not need the translated code
 add_executable(ref720 src/ref/refmain.cpp)
 target_link_libraries(ref720 PRIVATE refcpu)
-add_executable(leveltool src/tools/leveltool.cpp)
+add_executable(leveltool src/tools/leveltool.cpp src/tools/leveltool_sprites.cpp)
 target_link_libraries(leveltool PRIVATE leveldata board)
 
 if(MINGW)
