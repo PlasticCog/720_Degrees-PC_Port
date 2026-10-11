@@ -21,6 +21,7 @@ const Routine *sound_core(int &count);
 const Routine *sound_main(int &count);
 const Routine *sound_command(int &count);
 const Routine *sound_speech(int &count);
+const Routine *sound_music(int &count);
 
 namespace {
 
@@ -37,7 +38,7 @@ struct Slot {
 struct Table { const char *name; TableFn fn; };
 const Table TABLES[] = {
 	{"core", sound_core}, {"main", sound_main}, {"command", sound_command},
-	{"speech", sound_speech},
+	{"speech", sound_speech}, {"music", sound_music},
 };
 
 std::vector<Routine> &registry()

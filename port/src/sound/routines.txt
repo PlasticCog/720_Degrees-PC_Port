@@ -32,6 +32,7 @@
 44E3  cmd_start_sound
 461D  cmd_none
 461E  cmd_mask
+4656  voice_list
 4FF5  wait_ym
 57AC  nmi
 5831  speech_init
