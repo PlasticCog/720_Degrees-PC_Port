@@ -34,7 +34,7 @@ static void write_wav(const std::string &path, const std::vector<int16_t> &s, in
 int main(int argc, char **argv)
 {
 	std::string roms = "Game", out = ".", script, wav, mod, sound_log, ram_dump, palette_log, in0_log, sio_log, pal_dump,
-		sound_ram_dump;
+		sound_ram_dump, draw_ground, pf_dump;
 	bool hide_pf = false, hide_alpha = false;
 	int frames = 600, png_every = 0, seed = 0, stats_every = 0;
 	struct Poke { int frame; uint16_t addr, value; };
@@ -71,6 +71,8 @@ int main(int argc, char **argv)
 			logic::g_cheat_no_water |= c.find("no-water") != std::string::npos;
 			logic::g_cheat_no_bushes |= c.find("no-bushes") != std::string::npos;
 		}
+		else if (a == "--draw-ground") draw_ground = next();   // water, bushes: drawn as ground only (play unchanged)
+		else if (a == "--pf-dump") pf_dump = next();       // with each screenshot: the playfield words, scroll, tile banks
 		else if (a == "--translated") logic::use_translation(next());   // these rewritten routines run translated
 		else if (a == "--poke")                            // FRAME:ADDR:VALUE (hex addr/value), main RAM word
 		{
@@ -124,6 +126,15 @@ int main(int argc, char **argv)
 	m.board.debug.hide_alpha = hide_alpha;
 	m.board.debug.ground_water = logic::g_cheat_no_water;
 	m.board.debug.ground_bushes = logic::g_cheat_no_bushes;
+	m.board.debug.ground_water |= draw_ground.find("water") != std::string::npos;
+	m.board.debug.ground_bushes |= draw_ground.find("bushes") != std::string::npos;
+	FILE *pfdump = pf_dump.empty() ? nullptr : fopen(pf_dump.c_str(), "wb");
+	if (pfdump)                                        // first the tile tables: terrain, event bytes per code
+	{
+		uint8_t t[2][8192];
+		for (int c = 0; c < 8192; c++) { t[0][c] = m.board.tile_terrain(c); t[1][c] = m.board.tile_event(c); }
+		fwrite(t, 1, sizeof(t), pfdump);
+	}
 	if (stats_every || slog)
 		m.board.on_sound_command = [&](uint8_t c) {
 			sound_cmds++;
@@ -196,6 +207,13 @@ int main(int argc, char **argv)
 		if (!snap.empty() || (png_every && (f % png_every) == png_every - 1))
 		{
 			m.board.frame_rgb(rgb.data());
+			if (pfdump)
+			{
+				const int32_t head[4] = { f + 1, m.board.pf_scrollx(), m.board.pf_scrolly(), m.board.pf_tile_bank(0) | m.board.pf_tile_bank(1) << 8 };
+				fwrite(head, 4, 4, pfdump);
+				fwrite(m.board.pf_top(), 2, 0x1000, pfdump);
+				fwrite(m.board.pf_bottom(), 2, 0x1000, pfdump);
+			}
 			char name[256];
 			snprintf(name, sizeof(name), "%s/%s.png", out.c_str(), snap.empty() ? (std::string("n") + std::to_string(f + 1)).c_str() : snap.c_str());
 			write_png(name, rgb.data(), 512, 384);

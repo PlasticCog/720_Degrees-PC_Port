@@ -127,6 +127,12 @@ public:
 	uint8_t *sound_ram() { return m_sram.data(); }
 	uint8_t *eeprom() { return m_eeprom.data(); }
 	uint16_t xscroll() const { return m_xscroll; }
+	// a playfield tile's terrain byte (bank 0x0800: height level << 3 | slope bits) and its event
+	// byte (bank 0x0C00: 0x12 water, 0x0B bushes, ...)
+	uint8_t tile_terrain(int code) const;
+	uint8_t tile_event(int code) const;
+	int pf_scrollx() const { return m_pf_scrollx; }   // as the playfield is drawn (pixels)
+	int pf_scrolly() const { return m_pf_scrolly; }
 	uint16_t yscroll() const { return m_yscroll; }
 	int bank_entry(int i) const { return m_bank_entry[i]; }
 	const RomSet &roms() const { return m_roms; }
@@ -199,8 +205,17 @@ private:
 	std::array<uint16_t, 0xc00> m_alpha{};
 	std::array<uint16_t, 0x400> m_mo{};
 	std::array<uint16_t, 0x1000> m_pft{}, m_pfb{};
-	int m_ground = -1;                         // the floor tile word drawn for water / bushes
+	int m_ground = -1;                         // the floor tile word drawn for water / bushes with no floor near
+	std::array<int32_t, 0x2000> m_ground_at{}; // this frame's replacement word per water / bush cell (-1: none)
+	std::array<int32_t, 0x2000> m_shore_at{};  // the floor word for cells next to water / bushes (-1: none)
+	std::array<bool, 128> m_haz_pen{}, m_floor_pen{}, m_water_pen{};   // colour * 16 + pen
+	bool m_ground_ready = false;               // m_ground_at worked out for this frame
 	void choose_ground();
+	bool plain_floor(uint16_t data) const;
+	void fill_ground();
+	void floor_pens(uint16_t w, bool hazard);
+	uint16_t ground_for(int index);
+	int32_t shore_for(int index);
 	std::array<uint8_t, 0x1000> m_sram{};
 	std::array<uint8_t, 0x200> m_eeprom{};
 	bool m_slap_armed = false;

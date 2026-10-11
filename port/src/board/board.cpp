@@ -6,6 +6,9 @@
 #include <cstring>
 #include <fstream>
 #include <algorithm>
+#include <vector>
+#include <climits>
+#include <cstdlib>
 
 // ------------------------------------------------------------------ ROM loading
 
@@ -530,8 +533,9 @@ static uint8_t tile_table(const RomSet &roms, uint16_t bankreg, int code)
 }
 
 // with the cheats on: the commonest plain floor tile on the screen (no event, flat, a real height
-// level), colour included, to draw in place of the water / bush tiles; the last choice stays
-// unless another tile is clearly commoner, so that it does not flicker while scrolling
+// level), colour included, for water / bush cells with no floor near them (see ground_for); the
+// last choice stays unless another tile is clearly commoner, so that it does not flicker while
+// scrolling.  Also a fresh start of the per-cell replacements for the new frame.
 void Board::choose_ground()
 {
 	if (!debug.ground_water && !debug.ground_bushes)
@@ -539,6 +543,9 @@ void Board::choose_ground()
 		m_ground = -1;
 		return;
 	}
+	m_ground_at.fill(-1);
+	m_shore_at.fill(-1);
+	m_ground_ready = false;
 	static std::array<uint16_t, 0x4000> count;
 	count.fill(0);
 	int best = -1, best_n = 0;
@@ -561,6 +568,167 @@ void Board::choose_ground()
 	if (m_ground < 0 || count[m_ground] * 5 < best_n * 4) m_ground = best;
 }
 
+uint8_t Board::tile_terrain(int code) const { return tile_table(m_roms, 0x0800, code); }
+uint8_t Board::tile_event(int code) const { return tile_table(m_roms, 0x0C00, code); }
+
+// a plain floor cell: no terrain event, flat, a real height level
+bool Board::plain_floor(uint16_t data) const
+{
+	const int code = ((m_pf_tile_bank[(data >> 10) & 1] << 10) | (data & 0x3ff)) & 8191;
+	const uint8_t terrain = tile_table(m_roms, 0x0800, code);
+	return tile_table(m_roms, 0x0C00, code) == 0 && (terrain & 0x87) == 0 && (terrain >> 3) != 15;
+}
+
+// The floor drawn in place of water / bushes (the cheats), worked out once a frame for the whole
+// playfield (128 x 64 cells, wrapping).  Each patch of water / bush cells takes the floor around
+// it: the cells 3 to 8 away from it (nearer ones are shore and curb graphics), plain floor only.
+// The floors are random mixes of variant tiles (asphalt 0x43-0x4A, pavement 0x4B-0x52, ...),
+// so the patch's floor is the commonest tile there and the tiles seen next to it (its variants;
+// tiles of another floor only meet it along a border), and each cell gets one of those by a hash
+// of its place, so that it looks the same from frame to frame.
+void Board::fill_ground()
+{
+	m_ground_ready = true;
+	m_haz_pen.fill(false);
+	m_floor_pen.fill(false);
+	auto word = [&](int i) { return i < 4096 ? m_pft[i] : m_pfb[i & 4095]; };
+	auto cell = [](int x, int y) { return (y & 63) * 128 + (x & 127); };
+	static std::array<uint8_t, 0x2000> haz, nearhaz, plain;
+	static std::array<int, 0x2000> mark;
+	static int stamp = 0;
+	for (int i = 0; i < 0x2000; i++)
+	{
+		const uint16_t d = word(i);
+		const int code = ((m_pf_tile_bank[(d >> 10) & 1] << 10) | (d & 0x3ff)) & 8191;
+		const uint8_t event = tile_table(m_roms, 0x0C00, code);
+		haz[i] = (event == 0x12 && debug.ground_water) || (event == 0x0B && debug.ground_bushes);
+		plain[i] = plain_floor(d);
+		nearhaz[i] = 0;
+	}
+	for (int i = 0; i < 0x2000; i++)
+		if (haz[i])
+			for (int dy = -2; dy <= 2; dy++)
+				for (int dx = -2; dx <= 2; dx++) nearhaz[cell((i & 127) + dx, (i >> 7) + dy)] = 1;
+
+	std::vector<int> patch, ring;
+	std::vector<std::pair<uint16_t, int>> count;
+	for (int start = 0; start < 0x2000; start++)
+	{
+		if (!haz[start] || m_ground_at[start] >= 0) continue;
+		// the patch (8-connected)
+		patch.assign(1, start);
+		m_ground_at[start] = 0;
+		for (size_t k = 0; k < patch.size(); k++)
+			for (int dy = -1; dy <= 1; dy++)
+				for (int dx = -1; dx <= 1; dx++)
+				{
+					const int j = cell((patch[k] & 127) + dx, (patch[k] >> 7) + dy);
+					if (haz[j] && m_ground_at[j] < 0)
+					{
+						m_ground_at[j] = 0;
+						patch.push_back(j);
+					}
+				}
+		// the floor around it
+		ring.clear();
+		stamp++;
+		for (int p : patch)
+			for (int dy = -8; dy <= 8; dy++)
+				for (int dx = -8; dx <= 8; dx++)
+				{
+					const int j = cell((p & 127) + dx, (p >> 7) + dy);
+					if (mark[j] == stamp) continue;
+					mark[j] = stamp;
+					if (plain[j] && !nearhaz[j]) ring.push_back(j);
+				}
+		uint16_t fill = m_ground >= 0 ? (uint16_t)m_ground : 0;
+		std::vector<uint16_t> family;
+		if (!ring.empty())
+		{
+			count.clear();
+			for (int j : ring)
+			{
+				const uint16_t w = word(j) & 0x3fff;
+				auto it = std::find_if(count.begin(), count.end(), [&](const auto &c) { return c.first == w; });
+				if (it == count.end()) count.push_back({w, 1});
+				else it->second++;
+			}
+			const uint16_t top = std::max_element(count.begin(), count.end(), [](const auto &a, const auto &b) { return a.second < b.second; })->first;
+			// its variants: the tiles seen next to it in the ring, at least a third as often as the
+			// commonest of them (a border with another floor or a curb is seen far less often)
+			stamp++;
+			for (int j : ring) mark[j] = stamp;
+			count.clear();
+			for (int j : ring)
+			{
+				if ((word(j) & 0x3fff) != top) continue;
+				for (int dy = -1; dy <= 1; dy++)
+					for (int dx = -1; dx <= 1; dx++)
+					{
+						const int k = cell((j & 127) + dx, (j >> 7) + dy);
+						const uint16_t w = word(k) & 0x3fff;
+						if (mark[k] != stamp || w == top || (w & 0x3c00) != (top & 0x3c00)) continue;
+						auto it = std::find_if(count.begin(), count.end(), [&](const auto &c) { return c.first == w; });
+						if (it == count.end()) count.push_back({w, 1});
+						else it->second++;
+					}
+			}
+			int most = 0;
+			for (const auto &c : count) most = std::max(most, c.second);
+			family.push_back(top);
+			for (const auto &c : count)
+				if (c.second >= std::max(2, most / 3)) family.push_back(c.first);
+			fill = top;
+		}
+		auto pick = [&](int p) {
+			const uint32_t h = (uint32_t)(p & 127) * 73856093u ^ (uint32_t)(p >> 7) * 19349663u;
+			return family.empty() ? fill : family[(h >> 4) % family.size()];
+		};
+		for (int p : patch)
+		{
+			m_ground_at[p] = pick(p);
+			// the shore: the cells next to the patch, drawn with the floor where they show water
+			for (int dy = -1; dy <= 1; dy++)
+				for (int dx = -1; dx <= 1; dx++)
+				{
+					const int q = cell((p & 127) + dx, (p >> 7) + dy);
+					if (!haz[q] && m_shore_at[q] < 0) m_shore_at[q] = pick(q);
+				}
+		}
+		for (uint16_t w : family) floor_pens(w, false);
+		if (family.empty()) floor_pens(fill, false);
+	}
+	// the water's (bushes') own colours: the pens their tiles use that the floors put in their
+	// place do not
+	for (int i = 0; i < 0x2000; i++)
+		if (haz[i]) floor_pens(word(i), true);
+	for (int c = 0; c < 128; c++) m_water_pen[c] = m_haz_pen[c] && !m_floor_pen[c];
+}
+
+// note the colour / pen pairs of tile word w as used by water (bushes) or by the floors
+void Board::floor_pens(uint16_t w, bool hazard)
+{
+	const int code = ((m_pf_tile_bank[(w >> 10) & 1] << 10) | (w & 0x3ff)) & 8191;
+	const int color = (w >> 11) & 7;
+	for (int k = 0; k < 64; k++) (hazard ? m_haz_pen : m_floor_pen)[color * 16 + m_gfx.tiles[code * 64 + k]] = true;
+}
+
+// the floor for the shore cell at index this frame (-1: not a shore cell)
+int32_t Board::shore_for(int index)
+{
+	if (!m_ground_ready) fill_ground();
+	return m_shore_at[index];
+}
+
+// the floor drawn in place of the water / bush cell at index this frame
+uint16_t Board::ground_for(int index)
+{
+	if (!m_ground_ready) fill_ground();
+	const int32_t r = m_ground_at[index];
+	if (r >= 0) return (uint16_t)r;
+	return (uint16_t)(m_ground >= 0 ? m_ground : (m_pft[0] & 0x3fff));   // became water during the frame
+}
+
 void Board::render_line(int y)
 {
 	uint16_t *dst = &m_frame[y * SCREEN_W];
@@ -574,17 +742,24 @@ void Board::render_line(int y)
 		const int index = (ty >> 3) * 128 + (tx >> 3);
 		uint16_t data = index < 4096 ? m_pft[index] : m_pfb[index & 4095];
 		int code = ((m_pf_tile_bank[(data >> 10) & 1] << 10) | (data & 0x3ff)) & 8191;
-		if (m_ground >= 0)
+		int color = (data >> 11) & 7;
+		int pen = m_gfx.tiles[code * 64 + (ty & 7) * 8 + (tx & 7)];
+		if (debug.ground_water || debug.ground_bushes)
 		{
 			const uint8_t event = tile_table(m_roms, 0x0C00, code);
+			int32_t floor = -1;
 			if ((event == 0x12 && debug.ground_water) || (event == 0x0B && debug.ground_bushes))
+				floor = ground_for(index);
+			else if (shore_for(index) >= 0 && m_water_pen[color * 16 + pen])
+				floor = m_shore_at[index];               // a shore pixel showing water
+			if (floor >= 0)
 			{
-				data = (uint16_t)((data & 0xc000) | m_ground);
-				code = ((m_pf_tile_bank[(data >> 10) & 1] << 10) | (data & 0x3ff)) & 8191;
+				code = ((m_pf_tile_bank[(floor >> 10) & 1] << 10) | (floor & 0x3ff)) & 8191;
+				color = (floor >> 11) & 7;
+				pen = m_gfx.tiles[code * 64 + (ty & 7) * 8 + (tx & 7)];
 			}
 		}
-		const int color = (data >> 11) & 7;
-		dst[x] = (uint16_t)(128 + color * 16 + m_gfx.tiles[code * 64 + (ty & 7) * 8 + (tx & 7)]);
+		dst[x] = (uint16_t)(128 + color * 16 + pen);
 		pri[x] = (~data >> 14) & 3;
 		if (debug.capture_tiles) m_dbg_tiles[y * SCREEN_W + x] = (uint16_t)code;
 	}
