@@ -867,7 +867,7 @@ uint16_t slope_height(const Args &a)
 
 // A7:4098 (assembly): move objects 0-3 by their velocities (x, y, height).  The fraction
 // bytes (0x07FC/0x0800/0x0804 += 0x07F0/0x07F4/0x07F8) are added, but their carry is lost
-// (SWAB clears it before the ADC), as in the original.
+// (SWAB clears it before the ADC), as in the original; g_fix_subpixel_carry adds it.
 void move_objects_0_3()
 {
 	static const uint16_t parts[3][4] = {
@@ -882,10 +882,12 @@ void move_objects_0_3()
 		{
 			T.r[0] = (uint16_t)(peekb((uint16_t)(p[0] + i)) << 8);
 			T.r[1] = (uint16_t)(peekb((uint16_t)(p[1] + i)) << 8);
+			const uint16_t carry = (uint16_t)(((uint32_t)T.r[0] + T.r[1]) >> 16);
 			T.r[0] = (uint16_t)(T.r[0] + T.r[1]);
 			T.r[0] = (uint16_t)((T.r[0] >> 8) | (T.r[0] << 8));
 			pokeb((uint16_t)(p[1] + i), (uint8_t)T.r[0]);
 			const uint16_t a = (uint16_t)(p[2] + w);
+			if (g_fix_subpixel_carry) poke(a, (uint16_t)(peek(a) + carry));
 			poke(a, fl::add(peek(a), peek((uint16_t)(p[3] + w))));
 		}
 		T.r[2] = fl::dec(i);

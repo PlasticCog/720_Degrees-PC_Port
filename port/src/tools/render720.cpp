@@ -1,10 +1,14 @@
 // render720: run the native game headless and write screenshots + a WAV of its audio.
 //   render720 --roms DIR --frames N [--out DIR] [--png-every K] [--script FILE] [--random SEED] [--wav FILE]
+//             [--ram-dump FILE] [--pal-dump FILE] [--hide-pf] [--hide-alpha] [--poke FRAME:ADDR:VALUE]
+//             [--extras NAME,NAME...] [--dev-input FROM:TO:BITS]   (extras.h; BITS 1 freeze, 4 step)
 #include "nativemachine.h"
 #include "soundchips.h"
 #include "inputscript.h"
+#include <map>
 #include "modloader.h"
 #include "logic.h"
+#include "extras.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -27,10 +31,14 @@ static void write_wav(const std::string &path, const std::vector<int16_t> &s, in
 
 int main(int argc, char **argv)
 {
-	std::string roms = "Game", out = ".", script, wav, mod, sound_log, ram_dump;
+	std::string roms = "Game", out = ".", script, wav, mod, sound_log, ram_dump, palette_log, in0_log, sio_log, pal_dump;
+	bool hide_pf = false, hide_alpha = false;
 	int frames = 600, png_every = 0, seed = 0, stats_every = 0;
 	struct Poke { int frame; uint16_t addr, value; };
 	std::vector<Poke> pokes;
+	std::string extras;
+	struct DevInput { int from, to, bits; };
+	std::vector<DevInput> dev_inputs;
 	for (int i = 1; i < argc; i++)
 	{
 		std::string a = argv[i];
@@ -44,7 +52,13 @@ int main(int argc, char **argv)
 		else if (a == "--wav") wav = next();
 		else if (a == "--mod") mod = next();
 		else if (a == "--sound-log") sound_log = next();   // "frame command" per sound command
+		else if (a == "--palette-log") palette_log = next(); // "frame scanline addr value" per palette write
+		else if (a == "--in0-log") in0_log = next();
+		else if (a == "--sound-io-log") sio_log = next();   // sound CPU I/O writes with the time in seconds       // changes of the sound status bits as the main CPU reads them
 		else if (a == "--ram-dump") ram_dump = next();     // per frame: main RAM, MO RAM, x/y scroll
+		else if (a == "--pal-dump") pal_dump = next();     // per frame: the 256 palette RAM words
+		else if (a == "--hide-pf") hide_pf = true;         // screenshots without the playfield
+		else if (a == "--hide-alpha") hide_alpha = true;   // screenshots without the text layer
 		else if (a == "--difftest") logic::g_difftest = true;   // compare rewritten routines with the originals
 		else if (a == "--no-rewrite") logic::g_enabled = false; // run only the translated original
 		else if (a == "--translated") logic::use_translation(next());   // these rewritten routines run translated
@@ -55,12 +69,38 @@ int main(int argc, char **argv)
 			pokes.push_back({atoi(v.substr(0, c1).c_str()), (uint16_t)strtol(v.substr(c1 + 1, c2 - c1 - 1).c_str(), nullptr, 16),
 				(uint16_t)strtol(v.substr(c2 + 1).c_str(), nullptr, 16)});
 		}
+		else if (a == "--extras") extras = next();       // switch these extras on (extras.h names)
+		else if (a == "--dev-input")                       // FROM:TO:BITS hold the hidden inputs
+		{
+			const std::string v = next();
+			const size_t c1 = v.find(':'), c2 = v.find(':', c1 + 1);
+			dev_inputs.push_back({atoi(v.substr(0, c1).c_str()), atoi(v.substr(c1 + 1, c2 - c1 - 1).c_str()),
+				atoi(v.substr(c2 + 1).c_str())});
+		}
 		else if (a == "--audio-stats") stats_every = atoi(next().c_str());   // print chip levels every N frames
 	}
 	RomSet rs;
 	std::string err;
 	if (!rs.load(roms, err)) { fprintf(stderr, "%s\n", err.c_str()); return 1; }
 	if (!mod.empty() && !apply_mod_file(rs, mod, err)) { fprintf(stderr, "%s\n", err.c_str()); return 1; }
+	Extras ex;
+	if (!extras.empty())
+	{
+		std::string text = extras;
+		for (char &c : text) if (c == ',') c = '\n';
+		std::string lines;
+		size_t p = 0;
+		while (p < text.size())
+		{
+			size_t e = text.find('\n', p);
+			if (e == std::string::npos) e = text.size();
+			lines += text.substr(p, e - p) + " 1\n";
+			p = e + 1;
+		}
+		ex.s.load(lines);
+		ex.apply(rs);
+		if (!ex.problems.empty()) fprintf(stderr, "%s", ex.problems.c_str());
+	}
 	NativeMachine m(rs);
 	m.reset();
 	m.board.chips().audio_enabled = !wav.empty() || stats_every > 0;
@@ -68,8 +108,43 @@ int main(int argc, char **argv)
 	FILE *slog = sound_log.empty() ? nullptr : fopen(sound_log.c_str(), "w");
 	int cur_frame = 0;
 	FILE *rdump = ram_dump.empty() ? nullptr : fopen(ram_dump.c_str(), "wb");
+	FILE *pdump = pal_dump.empty() ? nullptr : fopen(pal_dump.c_str(), "wb");
+	m.board.debug.hide_pf = hide_pf;
+	m.board.debug.hide_alpha = hide_alpha;
 	if (stats_every || slog)
-		m.board.on_sound_command = [&](uint8_t c) { sound_cmds++; if (slog) fprintf(slog, "%d %02X\n", cur_frame, c); };
+		m.board.on_sound_command = [&](uint8_t c) {
+			sound_cmds++;
+			if (slog) fprintf(slog, "%d %02X %llu\n", cur_frame, c, (unsigned long long)main_cycles_now());
+		};
+	FILE *ilog = in0_log.empty() ? nullptr : fopen(in0_log.c_str(), "w");
+	uint16_t last_in0 = 0xffff;
+	if (ilog)
+		m.board.on_in0_read = [&](uint16_t v) {
+			if ((v & 0x30) != last_in0)
+			{
+				last_in0 = v & 0x30;
+				fprintf(ilog, "%d %02X %llu\n", cur_frame, last_in0, (unsigned long long)main_cycles_now());
+			}
+		};
+	FILE *sio = sio_log.empty() ? nullptr : fopen(sio_log.c_str(), "w");
+	std::map<uint16_t, int> last_sread;
+	if (sio)
+	{
+		m.board.on_sound_cpu_io_write = [&](uint16_t a, uint8_t d) {
+			fprintf(sio, "%d %04X %02X %.9f%c", cur_frame, a, d, (double)m.board.chips().now() / Board::SOUND_CLOCK, 10);
+		};
+		m.board.on_sound_cpu_io_read = [&](uint16_t a, uint8_t d) {
+			auto it = last_sread.find(a);
+			if (it != last_sread.end() && it->second == d) return;
+			last_sread[a] = d;
+			fprintf(sio, "%d R%04X %02X %.9f%c", cur_frame, a, d, (double)m.board.chips().now() / Board::SOUND_CLOCK, 10);
+		};
+	}
+	FILE *plog = palette_log.empty() ? nullptr : fopen(palette_log.c_str(), "w");
+	if (plog)
+		m.board.on_palette_write = [&](uint16_t a, uint16_t d, uint16_t) {
+			fprintf(plog, "%d %d %llu %04X %04X\n", cur_frame, m.board.scanline, (unsigned long long)main_cycles_now(), a, d);
+		};
 	InputScript inp;
 	if (!script.empty()) inp.load(script);
 	inp.random_seed = seed;
@@ -88,6 +163,13 @@ int main(int argc, char **argv)
 				m.board.main_ram()[pk.addr + 1] = (uint8_t)(pk.value >> 8);
 			}
 		inp.apply(f, m.board.input, snap);
+		m.board.input.dev_freeze = m.board.input.dev_step = false;
+		for (const auto &d : dev_inputs)
+			if (f >= d.from && f < d.to)
+			{
+				m.board.input.dev_freeze |= (d.bits & 1) != 0;
+				m.board.input.dev_step |= (d.bits & 4) != 0;
+			}
 		m.run_frame();
 		if (rdump)
 		{
@@ -96,6 +178,7 @@ int main(int argc, char **argv)
 			const uint16_t sc[2] = { m.board.xscroll(), m.board.yscroll() };
 			fwrite(sc, 2, 2, rdump);
 		}
+		if (pdump) fwrite(m.board.palette_ram(), 2, 0x100, pdump);
 		if (!snap.empty() || (png_every && (f % png_every) == png_every - 1))
 		{
 			m.board.frame_rgb(rgb.data());
@@ -129,6 +212,7 @@ int main(int argc, char **argv)
 	}
 	if (slog) fclose(slog);
 	if (rdump) fclose(rdump);
+	if (pdump) fclose(pdump);
 	if (logic::g_difftest || logic::g_enabled) printf("%s", logic::report().c_str());
 	printf("done: %d frames\n", frames);
 	return 0;

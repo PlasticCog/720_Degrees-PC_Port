@@ -43,6 +43,7 @@ void run_frame(Board &board, Main &main, Sound &sound, SchedState &st)
 			}
 			st.main_debt = done - want;
 
+			if (board.take_sound_irq_restart()) st.next_sound_irq = (double)st.sound_done + SOUND_IRQ_PERIOD;
 			st.sound_target += SOUND_PER_SUB;
 			while ((double)st.sound_done < st.sound_target)
 			{
