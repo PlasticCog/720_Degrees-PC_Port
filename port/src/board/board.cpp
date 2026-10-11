@@ -251,7 +251,8 @@ uint16_t Board::main_read16(uint16_t a, uint16_t mask)
 	if (a < 0x1800) return 0xffff;          // ADC (unused by 720) and write-only registers
 	if (a < 0x1c00)
 	{
-		const uint16_t v = 0x7f0f | (m_mainlatch_pending ? 0x10 : 0) | (m_soundlatch_pending ? 0x20 : 0) |
+		const uint16_t v = 0x7f0a | (input.dev_freeze ? 0 : 0x01) | (input.dev_step ? 0 : 0x04) |
+			(m_mainlatch_pending ? 0x10 : 0) | (m_soundlatch_pending ? 0x20 : 0) |
 			(input.button2 ? 0 : 0x40) | (input.button1 ? 0 : 0x80) | (input.test ? 0 : 0x8000);
 		if (on_in0_read) on_in0_read(v);
 		return v;

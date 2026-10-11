@@ -19,6 +19,7 @@
 #include "leveldata.h"
 #include "nativemachine.h"
 #include "soundchips.h"
+#include "sprites.h"
 #include "t11rt.h"
 #include "imgui.h"
 #include <algorithm>
@@ -76,6 +77,47 @@ DebugUI::DebugUI(RomSet &roms) : m_roms(roms)
 			m_orig_kick[i] = (uint16_t)(rom[m_tab + 0x10 + 2 * i] | (rom[m_tab + 0x11 + 2 * i] << 8));
 			m_orig_top[i] = (uint16_t)(rom[m_tab + 0x18 + 2 * i] | (rom[m_tab + 0x19 + 2 * i] << 8));
 		}
+}
+
+DebugUI::~DebugUI()
+{
+	for (SDL_Texture *&t : m_digit_tex)
+		if (t) SDL_DestroyTexture(t);
+}
+
+void DebugUI::load_extras(const std::string &path)
+{
+	m_extras_path = path;
+	if (SDL_IOStream *f = SDL_IOFromFile(path.c_str(), "rb"))
+	{
+		std::string text(4096, 0);
+		text.resize(SDL_ReadIO(f, text.data(), text.size()));
+		SDL_CloseIO(f);
+		m_extras.s.load(text);
+	}
+	m_extras.apply(m_roms);
+}
+
+void DebugUI::save_extras()
+{
+	m_extras.apply(m_roms);
+	if (m_extras_path.empty()) return;
+	const std::string text = m_extras.s.save();
+	if (SDL_IOStream *f = SDL_IOFromFile(m_extras_path.c_str(), "wb"))
+	{
+		SDL_WriteIO(f, text.data(), text.size());
+		SDL_CloseIO(f);
+	}
+}
+
+void DebugUI::apply_inputs(Inputs &in)
+{
+	const bool on = m_extras.s.dev_pause;
+	const bool *keys = SDL_GetKeyboardState(nullptr);
+	const bool typing = ImGui::GetCurrentContext() && ImGui::GetIO().WantTextInput;
+	in.dev_freeze = on && (m_dev_freeze || (!typing && keys && keys[SDL_SCANCODE_F7]));
+	in.dev_step = on && (m_dev_step_frames > 0 || (!typing && keys && keys[SDL_SCANCODE_F8]));
+	if (m_dev_step_frames > 0) m_dev_step_frames--;
 }
 
 void DebugUI::attach(NativeMachine &m)
@@ -137,6 +179,7 @@ int DebugUI::terrain_byte(int code, bool secondary) const
 
 void DebugUI::draw_sdl_overlays(NativeMachine &m, SDL_Renderer *ren, const SDL_FRect &game)
 {
+	if (m_extras.s.hex_labels) draw_hex_labels(m, ren, game);
 	m.board.debug.capture_tiles = m_show_height;
 	if (!m_show_height) return;
 	if (!m_height_tex)
@@ -163,6 +206,49 @@ void DebugUI::draw_sdl_overlays(NativeMachine &m, SDL_Renderer *ren, const SDL_F
 	}
 	SDL_UpdateTexture(m_height_tex, nullptr, m_height_px.data(), Board::SCREEN_W * 4);
 	SDL_RenderTexture(ren, m_height_tex, nullptr, &game);
+}
+
+// every active object labelled with its number in the game's unused hex-digit sprites
+// (frames 0x2085 + 5 * digit), two digits below its position
+void DebugUI::draw_hex_labels(NativeMachine &m, SDL_Renderer *ren, const SDL_FRect &game)
+{
+	if (!m_sprites)
+	{
+		m_gfx = std::make_unique<GfxSet>();
+		m_gfx->decode(m_roms);
+		m_sprites = std::make_unique<sprites::SpriteSet>();
+		std::string err;
+		if (!m_sprites->load(m_roms, err)) return;
+	}
+	for (int d = 0; d < 16; d++)
+		if (!m_digit_tex[d])
+			if (const sprites::Frame *f = m_sprites->frame((uint16_t)(0x2085 + 5 * d)))
+			{
+				const std::vector<uint32_t> px = m_sprites->render(*m_gfx, *f, m_sprites->palette[2].data());
+				m_digit_tex[d] = SDL_CreateTexture(ren, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, f->width(), f->height());
+				if (!m_digit_tex[d]) return;
+				SDL_SetTextureScaleMode(m_digit_tex[d], SDL_SCALEMODE_NEAREST);
+				SDL_SetTextureBlendMode(m_digit_tex[d], SDL_BLENDMODE_BLEND);
+				SDL_UpdateTexture(m_digit_tex[d], nullptr, px.data(), f->width() * 4);
+			}
+	const float sx = game.w / Board::SCREEN_W, sy = game.h / Board::SCREEN_H;
+	SDL_Rect clip = {(int)game.x, (int)game.y, (int)game.w, (int)game.h};
+	SDL_SetRenderClipRect(ren, &clip);
+	for (int i = 0; i < 32; i++)
+	{
+		if (!rb(m, (uint16_t)(OBJ_ACTIVE + i))) continue;
+		// screen x / y in 1/64 pixels; y counts upward from 0x2000 (bottom) to 0x8000 (top)
+		const int px = rw(m, (uint16_t)(OBJ_SX + 2 * i)) >> 6;
+		const int py = (0x8000 - (int)(uint16_t)rw(m, (uint16_t)(OBJ_SY + 2 * i))) >> 6;
+		if (px < -32 || px > Board::SCREEN_W + 16 || py < -16 || py > Board::SCREEN_H) continue;
+		for (int k = 0; k < 2; k++)
+			if (SDL_Texture *t = m_digit_tex[k ? (i & 15) : (i >> 4)])
+			{
+				const SDL_FRect r = {game.x + (px - 16 + 16 * k) * sx, game.y + (py + 2) * sy, 16 * sx, 16 * sy};
+				SDL_RenderTexture(ren, t, nullptr, &r);
+			}
+	}
+	SDL_SetRenderClipRect(ren, nullptr);
 }
 
 void DebugUI::draw_sprite_overlay(NativeMachine &m, const SDL_FRect &game)
@@ -240,7 +326,8 @@ void DebugUI::draw(NativeMachine &m, const SDL_FRect &game, RunControl &run, con
 		if (tab(5, "Cheats")) { tab_cheats(m); ImGui::EndTabItem(); }
 		if (tab(6, "Sound")) { tab_sound(m); ImGui::EndTabItem(); }
 		if (tab(7, "Memory")) { tab_memory(m); ImGui::EndTabItem(); }
-		if (tab(8, "Tricks")) { tab_tricks(); ImGui::EndTabItem(); }
+		if (tab(8, "Extras")) { tab_extras(m); ImGui::EndTabItem(); }
+		if (tab(9, "Tricks")) { tab_tricks(); ImGui::EndTabItem(); }
 		ImGui::EndTabBar();
 		select_tab = -1;
 	}
@@ -254,6 +341,76 @@ void DebugUI::draw(NativeMachine &m, const SDL_FRect &game, RunControl &run, con
 		if (ImGui::Begin("Programming tricks of 720 Degrees", &m_tricks_window)) m_tricks.draw("window");
 		ImGui::End();
 	}
+}
+
+void DebugUI::tab_extras(NativeMachine &m)
+{
+	ExtrasSettings &s = m_extras.s;
+	bool changed = false;
+	auto note = [](const char *t) {
+		ImGui::Indent();
+		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+		ImGui::TextWrapped("%s", t);
+		ImGui::PopStyleColor();
+		ImGui::Unindent();
+	};
+	ImGui::TextWrapped("Things the original game has but never uses, and fixes for its bugs. All off is the "
+		"original game; the settings are saved. See the Tricks tab for the background.");
+	if (ImGui::BeginChild("extras", {0, 0}))
+	{
+		ImGui::SeparatorText("Unused content");
+		changed |= ImGui::Checkbox("Developer freeze and frame step (F7 / F8)", &s.dev_pause);
+		note("Two inputs the cabinet never wired up. Hold F7 to freeze the game; while frozen, tap F8 to "
+			"step one frame or hold it for slow motion. The freeze also sets the developers' no-time-limit "
+			"flag, which nothing in the game clears again.");
+		if (s.dev_pause)
+		{
+			ImGui::Indent();
+			ImGui::Checkbox("Frozen", &m_dev_freeze);
+			ImGui::SameLine();
+			ImGui::BeginDisabled(!m_dev_freeze);
+			if (ImGui::Button("Step one frame")) m_dev_step_frames = 3;
+			ImGui::EndDisabled();
+			bool no_limit = rw(m, 0x0180) != 0;
+			if (ImGui::Checkbox("No time limit (no \"Skate or Die\")", &no_limit)) ww(m, 0x0180, no_limit ? 1 : 0);
+			ImGui::Unindent();
+		}
+		changed |= ImGui::Checkbox("Show the hidden points as flags", &s.point_flags);
+		note("The town's hidden points (\"SEARCH FOR HIDDEN POINTS\") are never drawn. With this they show as "
+			"the unused blue flags marked 100 to 1000, and the 50s as their unused signs.");
+		changed |= ImGui::Checkbox("Cut pedestrians", &s.cut_cast);
+		note("The unused man in suspenders jogs in place of the unicyclists (and gets knocked flat), the "
+			"unused businessman walks in place of the kids on tricycles. They were only drawn facing the "
+			"viewer, so they face you whichever way they go.");
+		changed |= ImGui::Checkbox("Object numbers in the hex-digit sprites", &s.hex_labels);
+		note("The unused sprite digits 0-F label every object with its number, a guess at the debug "
+			"display they were drawn for.");
+		ImGui::Text("Messages hidden in the program ROMs (at 0x8FD6 of each chip):");
+		ImGui::Indent();
+		ImGui::TextColored({1.0f, 0.85f, 0.35f, 1.0f}, "136047-3128.6fh: %s", Extras::rom_message(m_roms, 0).c_str());
+		ImGui::TextColored({1.0f, 0.85f, 0.35f, 1.0f}, "136047-4131.6mn: %s", Extras::rom_message(m_roms, 1).c_str());
+		ImGui::TextDisabled("as the CPU sees them: %s", Extras::cpu_view(m_roms).c_str());
+		ImGui::Unindent();
+
+		ImGui::SeparatorText("Bug fixes");
+		changed |= ImGui::Checkbox("Sub-pixel movement", &s.fix_subpixel);
+		note("The skater's velocity fractions never carry into his position (SWAB clears the carry before "
+			"the ADC at A7:40B8). With the fix they do.");
+		changed |= ImGui::Checkbox("The missing roller skater", &s.fix_roller);
+		note("Town stages 2, 5, 6 and 7 list a roller skater on a map cell with no places for objects, so "
+			"he never appears. The fix puts him on the nearest place next to the other roller skaters "
+			"(our guess at the intended one). Takes effect when the next town stage starts.");
+		changed |= ImGui::Checkbox("Bonus for jumping over hazards", &s.fix_hazard);
+		note("The game's hint says \"JUMPING OVER HAZARDS GIVES YOU MORE POINTS\", and the scoring looks up "
+			"that bonus but never adds it. The fix adds it (and keeps big totals at the top result).");
+		changed |= ImGui::Checkbox("Direction 3 movement", &s.fix_dir3);
+		note("One of the 16 movement directions is about half a degree off its mirror images. The fix makes "
+			"it symmetric.");
+		if (!m_extras.problems.empty())
+			ImGui::TextColored({1.0f, 0.5f, 0.3f, 1.0f}, "%s", m_extras.problems.c_str());
+	}
+	ImGui::EndChild();
+	if (changed) save_extras();
 }
 
 void DebugUI::tab_tricks()

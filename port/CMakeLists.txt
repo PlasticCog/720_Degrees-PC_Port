@@ -230,7 +230,8 @@ endif()
 file(WRITE ${D720_GEN_DIR}/tricks_doc.inc.tmp "${D720_TRICKS_BYTES}\n")
 configure_file(${D720_GEN_DIR}/tricks_doc.inc.tmp ${D720_GEN_DIR}/tricks_doc.inc COPYONLY)
 
-add_executable(720degrees WIN32 src/app/main.cpp src/app/input_config.cpp src/app/debugui.cpp src/app/docview.cpp ${D720_ICON_RC})
+add_executable(720degrees WIN32 src/app/main.cpp src/app/input_config.cpp src/app/debugui.cpp src/app/docview.cpp
+  src/app/extras.cpp ${D720_ICON_RC})
 target_include_directories(720degrees PRIVATE ${D720_GEN_DIR})
 target_link_libraries(720degrees PRIVATE gamecore leveldata imgui SDL3::SDL3)
 d720_copy_to_output(720degrees)
@@ -244,7 +245,8 @@ d720_copy_to_output(editor720)
 
 add_executable(verify720 src/tools/verify720.cpp)
 target_link_libraries(verify720 PRIVATE gamecore refcpu)
-add_executable(render720 src/tools/render720.cpp)
+add_executable(render720 src/tools/render720.cpp src/app/extras.cpp)
+target_include_directories(render720 PRIVATE src/app)
 target_link_libraries(render720 PRIVATE gamecore leveldata)
 endif()
 

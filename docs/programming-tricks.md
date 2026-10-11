@@ -428,7 +428,7 @@ The per-frame interrupt still contains a developer tool. It reads two input bits
 - Adding the second bit advances it one frame at a time. Hold it for about a second and the game runs in slow motion at half speed.
 - Pressing the first bit also sets a flag that nothing in the game ever clears again. With it set, the town timer running out no longer releases the bees, and their speed-up clock stops: no more "SKATE OR DIE".
 
-On a real machine these inputs would have to be wired up first (MAME lists them as unused). We confirmed the behaviour by feeding the bits to the original code.
+On a real machine these inputs would have to be wired up first (MAME lists them as unused). We confirmed the behaviour by feeding the bits to the original code. In this port you can use them: see "Extras" below.
 
 Where: F:B6BC-B71E, input decoding F:80A4, time-up check B3:7982.
 
@@ -445,18 +445,26 @@ The two chips hold the even and odd bytes of the same 16-bit words, so in the CP
 
 236 of the 1,864 sprite frames are in the ROM but no animation or code ever uses them. They include:
 
-- a whole extra pedestrian: a blond man in a white shirt, red suspenders and green trousers, with 26 walking and running frames and a frame of him knocked flat
-- a bald businessman in a suit carrying a briefcase, 12 walking frames
+- a whole extra pedestrian: a blond man in a white shirt and suspenders, with 18 walking and jogging frames and a frame of him knocked flat
+- a bald businessman in a suit carrying a briefcase, 10 standing and walking frames
 - the digits 0-F as sprites, a hexadecimal font that probably drove a removed debug display
 - 15 solid colour swatches, like a palette chart
-- blue flags on stands marked 100 to 1000. We think these were visible point flags; the finished game uses invisible "hidden points" objects instead
+- blue flags on stands marked 100 to 1000 (see "the hidden points" below)
 - "CLOSED" banners
 - 17 skater poses without a board
 - extra frames for the convertible, the pickup, the hot rod, the mower rider, the unicyclist, the tricycle kid, the dancer and the pennant
 
 Three unused object types (the points flag and two "CLOSED" signs) store a bare frame number where the engine expects an animation list, so they would show garbage if spawned. Types 1 and 2 hold the hex "0" digit in the same way. All of this looks like leftovers from an older data format.
 
-The level editor in this port can show all of them: Library, Sprites, tick "unused frames".
+None of these frames was ever given a palette, so their colours are a guess: the town's pedestrian palette makes the businessman's suit blue and the other man's trousers black. The level editor in this port can show all of them (Library, Sprites, tick "unused frames"), and the Extras tab can bring the two men and the flags into the game.
+
+## Secrets: the hidden points
+
+One of the game's hints says "SEARCH FOR HIDDEN POINTS". The hidden points are objects (types 72-82, worth 50, 100, 200 ... 1000 points) placed around Skate City. Their animations even contain signs showing their value (50, 100 ... 1K, with an arrow), but their type data tells the game to show them without any sprite pieces, so neither the signs nor anything else is ever drawn.
+
+The unused blue flags on stands, marked 100 to 1000, fit them exactly. They look like an earlier design in which the points were visible flags to skate to. Switch on "Show the hidden points as flags" in the Extras tab to see where the hidden points are.
+
+Where: the types' animations at 0x57C6 + 0x18 x k, the "no sprite pieces" check in the object start code (F:C5xx, before show_object F:B4B6).
 
 ## Secrets: smaller oddities
 
@@ -484,11 +492,15 @@ Where: A7:40A0-40BC.
 
 The town object lists for stages 2, 5, 6 and 7 each include a roller skater in white (type 51). Its placement points at map cell column 14, row 1, which has no places for objects defined at all, so the game skips it. The neighbouring cells do have places, so it is probably a typo in the data. As a result this skater never appears in those stages.
 
+Several valid places are one typo away. The Extras fix uses cell column 14, row 5 (descriptor 0x02E5): a single bit from the broken value, on a route, and right next to where the other roller skaters skate. That is our guess at the intended spot.
+
 Where: the list entries with descriptor 0x02E1; the check at F:CE24.
 
 ## Bugs: a bonus computed and thrown away
 
-When you land, the scoring routine looks up a bonus based on a counter of special jump tiles you crossed in the air, then overwrites the register before adding it. It looks like a missing ADD instruction. The bonus simply never happens, so a player cannot see it, but the designers evidently planned one.
+One of the game's hints says "JUMPING OVER HAZARDS GIVES YOU MORE POINTS". While you are in the air above hazard tiles, the game counts the frames. When you land, the scoring routine turns that count into a bonus from a table (0, 1, 2 ... up to 12 steps of the score table), then overwrites the register before adding it. Every other term of the score has an ADD right after its lookup; this one does not.
+
+So jumping over hazards only helps a little in the original: such jumps do not wear out like repeated tricks do, but the promised extra points never arrive. The Extras fix adds the bonus. It also keeps very big totals at the top result, because with the bonus they could otherwise run past the end of the score table.
 
 Where: score_landing B3:7C98-7CB4.
 
@@ -500,6 +512,25 @@ Where: score_landing B3:7C98-7CB4.
 - Direction 3 of the movement table is slightly off from its mirror images (see "16 directions" above). It is only about half a degree, too small to feel.
 
 We looked for exploits a player could trigger from the cabinet's controls (infinite money or time, counter overflows, clipping through walls at speed) and found none in the code we read. The code paths that never ran in our test sessions turned out to be rare but normal features: entering high-score initials, the "Hall of Fame" box, the sound test, the controller calibration, a corner take-off from ramp lips, and the bee shapes above.
+
+## Extras: switching the secrets and fixes on
+
+The debug menu (Tab) has an Extras tab. Everything in it is off by default, which is the original game, and the settings are saved.
+
+Unused content:
+
+- Developer freeze and frame step: F7 and F8 drive the two unwired inputs described above. Hold F7 to freeze; while frozen, tap F8 to step a frame or hold it for slow motion. Like on the original, the freeze also switches off the time limit; the tab has a checkbox to switch it back on.
+- Show the hidden points as flags: the hidden points become visible, as the unused 100-1000 flags (and the 50s as their unused signs).
+- Cut pedestrians: the man in suspenders jogs in place of the unicyclists, using his unused jogging frames and his knocked-flat frame, and the businessman walks in place of the kids on tricycles. They were only drawn facing the viewer, so they face you whichever way they walk. This is a reconstruction: the original never says where they would have appeared.
+- Object numbers in the hex-digit sprites: every object gets its slot number drawn with the unused sprite digits. This too is a guess at what the digits were for.
+- The messages hidden in the ROM chips are shown as read from your ROM files.
+
+Bug fixes:
+
+- Sub-pixel movement: the fraction carry is added.
+- The missing roller skater: he is placed on the nearest place next to the other roller skaters. Takes effect when the next town stage is set up.
+- Bonus for jumping over hazards: the dropped bonus is added.
+- Direction 3 movement: the lopsided entry gets its mirror images' values.
 
 ## Reported by others, not checked here
 

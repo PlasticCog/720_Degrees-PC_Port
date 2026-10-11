@@ -12,6 +12,7 @@
 //   objshot RAMDUMP PALDUMP FRAME OUT.png
 //                                      draw the objects of one dumped frame from the decoded
 //                                      frames (compare with render720 --hide-pf --hide-alpha)
+//   frames OUT.png PAL ID [ID ...]     the frames ID (hex) side by side with MO palette PAL (0-3)
 //   objedit-test OUT.720mod            encoder tests: unchanged lists encode to the ROM bytes;
 //                                      a demo edit (town list entry 21 becomes speakers, its
 //                                      definition moves, one stage 1 object moves to stage 2)
@@ -170,13 +171,34 @@ int object_frame(const RomSet &rs, const uint8_t *r, int slot)
 
 int sprite_command(const RomSet &rs, LevelSet &ls, const std::string &cmd, const std::vector<std::string> &args)
 {
-	if (cmd != "sprites" && cmd != "objects" && cmd != "objcheck" && cmd != "objshot" && cmd != "objedit-test") return -1;
+	if (cmd != "sprites" && cmd != "objects" && cmd != "objcheck" && cmd != "objshot" && cmd != "objedit-test" && cmd != "frames")
+		return -1;
 	SpriteSet ss;
 	std::string err;
 	if (!ss.load(rs, err)) { fprintf(stderr, "sprites: %s\n", err.c_str()); return 1; }
 	GfxSet gfx;
 	gfx.decode(rs);
 
+	if (cmd == "frames")
+	{
+		if (args.size() < 3) { fprintf(stderr, "usage: leveltool frames OUT.png PAL ID [ID ...]\n"); return 1; }
+		const int pal = atoi(args[1].c_str()) & 3;
+		std::vector<const Frame *> list;
+		for (size_t i = 2; i < args.size(); i++)
+			if (const Frame *f = ss.frame((uint16_t)strtol(args[i].c_str(), nullptr, 16))) list.push_back(f);
+		int w = 8, h = 8;
+		for (const Frame *f : list) { w += f->width() + 8; h = std::max(h, f->height() + 16); }
+		std::vector<uint32_t> img((size_t)w * h, 0xFF283828);
+		int x = 8;
+		for (const Frame *f : list)
+		{
+			ss.draw(gfx, *f, img.data(), w, h, x - f->left, 8 - f->top, ss.palette[pal].data());
+			x += f->width() + 8;
+		}
+		write_png(args[0], img.data(), w, h);
+		printf("%zu frames, palette %d -> %s\n", list.size(), pal, args[0].c_str());
+		return 0;
+	}
 	if (cmd == "sprites")
 	{
 		if (args.empty()) { fprintf(stderr, "usage: leveltool sprites OUTDIR\n"); return 1; }

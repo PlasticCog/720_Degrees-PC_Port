@@ -137,6 +137,9 @@ inline uint8_t decb(uint8_t d) { const int r = d - 1; f_nzv(nzb(r) | (d == 0x80 
 // settings and statistics
 extern bool g_enabled;                                 // use the rewritten routines
 extern bool g_difftest;                                // compare every call with the original
+// optional fixes of bugs in the original (debug menu, Extras; off = the original behaviour)
+extern bool g_fix_subpixel_carry;                      // A7:4098 loses the fraction carry (SWAB)
+extern bool g_fix_hazard_bonus;                        // B3:7CB0 looks up a bonus and drops it
 // run some rewritten routines as the translation again (for hunting differences): a comma-
 // separated list of SEG:ADDR, routine names or table names (routines_<table>.cpp), or "all"
 void use_translation(const std::string &spec);

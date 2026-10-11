@@ -1,12 +1,14 @@
 // render720: run the native game headless and write screenshots + a WAV of its audio.
 //   render720 --roms DIR --frames N [--out DIR] [--png-every K] [--script FILE] [--random SEED] [--wav FILE]
 //             [--ram-dump FILE] [--pal-dump FILE] [--hide-pf] [--hide-alpha] [--poke FRAME:ADDR:VALUE]
+//             [--extras NAME,NAME...] [--dev-input FROM:TO:BITS]   (extras.h; BITS 1 freeze, 4 step)
 #include "nativemachine.h"
 #include "soundchips.h"
 #include "inputscript.h"
 #include <map>
 #include "modloader.h"
 #include "logic.h"
+#include "extras.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -34,6 +36,9 @@ int main(int argc, char **argv)
 	int frames = 600, png_every = 0, seed = 0, stats_every = 0;
 	struct Poke { int frame; uint16_t addr, value; };
 	std::vector<Poke> pokes;
+	std::string extras;
+	struct DevInput { int from, to, bits; };
+	std::vector<DevInput> dev_inputs;
 	for (int i = 1; i < argc; i++)
 	{
 		std::string a = argv[i];
@@ -64,12 +69,38 @@ int main(int argc, char **argv)
 			pokes.push_back({atoi(v.substr(0, c1).c_str()), (uint16_t)strtol(v.substr(c1 + 1, c2 - c1 - 1).c_str(), nullptr, 16),
 				(uint16_t)strtol(v.substr(c2 + 1).c_str(), nullptr, 16)});
 		}
+		else if (a == "--extras") extras = next();       // switch these extras on (extras.h names)
+		else if (a == "--dev-input")                       // FROM:TO:BITS hold the hidden inputs
+		{
+			const std::string v = next();
+			const size_t c1 = v.find(':'), c2 = v.find(':', c1 + 1);
+			dev_inputs.push_back({atoi(v.substr(0, c1).c_str()), atoi(v.substr(c1 + 1, c2 - c1 - 1).c_str()),
+				atoi(v.substr(c2 + 1).c_str())});
+		}
 		else if (a == "--audio-stats") stats_every = atoi(next().c_str());   // print chip levels every N frames
 	}
 	RomSet rs;
 	std::string err;
 	if (!rs.load(roms, err)) { fprintf(stderr, "%s\n", err.c_str()); return 1; }
 	if (!mod.empty() && !apply_mod_file(rs, mod, err)) { fprintf(stderr, "%s\n", err.c_str()); return 1; }
+	Extras ex;
+	if (!extras.empty())
+	{
+		std::string text = extras;
+		for (char &c : text) if (c == ',') c = '\n';
+		std::string lines;
+		size_t p = 0;
+		while (p < text.size())
+		{
+			size_t e = text.find('\n', p);
+			if (e == std::string::npos) e = text.size();
+			lines += text.substr(p, e - p) + " 1\n";
+			p = e + 1;
+		}
+		ex.s.load(lines);
+		ex.apply(rs);
+		if (!ex.problems.empty()) fprintf(stderr, "%s", ex.problems.c_str());
+	}
 	NativeMachine m(rs);
 	m.reset();
 	m.board.chips().audio_enabled = !wav.empty() || stats_every > 0;
@@ -132,6 +163,13 @@ int main(int argc, char **argv)
 				m.board.main_ram()[pk.addr + 1] = (uint8_t)(pk.value >> 8);
 			}
 		inp.apply(f, m.board.input, snap);
+		m.board.input.dev_freeze = m.board.input.dev_step = false;
+		for (const auto &d : dev_inputs)
+			if (f >= d.from && f < d.to)
+			{
+				m.board.input.dev_freeze |= (d.bits & 1) != 0;
+				m.board.input.dev_step |= (d.bits & 4) != 0;
+			}
 		m.run_frame();
 		if (rdump)
 		{
