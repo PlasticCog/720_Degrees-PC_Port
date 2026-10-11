@@ -243,13 +243,14 @@ void load_scroll_registers()
 	slap(0x8036);
 	slap(0x8038);
 	T.r[0] = peek(0x01A8);
+	fl::mov(T.r[0]);
 	tick(0x803A, 24);
 	slap(0x803A);
 	slap(0x803C);
-	T.r[0] &= ~0x003F;
+	T.r[0] = fl::logic((uint16_t)(T.r[0] & ~0x003F));
 	tick(0x803E, 18);
 	slap(0x803E);
-	T.r[0] |= peek(0x01CC);
+	T.r[0] = fl::logic((uint16_t)(T.r[0] | peek(0x01CC)));
 	tick(0x8042, 24);
 	ww(0x1700, T.r[0]);
 	fl::mov(T.r[0]);
@@ -474,7 +475,7 @@ void town_alt_cell_bit()
 	poke(0x0F56, T.r[0]);
 	fl::mov(T.r[0]);
 	tick(0x48A6, 27);
-	poke(0x0F56, (uint16_t)((int16_t)peek(0x0F56) >> 1));
+	poke(0x0F56, fl::asr(peek(0x0F56)));
 	tick(0x48AA, 27);
 	T.r[0] = peek(0x0F56);
 	fl::mov(T.r[0]);
@@ -486,7 +487,7 @@ void town_alt_cell_bit()
 	tick(0x48B8, 42);
 	for (uint16_t pc = 0x48BC; pc <= 0x48C4; pc += 4)
 	{
-		poke(0x0F56, (uint16_t)((int16_t)peek(0x0F56) >> 1));
+		poke(0x0F56, fl::asr(peek(0x0F56)));
 		tick(pc, 27);                                  // ASR @#0x0F56
 	}
 	poke(0x0F56, fl::add(peek(0x0F56), 0x7F16));
@@ -679,16 +680,20 @@ void clear_playfield()
 	{
 		const uint16_t pc = half ? 0x8D00 : 0x8CE8;
 		wb(0x1800, 0);
+		fl::clr();
 		tick((uint16_t)(pc + 4), 27);                  // CLRB @#IN0 (watchdog)
 		T.r[0] = half ? 0x6000 : 0x4000;
+		fl::mov(T.r[0]);
 		tick((uint16_t)(pc + 8), 18);
 		jsr((uint16_t)(pc + 12), 0x8078);              // select_video_bank
 		T.r[0] = 0x2000;
+		fl::mov(T.r[0]);
 		tick((uint16_t)(pc + 16), 18);
 		const uint16_t loop = (uint16_t)(pc + 16);
 		for (;;)
 		{
 			ww(T.r[0], 0);
+			fl::clr();
 			T.r[0] += 2;
 			tick((uint16_t)(loop + 2), 21);            // CLR (R0)+
 			fl::cmp(T.r[0], 0x3FFE);
@@ -1041,7 +1046,11 @@ void load_text_palette()
 		tick(0xDA9A, 12);
 		T.r[0] = fl::asl(T.r[0]);
 		tick(0xDA9C, 12);
-		ww((uint16_t)(0x107E + T.r[0]), rw((uint16_t)(0x5EBE + T.r[0])));
+		{
+			const uint16_t c = rw((uint16_t)(0x5EBE + T.r[0]));
+			ww((uint16_t)(0x107E + T.r[0]), c);
+			fl::mov(c);
+		}
 		tick(0xDAA2, 45);
 		if (--T.r[1] == 0) break;
 		tick(0xDA98, 18);                              // SOB
@@ -1107,6 +1116,7 @@ void load_playfield_palette()
 		const uint16_t c = rw(T.r[1]);
 		T.r[0] -= 2;
 		ww(T.r[0], c);
+		fl::mov(c);
 		tick(0xDAE8, 33);                              // MOV -(R1),-(R0)
 		if (--T.r[2] == 0) break;
 		tick(0xDAE6, 18);                              // SOB

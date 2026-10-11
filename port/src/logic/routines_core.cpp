@@ -69,6 +69,43 @@ void c_save(int n, uint16_t body)
 	tick(body, 30);                                    // JSR PC,@(SP)+
 }
 
+// MOV #0x000E,R1 at pc and the two loops after it (F:81B8, F:821A, F:F3BA): the eight vectors
+// listed at 0xFC4E get handler h1 with PSW 0xE0, the four 32V vectors listed at 0xFC5E
+// handler h2 with PSW 0xC0 (MOV #h,@list(R1); MOV list(R1),R0; MOV #psw,2(R0)); R0 ends as
+// the last vector's address
+void vector_loops(uint16_t pc, uint16_t h1, uint16_t h2)
+{
+	for (int k = 0; k < 2; k++)
+	{
+		const uint16_t list = k ? 0xFC5E : 0xFC4E, h = k ? h2 : h1, psw = k ? 0x00C0 : 0x00E0;
+		T.r[1] = k ? 0x0006 : 0x000E;
+		fl::mov(T.r[1]);
+		const uint16_t loop = (uint16_t)(pc + 4);
+		tick(loop, 18);                                // MOV #n,R1
+		for (;;)
+		{
+			poke(peek((uint16_t)(list + T.r[1])), h);
+			fl::mov(h);
+			tick((uint16_t)(loop + 6), 42);
+			T.r[0] = peek((uint16_t)(list + T.r[1]));
+			fl::mov(T.r[0]);
+			tick((uint16_t)(loop + 0x0A), 27);
+			poke((uint16_t)(T.r[0] + 2), psw);
+			fl::mov(psw);
+			tick((uint16_t)(loop + 0x10), 36);
+			T.r[1] = fl::sub(T.r[1], 0x0002);
+			tick((uint16_t)(loop + 0x14), 18);
+			if ((int16_t)T.r[1] < 0)
+			{
+				tick((uint16_t)(loop + 0x16), 12);     // BPL not taken
+				break;
+			}
+			tick(loop, 12);
+		}
+		pc = (uint16_t)(loop + 0x16);
+	}
+}
+
 // the body's RTS into the register save helper, the helper's epilogue (F172-F17A: the saved
 // registers back) and its RTS
 void c_restore(int n)
@@ -206,8 +243,7 @@ uint16_t mul32(const Args &a)
 	if ((int16_t)T.r[1] < 0)
 	{
 		tick(0x810A, 12);
-		T.r[4]--;                                      // the high word of b
-		fl::dec((uint16_t)(T.r[4] + 1));
+		T.r[4] = fl::dec(T.r[4]);                                      // the high word of b
 		tick(0x810C, 12);
 	}
 	else

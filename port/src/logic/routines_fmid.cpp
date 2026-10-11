@@ -723,8 +723,7 @@ void build_sprite_pieces()
 			T.r[5] |= peekb(pop());                    // BISB @(SP)+,R5
 			fl::logicb((uint8_t)T.r[5]);
 			tick(0xB224, 24);
-			T.r[5] = (uint16_t)~T.r[5];
-			fl::com((uint16_t)(~T.r[5]));
+			T.r[5] = fl::com(T.r[5]);
 			tick(0xB226, 12);
 			T.r[2] = fl::logic((uint16_t)(T.r[2] & (uint16_t)~T.r[5]));
 			tick(0xB228, 12);
@@ -2308,8 +2307,7 @@ uint16_t turn_map_object(const Args &)
 		else
 		{
 			tick(0xC174, 12);
-			T.r[2] = (uint16_t)-T.r[2];
-			fl::neg((uint16_t)(-T.r[2]));
+			T.r[2] = fl::neg(T.r[2]);
 			tick(0xC176, 12);
 			poke(sp_at(0x0A), 0xFFFE);
 			fl::mov(0xFFFE);

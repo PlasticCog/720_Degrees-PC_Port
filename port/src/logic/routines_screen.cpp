@@ -307,11 +307,13 @@ void clear_video(uint16_t pc, uint16_t from, uint16_t last)
 {
 	jsr((uint16_t)(pc + 4), 0x8068);                   // select_video_bank0
 	T.r[0] = from;
+	fl::mov(T.r[0]);
 	tick((uint16_t)(pc + 8), 18);
 	const uint16_t loop = (uint16_t)(pc + 8);
 	for (;;)
 	{
 		poke(T.r[0], 0);
+		fl::clr();
 		T.r[0] += 2;
 		tick((uint16_t)(loop + 2), 21);                // CLR (R0)+
 		fl::cmp(T.r[0], last);

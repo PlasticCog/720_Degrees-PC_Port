@@ -11,6 +11,7 @@ void rts();
 void jsr(uint16_t ret, uint16_t addr);
 void c_save(int n, uint16_t body);
 void c_restore(int n);
+void vector_loops(uint16_t pc, uint16_t h1, uint16_t h2);
 }
 
 namespace {
@@ -274,46 +275,31 @@ void step_sound_level()
 
 // F:81AA / F:820C: install the interrupt handlers: the eight vectors listed at 0xFC4E get
 // handler h1 (PSW 0xE0), the four 32V vectors listed at 0xFC5E handler h2 (PSW 0xC0); the
-// interrupt enables are off meanwhile and end as 0x000C.  Returns the last vector address.
-uint16_t install_vectors(uint16_t h1, uint16_t h2)
-{
-	for (int i = 14; i >= 0; i -= 2)
-	{
-		const uint16_t v = peek((uint16_t)(0xFC4E + i));
-		poke(v, h1);
-		poke((uint16_t)(v + 2), 0x00E0);
-	}
-	uint16_t v = 0;
-	for (int i = 6; i >= 0; i -= 2)
-	{
-		v = peek((uint16_t)(0xFC5E + i));
-		poke(v, h2);
-		poke((uint16_t)(v + 2), 0x00C0);
-	}
-	return v;
-}
-
-// the start of both: MOV R1,-(SP), the interrupts off, then the vectors (with the interrupts
-// off nothing sees them being written, so the two loops are charged at once)
+// interrupt enables are off meanwhile and end as 0x000C.  The start of both: MOV R1,-(SP),
+// the interrupts off, then the vectors.  Returns the last vector address.
 uint16_t install_start(uint16_t pc, uint16_t h1, uint16_t h2)
 {
 	push(T.r[1]);
+	fl::mov(T.r[1]);
 	tick((uint16_t)(pc + 2), 24);
 	poke(0x018C, 0);
+	fl::clr();
 	tick((uint16_t)(pc + 6), 27);
 	poke(0x1600, 0);
+	fl::clr();
 	tick((uint16_t)(pc + 10), 27);
 	pokeb(0x1800, 0);
+	fl::clr();
 	tick((uint16_t)(pc + 14), 27);
-	const uint16_t v = install_vectors(h1, h2);
-	tick((uint16_t)(pc + 0x42), 18 + 8 * (42 + 27 + 36 + 18 + 12) + 18 + 4 * (42 + 27 + 36 + 18 + 12));
-	return v;
+	vector_loops((uint16_t)(pc + 14), h1, h2);
+	return T.r[0];
 }
 
 uint16_t install_interrupts_a(const Args &)
 {
 	const uint16_t r0 = install_start(0x81AA, 0x84D4, 0xB66E);
 	pokeb(0x0196, 0);
+	fl::clr();
 	tick(0x81F0, 27);
 	pokeb(0x0191, 0x4D);
 	fl::movb(0x4D);
@@ -338,6 +324,7 @@ uint16_t install_interrupts_b(const Args &)
 {
 	install_start(0x820C, 0x899C, 0xB9D4);
 	pokeb(0x0196, 0);
+	fl::clr();
 	tick(0x8252, 27);
 	pokeb(0x0197, 0);
 	fl::clr();

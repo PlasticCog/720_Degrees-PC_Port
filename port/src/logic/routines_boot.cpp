@@ -9,6 +9,7 @@ void rts();
 void jsr(uint16_t ret, uint16_t addr);
 void c_save(int n, uint16_t body);
 void c_restore(int n);
+void vector_loops(uint16_t pc, uint16_t h1, uint16_t h2);
 }
 
 namespace {
@@ -21,8 +22,6 @@ uint16_t sext8(uint8_t v) { return (uint16_t)(int16_t)(int8_t)v; }
 // F:F3A8: interrupt handlers of the self test: the eight vectors listed at 0xFC4E get F:8938
 // (PSW 0xE0), the four 32V vectors at 0xFC5E F:8924 (PSW 0xC0), the sound command vector
 // 0x0038 F:891E (PSW 0xA0); only the 32V interrupt is enabled.  Returns the last vector.
-// The vectors are written with the interrupts off, where nothing sees them, so their two
-// loops are charged at once.
 uint16_t install_selftest_interrupts(const Args &)
 {
 	push(T.r[1]);
@@ -40,21 +39,7 @@ uint16_t install_selftest_interrupts(const Args &)
 	poke(0x15C0, 0);
 	fl::clr();
 	tick(0xF3BA, 27);
-	for (int i = 14; i >= 0; i -= 2)
-	{
-		const uint16_t v = peek((uint16_t)(0xFC4E + i));
-		poke(v, 0x8938);
-		poke((uint16_t)(v + 2), 0x00E0);
-	}
-	uint16_t v = 0;
-	for (int i = 6; i >= 0; i -= 2)
-	{
-		v = peek((uint16_t)(0xFC5E + i));
-		poke(v, 0x8924);
-		poke((uint16_t)(v + 2), 0x00C0);
-	}
-	T.r[0] = v;
-	tick(0xF3EE, 18 + 8 * (42 + 27 + 36 + 18 + 12) + 18 + 4 * (42 + 27 + 36 + 18 + 12));
+	vector_loops(0xF3BA, 0x8938, 0x8924);
 	poke(0x0038, 0x891E);
 	fl::mov(0x891E);
 	tick(0xF3F4, 33);
@@ -71,7 +56,7 @@ uint16_t install_selftest_interrupts(const Args &)
 	fl::mov(T.r[1]);
 	tick(0xF408, 18);
 	rts();
-	return v;
+	return T.r[0];
 }
 
 // F:8924 (interrupt, 32V in the self test): count the quarter frame in 0x0191 (step by step;
@@ -215,8 +200,7 @@ uint16_t rotary_step(const Args &)
 		T.r[0] = 0xFFFF;
 		fl::mov(T.r[0]);
 		tick(0x8E3E, 18);
-		T.r[1] = (uint16_t)-T.r[1];
-		fl::neg((uint16_t)(-T.r[1]));
+		T.r[1] = fl::neg(T.r[1]);
 		tick(0x8E40, 12);
 		tick(0x8E46, 12);                              // BR
 	}
@@ -232,11 +216,9 @@ uint16_t rotary_step(const Args &)
 	if ((int16_t)T.r[1] > 0x48)
 	{
 		tick(0x8E4C, 12);
-		T.r[0] = (uint16_t)-T.r[0];
-		fl::neg((uint16_t)(-T.r[0]));
+		T.r[0] = fl::neg(T.r[0]);
 		tick(0x8E4E, 12);
-		T.r[1] = (uint16_t)-T.r[1];
-		fl::neg((uint16_t)(-T.r[1]));
+		T.r[1] = fl::neg(T.r[1]);
 		tick(0x8E50, 12);
 		T.r[1] = fl::add(T.r[1], 0x0090);
 		tick(0x8E54, 18);
