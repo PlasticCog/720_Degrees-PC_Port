@@ -115,7 +115,10 @@ bool sync_slow(uint16_t next)
 		if (T.r[6] < g_min_sp) g_min_sp = T.r[6];
 		if (g_trace_count)
 		{
-			const uint64_t step = (uint64_t)next << 32 | (uint64_t)T.r[6] << 16 | T.psw;
+			uint32_t h = 0;                            // R0-R5, hashed
+			for (int i = 0; i < 6; i++) h = (h ^ T.r[i]) * 0x01000193u;
+			const uint64_t step = (uint64_t)next << 48 | (uint64_t)T.r[6] << 32 | (uint64_t)T.psw << 24 |
+				((h ^ (h >> 24)) & 0xFFFFFF);
 			for (int i = 0; i < g_trace_count; i++) g_traces[i]->push_back(step);
 		}
 		if (++g_atomic_steps > g_atomic_limit) throw AtomicTimeout{};

@@ -83,7 +83,7 @@ def parse(text):
         if m:
             key, name, calls, rest = m.group(1), m.group(2), int(m.group(3)), m.group(4)
             r = {'name': name, 'calls': calls, 'tested': 0, 'bad': 0, 'cycles': 0.0, 'native': 0.0, 'charged': None,
-                 'waits': 0, 'unwound': 0, 'first': None, 'steps': 0, 'first_step': None, 'wrong': {}}
+                 'waits': 0, 'unwound': 0, 'first': None, 'steps': 0, 'first_step': None, 'wrong': {}, 'regs': set()}
             t = re.search(r'tested\s+(\d+)\s+mismatches (\d+)\s+original (\d+) cycles/call \(charged (-?\d+)\)', rest)
             if t:
                 r['tested'], r['bad'] = int(t.group(1)), int(t.group(2))
@@ -104,6 +104,8 @@ def parse(text):
             last = key
         elif last and line.strip().startswith('first mismatch:'):
             out[last]['first'] = line.strip()[len('first mismatch:'):].strip()
+        elif last and line.strip().startswith('registers differ after:'):
+            out[last]['regs'].update(line.split(':', 1)[1].split())
         elif last and line.strip().startswith('condition codes differ after:'):
             for t in line.split(':', 1)[1].split():
                 out[last]['wrong'].setdefault(t[:4], t)
@@ -190,7 +192,7 @@ def main():
             for key, r in parse(text).items():
                 m = merged.setdefault(key, {'name': r['name'], 'calls': 0, 'tested': 0, 'bad': 0, 'cyc': 0.0, 'ncyc': 0.0,
                                             'charged': r['charged'], 'waits': 0, 'unwound': 0, 'first': None,
-                                            'steps': 0, 'first_step': None, 'wrong': {}, 'where': set()})
+                                            'steps': 0, 'first_step': None, 'wrong': {}, 'regs': set(), 'where': set()})
                 m['calls'] += r['calls']
                 m['tested'] += r['tested']
                 m['bad'] += r['bad']
@@ -207,6 +209,7 @@ def main():
                 m['steps'] += r['steps']
                 for a, t in r['wrong'].items():
                     m['wrong'].setdefault(a, t)
+                m['regs'].update(r['regs'])
                 if r['first_step'] and not m['first_step']:
                     m['first_step'] = '[%s] %s' % (name, r['first_step'])
 
@@ -233,6 +236,8 @@ def main():
             lines.append('      first step difference: ' + m['first_step'])
         if m['wrong']:
             lines.append('      condition codes differ after: ' + ' '.join(m['wrong'][a] for a in sorted(m['wrong'])))
+        if m['regs']:
+            lines.append('      registers differ after: ' + ' '.join(sorted(m['regs'])))
     for line in open(os.path.join(ROOT, 'port', 'src', 'logic', 'routines.txt'), encoding='utf-8'):
         f = line.split()
         if f and not f[0].startswith('#') and f[0] not in merged:

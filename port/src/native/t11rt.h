@@ -73,7 +73,8 @@ extern uint16_t g_min_sp;
 extern uint32_t g_atomic_steps, g_atomic_limit;
 constexpr uint32_t ATOMIC_STEP_LIMIT = 4000000;
 struct AtomicTimeout {};
-// atomic mode also appends every instruction boundary (next PC << 32 | SP << 16 | PSW) to the
+// atomic mode also appends every instruction boundary (next PC << 48 | SP << 32 | PSW << 24 |
+// a 24-bit hash of R0-R5) to the
 // active traces, so the difference tester can compare the rewritten routines' steps with the
 // original's
 constexpr int MAX_TRACES = 8;

@@ -53,6 +53,7 @@ struct Slot {
 	uint64_t step_bad = 0;                                 // tested calls whose steps differ (see difftest)
 	std::string first_step;
 	std::map<uint16_t, uint16_t> wrong;                    // instruction -> original / rewrite PSW after it
+	std::map<uint16_t, int> regs_wrong;                    // instructions after which R0-R5 differ
 };
 
 // the routine tables of the routines_*.cpp files
@@ -282,23 +283,25 @@ void difftest(Slot &s)
 			if (s.first_step.empty())
 			{
 				auto step = [](const std::vector<uint64_t> &v, size_t i) {
-					return i < v.size() ? fmt("%04X sp %04X psw %02X", (unsigned)(v[i] >> 32) & 0xffff,
-						(unsigned)(v[i] >> 16) & 0xffff, (unsigned)v[i] & 0xff) : std::string("(none)");
+					return i < v.size() ? fmt("%04X sp %04X psw %02X regs %06X", (unsigned)(v[i] >> 48),
+						(unsigned)(v[i] >> 32) & 0xffff, (unsigned)(v[i] >> 24) & 0xff, (unsigned)v[i] & 0xffffff)
+						: std::string("(none)");
 				};
 				s.first_step = fmt("args %04X %04X %04X %04X, step %zu of %zu/%zu", args[0], args[1], args[2], args[3],
-					k, o.size(), w.size()) + (k ? fmt(" after %04X", (unsigned)(o[k - 1] >> 32) & 0xffff) : std::string()) +
+					k, o.size(), w.size()) + (k ? fmt(" after %04X", (unsigned)(o[k - 1] >> 48)) : std::string()) +
 					": original " + step(o, k) + ", rewrite " + step(w, k);
 			}
 			// where the same addresses are stepped through, the instructions after which the
-			// condition codes start to differ (the first instruction for step 0)
+			// condition codes or the registers start to differ (the first instruction for step 0)
 			for (size_t i = k; i < m; i++)
 			{
-				if ((o[i] >> 16) != (w[i] >> 16)) break;
-				if (o[i] != w[i] && (i == 0 || o[i - 1] == w[i - 1]) && s.wrong.size() < 200)
-				{
-					const uint16_t at = i ? (uint16_t)(o[i - 1] >> 32) : s.orig->addr;
-					s.wrong.emplace(at, (uint16_t)((o[i] & 0xff) << 8 | (w[i] & 0xff)));
-				}
+				if ((o[i] >> 32) != (w[i] >> 32)) break;
+				const uint16_t at = i ? (uint16_t)(o[i - 1] >> 48) : s.orig->addr;
+				const uint64_t PSW = 0xFFull << 24, REGS = 0xFFFFFF;
+				if ((o[i] & PSW) != (w[i] & PSW) && (i == 0 || (o[i - 1] & PSW) == (w[i - 1] & PSW)) && s.wrong.size() < 200)
+					s.wrong.emplace(at, (uint16_t)(((o[i] >> 24) & 0xff) << 8 | ((w[i] >> 24) & 0xff)));
+				if ((o[i] & REGS) != (w[i] & REGS) && (i == 0 || (o[i - 1] & REGS) == (w[i - 1] & REGS)) && s.regs_wrong.size() < 200)
+					s.regs_wrong.emplace(at, 1);
 			}
 		}
 	}
@@ -483,6 +486,12 @@ std::string report(bool all)
 		{
 			out += "      condition codes differ after:";
 			for (const auto &w : s.wrong) out += fmt(" %04X(%02X/%02X)", w.first, w.second >> 8, w.second & 0xff);
+			out += "\n";
+		}
+		if (!s.regs_wrong.empty())
+		{
+			out += "      registers differ after:";
+			for (const auto &w : s.regs_wrong) out += fmt(" %04X", w.first);
 			out += "\n";
 		}
 	}
