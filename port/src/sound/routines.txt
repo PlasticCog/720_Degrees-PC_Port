@@ -39,6 +39,13 @@
 4E6D  ym_channel
 4FF5  wait_ym
 5012  player
+502E  note_command
+504C  note_byte
+5074  kind_command
+5186  volume_add
+5449  source_value
+558D  ym_voice
+5674  ym_data_reg
 57AC  nmi
 5831  speech_init
 5883  speech
