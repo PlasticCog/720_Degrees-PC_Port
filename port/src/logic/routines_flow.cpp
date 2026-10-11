@@ -6990,6 +6990,368 @@ void short_delay()
 	rts();
 }
 
+// F:F17E (jumped to by the reset with the test switch on): the power-on test.  The first 17
+// playfield and text palette entries (0x1100 / 0x1080) get the test colours; the RAM
+// (0x0000-0x0FFE) and the three video RAM banks (0x2000-0x3FFE, bank 0x01D0 from the table
+// at 0xFF2E by F:8096) are filled with 0x0101 and shifted left eight times, each word checked
+// against the pattern (0x0202 .. 0x8000); a bad word shows the failing chip (F:8AB6 with the
+// bits of 0xFF36 and the byte that failed) and hangs, clearing the watchdog.  Then the
+// palettes, RAM 0x0080-0x0FFE cleared, the self-test interrupts (F:F3A8), the screen cleared
+// (F:8CE8, F:8D2C, F:8D3E) and its palettes (F:DA74, F:DABA, F:DB4E), message 0x0E; a loop of
+// 20001 passes counts the interrupts (0x0191 0x36-0x42 and 0x01C4 9-11 expected, else message
+// 0x0D and F:F40A); the ROM checksums (F:F4D2), message 0x1F, a button (F:8D60) and the
+// self-test loop F:F43C, which does not return.
+void power_on_test()
+{
+	T.r[6] = (uint16_t)(T.r[6] - 2);
+	fl::tst(peek(T.r[6]));
+	tick(0xF180, 21);
+	clr_w(0x1600, 0xF184);                             // IRQ_ENABLE: interrupts off
+	clr_b(0x0FE8, 0xF188);
+	// CLR R0 at pc; MOV #pf,PAL_PF(R0); MOV #0xCCCC,PAL_ALPHA(R0); ADD #2,R0; CMP R0,#0x20;
+	// BLE: the palettes
+	auto palettes = [](uint16_t pc, uint16_t pf) {
+		T.r[0] = 0;
+		fl::clr();
+		const uint16_t loop = (uint16_t)(pc + 2);
+		tick(loop, 12);
+		for (;;)
+		{
+			poke((uint16_t)(0x1100 + T.r[0]), pf);
+			fl::mov(pf);
+			tick((uint16_t)(loop + 6), 36);
+			poke((uint16_t)(0x1080 + T.r[0]), 0xCCCC);
+			fl::mov(0xCCCC);
+			tick((uint16_t)(loop + 0x0C), 36);
+			T.r[0] = fl::add(T.r[0], 0x0002);
+			tick((uint16_t)(loop + 0x10), 18);
+			fl::cmp(T.r[0], 0x0020);
+			tick((uint16_t)(loop + 0x14), 18);
+			if ((int16_t)T.r[0] > 0x0020)
+			{
+				tick((uint16_t)(loop + 0x16), 12);     // BLE not taken
+				break;
+			}
+			tick(loop, 12);
+		}
+	};
+	palettes(0xF188, 0xF00F);
+	T.r[2] = 0x0FFE;                                   // the end of the RAM
+	fl::mov(T.r[2]);
+	tick(0xF1A4, 18);
+	T.r[1] = 0;
+	fl::clr();
+	tick(0xF1A6, 12);
+	for (;;)
+	{
+		fl::cmp(T.r[1], 0x0003);
+		tick(0xF1AA, 18);
+		if ((int16_t)T.r[1] > 3)
+		{
+			tick(0xF26E, 12);                          // BGT: all tested
+			break;
+		}
+		tick(0xF1AC, 12);
+		clr_b(0x1800, 0xF1B0);                         // the watchdog
+		fl::tst(T.r[1]);
+		tick(0xF1B2, 12);
+		// TST R1 / BNE or BLE at pc: R4 = the start (0 for the RAM, 0x2000 for video RAM)
+		if (!T.r[1])
+		{
+			tick(0xF1B4, 12);
+			T.r[4] = 0;
+			fl::clr();
+			tick(0xF1B6, 12);
+			tick(0xF1BC, 12);                          // BR
+		}
+		else
+		{
+			tick(0xF1B8, 12);                          // BNE
+			T.r[4] = 0x2000;
+			fl::mov(T.r[4]);
+			tick(0xF1BC, 18);
+		}
+		for (;;)                                       // filled with 0x0101
+		{
+			poke(T.r[4], 0x0101);
+			fl::mov(0x0101);
+			T.r[4] = (uint16_t)(T.r[4] + 2);
+			tick(0xF1C0, 27);
+			fl::cmp(T.r[4], T.r[2]);
+			tick(0xF1C2, 12);
+			if (T.r[4] > T.r[2])
+			{
+				tick(0xF1C4, 12);                      // BLOS not taken
+				break;
+			}
+			tick(0xF1BC, 12);
+		}
+		T.r[3] = 0x0202;
+		fl::mov(T.r[3]);
+		tick(0xF1C8, 18);
+		for (;;)                                       // shifted, eight times
+		{
+			fl::cmp(T.r[3], 0x0100);
+			tick(0xF1CC, 18);
+			if (T.r[3] == 0x0100)
+			{
+				tick(0xF258, 12);                      // BEQ: the next part
+				break;
+			}
+			tick(0xF1CE, 12);
+			clr_b(0x1800, 0xF1D2);
+			fl::tst(T.r[1]);
+			tick(0xF1D4, 12);
+			if ((int16_t)T.r[1] <= 0)
+			{
+				tick(0xF1DC, 12);                      // BLE
+				T.r[4] = 0;
+				fl::clr();
+				tick(0xF1DE, 12);
+			}
+			else
+			{
+				tick(0xF1D6, 12);
+				T.r[4] = 0x2000;
+				fl::mov(T.r[4]);
+				tick(0xF1DA, 18);
+				tick(0xF1DE, 12);                      // BR
+			}
+			for (;;)
+			{
+				fl::cmp(T.r[4], T.r[2]);
+				tick(0xF1E0, 12);
+				if (T.r[4] > T.r[2])
+				{
+					tick(0xF254, 12);                  // BHI
+					break;
+				}
+				tick(0xF1E2, 12);
+				poke(T.r[4], fl::asl(peek(T.r[4])));
+				tick(0xF1E4, 21);
+				fl::cmp(peek(T.r[4]), T.r[3]);
+				tick(0xF1E6, 18);
+				if (peek(T.r[4]) != T.r[3])
+				{
+					// a bad word: the failing chip on the screen, then hang
+					tick(0xF1E8, 12);
+					clr_w(0x1600, 0xF1EC);
+					set_w(0x1102, 0xF00F, 0xF1F2);
+					set_w(0x1106, 0xF00F, 0xF1F8);
+					set_w(0x1082, 0xCCCC, 0xF1FE);
+					clr_b(0x1800, 0xF202);
+					fl::tst(T.r[1]);
+					tick(0xF204, 12);
+					if (!T.r[1])
+						tick(0xF246, 12);              // BEQ: the RAM, no message
+					else
+					{
+						tick(0xF206, 12);
+						T.r[1] = fl::dec(T.r[1]);
+						tick(0xF208, 12);
+						poke(T.r[6], T.r[1]);
+						fl::mov(T.r[1]);
+						tick(0xF20A, 21);
+						T.r[1] = fl::asl(T.r[1]);
+						tick(0xF20C, 12);
+						T.r[1] = fl::asl(T.r[1]);
+						tick(0xF20E, 12);
+						T.r[0] = peek(T.r[6]);
+						fl::mov(T.r[0]);
+						tick(0xF210, 18);
+						T.r[0] = fl::asl(T.r[0]);
+						tick(0xF212, 12);
+						const bool high = fl::logic((uint16_t)(T.r[4] & peek((uint16_t)(T.r[0] - 0x00CA)))) != 0;
+						tick(0xF216, 27);
+						if (!high)
+							tick(0xF21C, 12);          // BEQ
+						else
+						{
+							tick(0xF218, 12);
+							T.r[1] = fl::add(T.r[1], 0x0002);
+							tick(0xF21C, 18);
+						}
+						T.r[5] = peek(T.r[4]);
+						fl::mov(T.r[5]);
+						tick(0xF21E, 18);
+						T.r[5] = fl::logic((uint16_t)(T.r[5] ^ T.r[3]));
+						tick(0xF220, 12);
+						fl::logic(T.r[5] & 0xFF00);
+						tick(0xF224, 18);
+						if (!(T.r[5] & 0xFF00))
+							tick(0xF228, 12);          // BEQ
+						else
+						{
+							tick(0xF226, 12);
+							T.r[1] = fl::inc(T.r[1]);
+							tick(0xF228, 12);
+						}
+						set_w(0x0184, 0x5C04, 0xF22E);
+						set_w(0x0188, 0xE000, 0xF234);
+						T.r[0] = 0;
+						fl::mov(0);
+						tick(0xF238, 18);
+						jsr(0xF23C, 0x8AB6);           // draw_string_large
+						T.r[0] = T.r[1];
+						fl::mov(T.r[0]);
+						tick(0xF23E, 12);
+						T.r[0] = fl::add(T.r[0], 0x0001);
+						tick(0xF242, 18);
+						jsr(0xF246, 0x8AB6);
+					}
+					for (;;)
+					{
+						clr_b(0x1800, 0xF24A);
+						T.r[3] = peek(T.r[4]);
+						fl::mov(T.r[3]);
+						tick(0xF24C, 18);
+						tick(0xF246, 12);              // BR
+					}
+				}
+				tick(0xF24E, 12);                      // BEQ
+				T.r[4] = fl::add(T.r[4], 0x0002);
+				tick(0xF252, 18);
+				tick(0xF1DE, 12);                      // BR
+			}
+			T.r[3] = fl::asl(T.r[3]);
+			tick(0xF256, 12);
+			tick(0xF1C8, 12);                          // BR
+		}
+		T.r[1] = fl::inc(T.r[1]);                      // the next video RAM bank
+		tick(0xF25A, 12);
+		T.r[2] = 0x3FFE;
+		fl::mov(T.r[2]);
+		tick(0xF25E, 18);
+		T.r[0] = T.r[1];
+		fl::mov(T.r[0]);
+		tick(0xF260, 12);
+		T.r[0] = fl::asl(T.r[0]);
+		tick(0xF262, 12);
+		{
+			const uint16_t v = peek((uint16_t)(T.r[0] - 0x00D2));
+			fl::mov(v);
+			poke(0x01D0, v);
+		}
+		tick(0xF268, 42);
+		jsr(0xF26C, 0x8096);                           // reselect_video_bank
+		tick(0xF1A6, 12);                              // BR
+	}
+	clr_b(0x1800, 0xF272);
+	palettes(0xF272, 0x0F0F);
+	clr_b(0x1800, 0xF28E);
+	T.r[0] = 0x0FFE;                                   // RAM 0x0080-0x0FFE cleared
+	fl::mov(T.r[0]);
+	tick(0xF292, 18);
+	for (;;)
+	{
+		poke(T.r[0], 0);
+		fl::clr();
+		tick(0xF294, 21);
+		T.r[0] = fl::sub(T.r[0], 0x0002);
+		tick(0xF298, 18);
+		fl::cmp(T.r[0], 0x0080);
+		tick(0xF29C, 18);
+		if (T.r[0] < 0x0080)
+		{
+			tick(0xF29E, 12);                          // BCC not taken
+			break;
+		}
+		tick(0xF292, 12);
+	}
+	set_w(0x0184, 0x5C04, 0xF2A4);                     // the text table
+	set_w(0x018A, 0x0001, 0xF2AA);
+	jsr(0xF2AE, 0xF3A8);                               // install_selftest_interrupts
+	set_w(0x018C, 0x000C, 0xF2B4);
+	set_w(0x1600, 0x000C, 0xF2BA);                     // IRQ_ENABLE
+	T.r[1] = 0;
+	fl::clr();
+	tick(0xF2BC, 12);
+	mtps(0);                                           // interrupts on
+	tick(0xF2C0, 30);
+	jsr(0xF2C4, 0x8CE8);                               // clear_playfield
+	jsr(0xF2C8, 0x8D2C);                               // clear_playfield_ram
+	jsr(0xF2CC, 0x8D3E);                               // clear_text_ram
+	jsr(0xF2D0, 0xDA74);                               // load_text_palette
+	jsr(0xF2D4, 0xDABA);                               // load_playfield_palette
+	jsr(0xF2D8, 0xDB4E);                               // fade_sprite_palette
+	set_w(0x0188, 0xE000, 0xF2DE);
+	T.r[0] = 0x000E;
+	fl::mov(T.r[0]);
+	tick(0xF2E2, 18);
+	jsr(0xF2E6, 0x8AB6);                               // draw_string_large(0x0E)
+	clr_b(0x01C4, 0xF2EA);                             // the interrupts counted over a loop
+	clr_b(0x0191, 0xF2EE);
+	T.r[0] = 0x4E21;
+	fl::mov(T.r[0]);
+	tick(0xF2F2, 18);
+	for (;;)
+	{
+		T.r[1] = sext8(peekb(0x0FE6));
+		fl::movb((uint8_t)T.r[1]);
+		tick(0xF2F6, 24);
+		T.r[1] = fl::inc(T.r[1]);
+		tick(0xF2F8, 12);
+		pokeb(0x0FE6, (uint8_t)T.r[1]);
+		fl::movb((uint8_t)T.r[1]);
+		tick(0xF2FC, 27);
+		if (--T.r[0] == 0)
+		{
+			tick(0xF2FE, 18);                          // SOB
+			break;
+		}
+		tick(0xF2F2, 18);
+	}
+	// CMPB @#a,#v at pc and a branch: true when it goes to target
+	auto check = [](uint16_t pc, uint16_t a, uint8_t v, bool taken, uint16_t target) {
+		fl::cmpb(peekb(a), v);
+		tick((uint16_t)(pc + 6), 30);
+		tick(taken ? target : (uint16_t)(pc + 8), 12);
+		return taken;
+	};
+	bool bad = check(0xF2FE, 0x0191, 0x42, peekb(0x0191) > 0x42, 0xF31E);              // BHI
+	if (!bad)
+		bad = check(0xF306, 0x0191, 0x36, peekb(0x0191) < 0x36, 0xF31E);           // BCS
+	if (!bad)
+		bad = check(0xF30E, 0x01C4, 0x0B, peekb(0x01C4) > 0x0B, 0xF31E);           // BHI
+	if (!bad)
+		bad = !check(0xF316, 0x01C4, 0x09, peekb(0x01C4) >= 0x09, 0xF342);         // BCC
+	if (bad)
+	{
+		set_w(0x0188, 0xE000, 0xF324);
+		set_w(0x1102, 0x0F0F, 0xF32A);
+		set_w(0x1106, 0x0F0F, 0xF330);
+		set_w(0x1082, 0xCCCC, 0xF336);
+		T.r[0] = 0x000D;
+		fl::mov(T.r[0]);
+		tick(0xF33A, 18);
+		jsr(0xF33E, 0x8AB6);                           // draw_string_large(0x0D)
+		jsr(0xF342, 0xF40A);                           // wait_forever
+	}
+	set_w(0x018C, 0x0008, 0xF348);
+	set_w(0x1600, 0x0008, 0xF34E);                     // IRQ_ENABLE
+	jsr(0xF352, 0xF4D2);                               // selftest_rom_checksums
+	{
+		const uint8_t v = peekb(0x0FE8);
+		fl::tstb(v);
+		tick(0xF356, 24);
+		if (!v)
+			tick(0xF35E, 12);                          // BEQ
+		else
+		{
+			tick(0xF358, 12);
+			set_w(0x0184, 0x5C04, 0xF35E);
+		}
+	}
+	T.r[0] = 0x001F;
+	fl::mov(T.r[0]);
+	tick(0xF362, 18);
+	jsr(0xF366, 0x8AB6);                               // draw_string_large(0x1F)
+	jsr(0xF36A, 0x8D60);                               // wait_button_press
+	jsr(0xF36E, 0xF43C);                               // selftest_loop: does not return
+	drop(0xF36E);
+	rts();
+}
+
 // F:8000 (reset): stack at 0x017E, vector 4 = vector 8; with the test switch on (IN0 bit 15
 // clear) the self test (F:F17E, banks 0x3800 / 0x3C00), otherwise the power-on sequence
 // (F:8156): interrupts off, RAM 0x0080-0x0FFF cleared, video RAM cleared (F:8D2C, F:8CE8),
@@ -7044,8 +7406,8 @@ void reset_entry()
 		poke(0x1402, v);
 		tick(0x8032, 39);
 		slap(0x8032); slap(0x8034);
-		tick(0xF17E, 18);
-		tail_jump(0xF17E);                             // the self test
+		tick(0xF17E, 18);                              // JMP: the power-on test
+		power_on_test();
 		return;
 	}
 	tick(0x8016, 12);
