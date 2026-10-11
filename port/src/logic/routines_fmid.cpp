@@ -13,6 +13,7 @@
 // registers handed to other routines are the original's working registers.
 #include "logic.h"
 #include <cstdio>
+#include <exception>
 
 namespace logic {
 namespace {
@@ -20,6 +21,43 @@ namespace {
 using namespace t11rt;
 
 uint16_t sext8(uint8_t v) { return (uint16_t)(int16_t)(int8_t)v; }
+
+// Cycles: the routines charge the original's exact cost on the path they take (per straight-
+// line part, tools/insn_cycles.py; loops per pass with charge() at the pass's address).  The
+// table charge is the part all paths share: the register-save helper's epilogue for the C
+// routines, otherwise nothing.
+// Every charge is also a point where interrupts may come in (at the address of the routine
+// running, kept in g_pc), so an interrupt falls between the same parts of the routine as in
+// the original (before the part it falls in) instead of after the whole routine.
+uint16_t g_pc = 0;
+struct At {
+	uint16_t saved;
+	explicit At(uint16_t pc) : saved(g_pc) { g_pc = pc; }
+	~At() { g_pc = saved; }
+	At(const At &) = delete;
+	At &operator=(const At &) = delete;
+};
+// Charging n cycles of straight-line code at pc.  The board runs in slices of 50 T-11 cycles
+// and the original lets it run (and takes interrupts) after the instruction that ends a slice,
+// so a part that ends a slice charges up to the slice's end, lets the board run there and
+// then charges the rest (again for every further slice it spans): interrupts and the sound
+// CPU then see the routine's time as in the original (to within an instruction), not the
+// time after the whole part.  An interrupt made pending by the last part is taken first.
+void charge(uint16_t pc, int n)
+{
+	if (T.check_irqs) tick(pc, 0);
+	while (T.icount <= n && !g_atomic)
+	{
+		const int k = T.icount > 0 ? T.icount : 0;
+		n -= k;
+		tick(pc, k);
+	}
+	T.icount -= n;
+}
+void cy(int n) { charge(g_pc, n); }
+// JSR R1,@#F144 / F152 / F162 and the helper's prologue; the epilogues after the body's RTS
+constexpr int IN144 = 30 + 129, IN152 = 30 + 153, IN162 = 30 + 177;
+constexpr int OUT144 = 12 + 18 * 3 + 21, OUT152 = 12 + 18 * 4 + 21, OUT162 = 18 * 5 + 21;
 uint16_t asr(uint16_t v, int n) { return (uint16_t)((int16_t)v >> n); }
 
 // condition codes of the instructions the fl:: helpers do not cover
@@ -51,7 +89,7 @@ void hw_banks(uint16_t a, uint16_t b) { poke(0x1400, a); poke(0x1402, b); }
 // JSR PC,@#addr from the original's call site (ret = the address after it): like logic::call,
 // but the return address on the stack is the original's (the translated JSR does the same).
 //
-// Long loops let interrupts in once per pass (tick, with the cycles the original's pass
+// Long loops let interrupts in once per pass (charge, with the cycles the original's pass
 // costs, at the original's loop address); the stack pointer and registers are the original's
 // there, as an interrupt saves its frame below the stack pointer.
 uint16_t jsr(uint16_t addr, uint16_t ret)
@@ -74,12 +112,14 @@ uint16_t jsr(uint16_t addr, uint16_t ret)
 // a C routine's frame: the stack pointer and R1-R5 are given back at the end
 struct CFrame {
 	uint16_t sp, regs[6];
-	CFrame() : sp(T.r[6])
+	int unwinding;                                      // not when abandoned (Unwound)
+	CFrame() : sp(T.r[6]), unwinding(std::uncaught_exceptions())
 	{
 		for (int i = 1; i < 6; i++) regs[i] = T.r[i];
 	}
 	~CFrame()
 	{
+		if (std::uncaught_exceptions() > unwinding) return;
 		T.r[6] = sp;
 		for (int i = 1; i < 6; i++) T.r[i] = regs[i];
 	}
@@ -110,39 +150,58 @@ uint16_t field9(uint16_t d) { return sext8((uint8_t)(asr(d, 1) >> 8)); }
 // with flag 0x04, and drop the entry unless the slot's flag 0x20 asks to keep it
 void apply_queued_piece_counts()
 {
+	At here(0xB03C);
+	cy(36);
 	const uint8_t pending = peekb(0x0992);
 	fl::tstb(pending);
-	if (!pending) return;
+	if (!pending)
+	{
+		cy(21);
+		return;
+	}
+	cy(18);
 	T.r[2] = 4;
 	do
 	{
+		int c = 39;                                     // F:B046-B04A
 		const uint8_t slot = peekb((uint16_t)(0x0989 + T.r[2]));
 		T.r[1] = sext8(slot);
 		fl::movb(slot);
-		if (!slot) continue;
-		pokeb((uint16_t)(0x04D0 + T.r[1]), peekb((uint16_t)(0x098D + T.r[2])));
-		T.r[4] = fl::add(0x0490, T.r[1]);
-		if (peekb(T.r[4]) & 0x04)
+		if (slot)
 		{
-			T.r[3] = (uint16_t)(T.r[1] + 0x20);
-			push(1);
-			push(T.r[3]);
-			jsr(0xACE6, 0xB06E);
-			ww(T.r[6], 1);
-			push(T.r[3]);
-			jsr(0xAE02, 0xB078);
-			T.r[6] = fl::add(T.r[6], 6);
+			c += 111;                                   // F:B04C-B05C
+			pokeb((uint16_t)(0x04D0 + T.r[1]), peekb((uint16_t)(0x098D + T.r[2])));
+			T.r[4] = fl::add(0x0490, T.r[1]);
+			if (peekb(T.r[4]) & 0x04)
+			{
+				T.r[3] = (uint16_t)(T.r[1] + 0x20);
+				push(1);
+				push(T.r[3]);
+				cy(c + 114);
+				c = 0;
+				jsr(0xACE6, 0xB06E);
+				cy(81);
+				ww(T.r[6], 1);
+				push(T.r[3]);
+				jsr(0xAE02, 0xB078);
+				c += 18;
+				T.r[6] = fl::add(T.r[6], 6);
+			}
+			c += 63;                                    // F:B07C-B084
+			const uint8_t f = (uint8_t)(peekb(T.r[4]) & ~0x40);
+			pokeb(T.r[4], f);
+			f_nzv(nzb(f & 0x20));
+			if (!(f & 0x20))
+			{
+				c += 57;
+				pokeb(0x0992, fl::decb(peekb(0x0992)));
+				pokeb((uint16_t)(0x0989 + T.r[2]), 0);
+				fl::clr();
+			}
 		}
-		const uint8_t f = (uint8_t)(peekb(T.r[4]) & ~0x40);
-		pokeb(T.r[4], f);
-		f_nzv(nzb(f & 0x20));
-		if (!(f & 0x20))
-		{
-			pokeb(0x0992, fl::decb(peekb(0x0992)));
-			pokeb((uint16_t)(0x0989 + T.r[2]), 0);
-			fl::clr();
-		}
+		charge(T.r[2] > 1 ? 0xB046 : 0xB090, c + 18);     // SOB
 	} while (--T.r[2]);
+	cy(21);
 }
 
 // top edge used by F:B092 / F:B120: 0x4F80 - the height table entry 0x5BCC of type R1
@@ -153,71 +212,102 @@ uint16_t type_height(uint16_t type) { return peek((uint16_t)(0x5BCC + 2 * type))
 // objects not shown but on screen with pieces are put in.  Slots 0x0994 down to 0.
 void update_chains_a()
 {
+	At here(0xB092);
+	cy(36);
 	const uint8_t top = peekb(0x0994);
 	T.r[3] = sext8(top);
 	fl::movb(top);
-	if (lt()) return;
+	if (lt())
+	{
+		cy(21);
+		return;
+	}
 	do
 	{
+		int c = 108;                                    // F:B098-B0A8
 		T.r[1] = peekb((uint16_t)(0x0370 + T.r[3]));
 		T.r[2] = peekb((uint16_t)(0x0490 + T.r[3]));
 		uint16_t target = 0;
 		fl::tstb((uint8_t)T.r[2]);
 		if (T.r[2] & 0x02)
 		{
+			c += 24;
 			target = 0xACE6;
 			if (T.r[2] & 0x80)
 			{
+				c += 144;
 				T.r[4] = (uint16_t)(T.r[3] * 2);
 				T.r[0] = (uint16_t)-(uint16_t)(type_height(T.r[1]) - 0x4F80);
 				fl::cmp(peek((uint16_t)(0x0670 + T.r[4])), T.r[0]);
 				if (!lt())
 				{
+					c += 69;
 					T.r[0] = (uint16_t)(T.r[3] * 2);
 					fl::cmp(peek((uint16_t)(0x0630 + T.r[0])), 0xD400);
 					if (!lt()) target = 0;
 				}
 			}
 		}
-		else if (T.r[2] & 0x80)
+		else
 		{
-			const uint8_t pieces = peekb((uint16_t)(0x04D0 + T.r[3]));
-			fl::tstb(pieces);
-			if (pieces)
+			c += 24;
+			if (T.r[2] & 0x80)
 			{
-				T.r[4] = (uint16_t)(T.r[3] * 2);
-				T.r[0] = (uint16_t)-(uint16_t)(type_height(T.r[1]) - 0x4F80);
-				fl::cmp(peek((uint16_t)(0x0670 + T.r[4])), T.r[0]);
-				if (gt())
+				c += 39;
+				const uint8_t pieces = peekb((uint16_t)(0x04D0 + T.r[3]));
+				fl::tstb(pieces);
+				if (pieces)
 				{
-					T.r[0] = (uint16_t)(T.r[3] * 2);
-					fl::cmp(peek((uint16_t)(0x0630 + T.r[0])), 0xD400);
-					if (!lt()) target = 0xAE02;
+					c += 30 + 144;
+					T.r[4] = (uint16_t)(T.r[3] * 2);
+					T.r[0] = (uint16_t)-(uint16_t)(type_height(T.r[1]) - 0x4F80);
+					fl::cmp(peek((uint16_t)(0x0670 + T.r[4])), T.r[0]);
+					if (gt())
+					{
+						c += 69;
+						T.r[0] = (uint16_t)(T.r[3] * 2);
+						fl::cmp(peek((uint16_t)(0x0630 + T.r[0])), 0xD400);
+						if (!lt()) target = 0xAE02;
+					}
 				}
 			}
 		}
 		if (target)
 		{
+			cy(c + 78);
+			c = 0;
 			push(0);
 			push(T.r[3]);
 			jsr(target, target == 0xACE6 ? 0xB0DA : 0xB118);
+			c += (target == 0xACE6 ? 12 : 0) + 24;
 			fl::cmp(rw(T.r[6]), rw((uint16_t)(T.r[6] + 2)));
 			T.r[6] = (uint16_t)(T.r[6] + 4);
 		}
 		T.r[3] = fl::dec(T.r[3]);
-	} while (!lt());
+		const bool more = !lt();
+		charge(more ? 0xB098 : 0xB11E, c + 24);           // DEC, BGE
+		if (!more) break;
+	} while (true);
+	cy(21);
 }
 
 // F:B120 (assembly): the same for the second chains (slot + 0x20) with flag 0x04: visible
 // when y <= 0x5080 (unsigned), y + height >= 0x2000 (unsigned) and x >= 0xD400 (signed)
 void update_chains_b()
 {
+	At here(0xB120);
+	cy(36);
 	const uint8_t top = peekb(0x0994);
 	T.r[3] = sext8(top);
 	fl::movb(top);
-	if (lt()) return;
+	if (lt())
+	{
+		cy(21);
+		return;
+	}
 	do
 	{
+		int c = 108;                                    // F:B126-B136
 		T.r[1] = peekb((uint16_t)(0x0370 + T.r[3]));
 		T.r[2] = peekb((uint16_t)(0x0490 + T.r[3]));
 		uint16_t target = 0;
@@ -225,19 +315,23 @@ void update_chains_b()
 		fl::tstb((uint8_t)T.r[2]);
 		if (T.r[2] & 0x04)
 		{
+			c += 24;
 			target = 0xACE6;
 			if (T.r[2] & 0x80)
 			{
+				c += 69;
 				T.r[0] = w;
 				fl::cmp(peek((uint16_t)(0x0670 + w)), 0x5080);
 				if (!(!fC() && !fZ()))
 				{
+					c += 132;
 					T.r[4] = w;
 					T.r[0] = (uint16_t)(T.r[1] * 2);
 					T.r[4] = (uint16_t)(peek((uint16_t)(0x0670 + w)) + peek((uint16_t)(0x5BCC + T.r[0])));
 					fl::cmp(T.r[4], 0x2000);
 					if (!fC())
 					{
+						c += 69;
 						T.r[0] = w;
 						fl::cmp(peek((uint16_t)(0x0630 + w)), 0xD400);
 						if (!lt()) target = 0;
@@ -245,39 +339,54 @@ void update_chains_b()
 				}
 			}
 		}
-		else if (T.r[2] & 0x80)
+		else
 		{
-			const uint8_t pieces = peekb((uint16_t)(0x04D0 + T.r[3]));
-			fl::tstb(pieces);
-			if (pieces)
+			c += 24;
+			if (T.r[2] & 0x80)
 			{
-				T.r[0] = w;
-				fl::cmp(peek((uint16_t)(0x0670 + w)), 0x5080);
-				if (fC() || fZ())
+				c += 39;
+				const uint8_t pieces = peekb((uint16_t)(0x04D0 + T.r[3]));
+				fl::tstb(pieces);
+				if (pieces)
 				{
-					T.r[4] = w;
-					T.r[0] = (uint16_t)(T.r[1] * 2);
-					T.r[4] = (uint16_t)(peek((uint16_t)(0x0670 + w)) + peek((uint16_t)(0x5BCC + T.r[0])));
-					fl::cmp(T.r[4], 0x2000);
-					if (!fC())
+					c += 69;
+					T.r[0] = w;
+					fl::cmp(peek((uint16_t)(0x0670 + w)), 0x5080);
+					if (fC() || fZ())
 					{
-						T.r[0] = w;
-						fl::cmp(peek((uint16_t)(0x0630 + w)), 0xD400);
-						if (gt()) target = 0xAE02;
+						c += 132;
+						T.r[4] = w;
+						T.r[0] = (uint16_t)(T.r[1] * 2);
+						T.r[4] = (uint16_t)(peek((uint16_t)(0x0670 + w)) + peek((uint16_t)(0x5BCC + T.r[0])));
+						fl::cmp(T.r[4], 0x2000);
+						if (!fC())
+						{
+							c += 69;
+							T.r[0] = w;
+							fl::cmp(peek((uint16_t)(0x0630 + w)), 0xD400);
+							if (gt()) target = 0xAE02;
+						}
 					}
 				}
 			}
 		}
 		if (target)
 		{
+			cy(c + 111);
+			c = 0;
 			push(1);
 			push((uint16_t)(T.r[3] + 0x20));
 			jsr(target, target == 0xACE6 ? 0xB178 : 0xB1C0);
+			c += (target == 0xACE6 ? 12 : 0) + 24;
 			fl::cmp(rw(T.r[6]), rw((uint16_t)(T.r[6] + 2)));
 			T.r[6] = (uint16_t)(T.r[6] + 4);
 		}
 		T.r[3] = fl::dec(T.r[3]);
-	} while (!lt());
+		const bool more = !lt();
+		charge(more ? 0xB126 : 0xB1C6, c + 24);           // DEC, BGE
+		if (!more) break;
+	} while (true);
+	cy(21);
 }
 
 // F:B1EA (assembly): rebuild the sprite pieces of the chains in display list 0x0993 (0 or 1),
@@ -288,6 +397,7 @@ void update_chains_b()
 // Objects with a flag of 0xFD80+list are skipped.
 void build_sprite_pieces()
 {
+	At here(0xB1EA);
 	const uint16_t list = sext8(peekb(0x0993));
 	push(list);                                         // the list is kept on the stack
 	const uint16_t sp = T.r[6];
@@ -297,7 +407,7 @@ void build_sprite_pieces()
 	uint16_t link = T.r[0];
 	while ((int16_t)link >= 0)
 	{
-		// cycles of this object's pass at B1FA, except the piece loops (they tick themselves)
+		// cycles of this object's pass at B1FA, except the piece loops (they charge themselves)
 		int cycles = 12 + 138;                          // BGE, B200-B214
 		T.r[3] = peek(0x0FEE) & 0x001F;
 		T.r[2] = peekb((uint16_t)(0x0490 + T.r[3]));
@@ -393,10 +503,10 @@ void build_sprite_pieces()
 					T.r[4] = (uint16_t)(T.r[5] + 0x3800);
 					if (--T.r[0] == 0)
 					{
-						tick(0xB362, pass);
+						charge(0xB362, pass);
 						break;
 					}
-					tick(0xB2D0, pass + 12);            // BR B2D0
+					charge(0xB2D0, pass + 12);            // BR B2D0
 				}
 			}
 			else
@@ -410,7 +520,7 @@ void build_sprite_pieces()
 					poke((uint16_t)(0x3800 + T.r[4]), (uint16_t)(peek((uint16_t)(0x3800 + T.r[4])) + T.r[2]));
 					T.r[4] = peek((uint16_t)(0x3806 + T.r[4])) & 0x07F8;
 					--T.r[0];
-					tick(T.r[0] ? 0xB354 : 0xB362, 30 + 27 + 18 + 18);   // ADD, MOV, BIC, SOB
+					charge(T.r[0] ? 0xB354 : 0xB362, 30 + 27 + 18 + 18);   // ADD, MOV, BIC, SOB
 					if (!T.r[0]) break;
 				}
 			}
@@ -421,7 +531,7 @@ void build_sprite_pieces()
 		poke(0x0FEE, T.r[5]);
 		fl::mov(T.r[5]);
 		link = T.r[5];
-		tick(0xB1FA, cycles);
+		charge(0xB1FA, cycles);
 	}
 	fl::tst(pop());
 }
@@ -433,6 +543,7 @@ void build_sprite_pieces()
 // reserves end compared, as the original does.
 void move_objects()
 {
+	At here(0xB378);
 	T.r[6] = (uint16_t)(T.r[6] - 4);                    // CMP -(SP),-(SP)
 	const uint16_t at_rate = T.r[6], at_scratch = (uint16_t)(T.r[6] + 2), at_byte = (uint16_t)(T.r[6] - 2);
 	const uint8_t top = peekb(0x0994);
@@ -540,10 +651,10 @@ void move_objects()
 			T.r[5]--;
 			if ((int16_t)T.r[5] < 0)
 			{
-				tick(0xB4B2, cycles);
+				charge(0xB4B2, cycles);
 				break;
 			}
-			tick(0xB384, cycles + 18);                  // JMP B384
+			charge(0xB384, cycles + 18);                  // JMP B384
 		}
 	fl::cmp(rw(at_rate), rw(at_scratch));                // CMP (SP)+,(SP)+
 	T.r[6] = (uint16_t)(T.r[6] + 4);
@@ -557,22 +668,52 @@ void move_objects()
 // scroll; flag 0x80 of 0x0490.  0x0FFC = 0xFF when interrupts are enabled.  Returns slot * 2.
 uint16_t show_object(const Args &a)
 {
+	At here(0xB4B6);
 	CFrame frame;
+	cy(IN152 + 267);
 	frame.save_regs(SAVE_R2_R4, F152_RET);
 	const uint16_t saved_a = peek(0x01D2), saved_b = peek(0x01D4);
 	set_bank_a(0);
 	set_bank_b(0x0400);
 	const uint16_t arg = a.u(0), slot = arg & ~0x0080;
 	if ((int16_t)slot >= (int16_t)sext8(peekb(0x0994)))
+	{
+		cy(39);
 		pokeb(0x0994, (uint8_t)slot);
+	}
 	else
+	{
+		cy(36);
 		for (int16_t i = (int16_t)sext8(peekb(0x0994)); i >= 0; i--)
-			if (peekb((uint16_t)(0x0370 + i)) || (peekb((uint16_t)(0x0490 + i)) & 0x86))
+		{
+			cy(39);
+			bool used = peekb((uint16_t)(0x0370 + i)) != 0;
+			if (!used)
 			{
+				cy(45);
+				used = (peekb((uint16_t)(0x0490 + i)) & 0x86) != 0;
+			}
+			if (used)
+			{
+				cy(39);
 				pokeb(0x0994, (uint8_t)i);
 				break;
 			}
-	pokeb((uint16_t)(0x04D0 + slot), arg == slot ? peekb((uint16_t)(0x5C96 + peekb((uint16_t)(0x0370 + slot)))) : 0);
+			cy(24);
+		}
+	}
+	cy(39);
+	if (arg == slot)
+	{
+		cy(96);
+		pokeb((uint16_t)(0x04D0 + slot), peekb((uint16_t)(0x5C96 + peekb((uint16_t)(0x0370 + slot)))));
+	}
+	else
+	{
+		cy(30);
+		pokeb((uint16_t)(0x04D0 + slot), 0);
+	}
+	cy(306);
 	const uint16_t w = (uint16_t)(slot << 1);
 	poke((uint16_t)(0x0630 + w), (uint16_t)(peek((uint16_t)(0x06F0 + w)) - peek(0x01A8)));
 	const uint16_t sy = peek(0x01AA), y = peek((uint16_t)(0x0730 + w));
@@ -580,7 +721,12 @@ uint16_t show_object(const Args &a)
 	set_c(carry(sy, y));
 	poke((uint16_t)(0x05F0 + w), 0);
 	pokeb((uint16_t)(0x0490 + slot), peekb((uint16_t)(0x0490 + slot)) | 0x80);
-	if (!(T.psw & 0xE0)) pokeb(0x0FFC, 0xFF);
+	if (!(T.psw & 0xE0))
+	{
+		cy(33);
+		pokeb(0x0FFC, 0xFF);
+	}
+	cy(153);
 	restore_banks(saved_a, saved_b);
 	return w;
 }
@@ -590,6 +736,7 @@ uint16_t show_object(const Args &a)
 // i = 4..1), flag the slot (0x60) and count the entry (0x0992).  Interrupts end enabled.
 uint16_t queue_piece_count(const Args &a)
 {
+	At here(0xB602);
 	CFrame frame;
 	frame.save_regs(SAVE_R2_R5, F162_RET);
 	const uint16_t saved_a = peek(0x01D2), saved_b = peek(0x01D4);
@@ -617,6 +764,7 @@ uint16_t queue_piece_count(const Args &a)
 // (0x0988/0x0989 = 0xFF).  Interrupts end enabled.  Returns 0x0995.
 uint16_t clear_objects_and_text(const Args &)
 {
+	At here(0xBA2E);
 	CFrame frame;
 	push(T.r[1]);
 	T.r[1] = 0x00E0;
@@ -626,7 +774,7 @@ uint16_t clear_objects_and_text(const Args &)
 	for (T.r[0] = 0x0370; T.r[0] != 0x0995;)
 	{
 		pokeb(T.r[0]++, 0);
-		tick(T.r[0] != 0x0995 ? 0xBA42 : 0xBA4A, 21 + 18 + 12);     // CLRB (R0)+, CMP, BNE
+		charge(T.r[0] != 0x0995 ? 0xBA42 : 0xBA4A, 21 + 18 + 12);     // CLRB (R0)+, CMP, BNE
 	}
 	poke(0x3BFE, 0x03F8);
 	poke(0x0988, 0xFFFF);
@@ -640,6 +788,7 @@ uint16_t clear_objects_and_text(const Args &)
 // Not for the object queued in 0x0E6A.  Returns the slot.
 uint16_t restart_object_animation(const Args &a)
 {
+	At here(0xC98E);
 	CFrame frame;
 	frame.save_regs(SAVE_R2_R4, F152_RET);
 	const uint16_t saved_a = peek(0x01D2), saved_b = peek(0x01D4);
@@ -683,21 +832,27 @@ uint16_t restart_object_animation(const Args &a)
 // 0x09AA.  Returns the address of its cell entry.
 uint16_t locate_map_object(const Args &)
 {
+	At here(0xBE10);
 	CFrame frame;
+	cy(IN144 + 177);
 	frame.save_regs(SAVE_R2_R3, F144_RET);
 	const uint16_t n = peek(0x09AA);
 	const uint16_t d = peek((uint16_t)(0x0AF8 + 2 * n)) & 0x7FFF;
 	const bool dynamic = (int16_t)n >= 0x40;
+	cy(dynamic ? 96 : 18);
+	cy(114);
 	const uint16_t entry = (uint16_t)((dynamic ? 0x7D00 : 0x7A00) + ((d & 0x01FF) << 1));
 	const uint16_t def = (uint16_t)(field9(d) + peek(entry));
 	poke(0x09B6, def);
 	if (dynamic)
 	{
+		cy(81);
 		poke(0x09B6, (uint16_t)(def + 0x0338));
 		set_c(carry(def, 0x0338));
 	}
 	else
 	{
+		cy(129);
 		const uint16_t rec = (uint16_t)(def << 3);
 		poke(0x09B2, (uint16_t)(rec + 0x6040));
 		set_c(carry(rec, 0x6040));
@@ -711,42 +866,59 @@ uint16_t locate_map_object(const Args &)
 // the others the definition's bit in the bitmap 0x0CF6 (taken).
 uint16_t map_object_state(const Args &)
 {
+	At here(0xBE7C);
 	CFrame frame;
+	cy(IN144 + 129);
 	frame.save_regs(SAVE_R2_R3, F144_RET);
 	const uint16_t d = peek(peek(0x09B2));
 	const bool dynamic = (int16_t)peek(0x09AA) >= 0x40;
+	cy(dynamic ? 96 : 18);
+	cy(30);
 	const uint16_t cell = peek((uint16_t)((dynamic ? 0x7D00 : 0x7A00) + ((d & 0x01FF) << 1)));
 	if ((int16_t)cell < 0)
 	{
+		cy(33);
 		set_c(false);
 		return cell;
 	}
+	cy(108);
 	uint16_t def = (uint16_t)(field9(d) + cell);
-	if (dynamic) def = (uint16_t)(def + 0x0338);
+	if (dynamic)
+	{
+		cy(18);
+		def = (uint16_t)(def + 0x0338);
+	}
+	cy(72);
 	poke(0x09B4, def);
 	const uint8_t prop = peekb((uint16_t)(0x4560 + def));
 	uint16_t r;
 	if (prop & 0x0F)
 	{
+		cy(108);
 		const uint16_t holder = peekb((uint16_t)(0x0E6D + (prop & 0x0F)));
 		const uint16_t self = (uint16_t)(peek(0x09AA) + 1);
+		if (holder) cy(60);
 		if (!holder || holder == self)
 		{
+			cy(24);
 			r = 0;
 			set_c(false);
 		}
 		else
 		{
+			cy(30);
 			r = 1;
 			set_c(holder < self);
 		}
 	}
 	else
 	{
+		cy(162);
 		const uint16_t mask = peekb((uint16_t)(0xFC74 + (def & 7)));
 		r = peekb((uint16_t)(0x0CF6 + asr(def, 3))) & mask;
 		set_c(true);                                    // COM
 	}
+	cy(33);
 	return r;
 }
 
@@ -755,6 +927,7 @@ uint16_t map_object_state(const Args &)
 // with the scroll row 0x0E9B, one more right of column 0x099C).  Returns the column offset index.
 uint16_t map_object_position(const Args &a)
 {
+	At here(0xBF5E);
 	CFrame frame;
 	frame.save_regs(SAVE_R2_R3, F144_RET);
 	const uint16_t cell = peek((uint16_t)(0x0AF8 + 2 * peek(0x09AA))) & 0x01FF;
@@ -776,19 +949,25 @@ uint16_t map_object_position(const Args &a)
 // object is created (F:C4E4)
 void map_object_enters()
 {
+	At here(0xBD78);
+	cy(159);
 	T.r[0] = (uint16_t)(peek(0x09AA) << 1);
 	T.r[4] = peek((uint16_t)(0x0AF8 + T.r[0]));
 	T.r[2] = T.r[4] & 0x01FF;
 	T.r[1] = T.r[2] & 0x000F;
 	fl::cmp(T.r[1], peek(0x0224));
-	if (lt()) return;
+	if (lt()) return cy(21);
+	cy(36);
 	fl::cmp(T.r[1], peek(0x0226));
-	if (gt()) return;
+	if (gt()) return cy(21);
+	cy(66);
 	T.r[0] = T.r[2] & 0x01F0;
 	fl::cmp(T.r[0], peek(0x0228));
-	if (lt()) return;
+	if (lt()) return cy(21);
+	cy(36);
 	fl::cmp(T.r[0], peek(0x022A));
-	if (gt()) return;
+	if (gt()) return cy(21);
+	cy(165);
 	T.r[4] &= 0x7FFF;
 	T.r[2] = (uint16_t)(T.r[2] << 1);
 	T.r[3] = (uint16_t)(field9(T.r[4]) + peek((uint16_t)(0x7A00 + T.r[2])));
@@ -800,28 +979,37 @@ void map_object_enters()
 	fl::cmp(T.r[1], peek(0x0224));
 	if (!gt())
 	{
+		cy(75);
 		fl::cmp(pos(0x5580), peek(0x09A6));
-		if (!fC()) return;
+		if (!fC()) return cy(21);
 	}
+	cy(36);
 	fl::cmp(T.r[1], peek(0x0226));
 	if (!lt())
 	{
+		cy(75);
 		fl::cmp(pos(0x5580), peek(0x09A6));
-		if (fC()) return;
+		if (fC()) return cy(21);
 	}
+	cy(36);
 	fl::cmp(T.r[0], peek(0x022A));
 	if (!lt())
 	{
+		cy(75);
 		fl::cmp(pos(0x4AC0), peek(0x09A4));
-		if (!fC()) return;
+		if (!fC()) return cy(21);
 	}
+	cy(36);
 	fl::cmp(T.r[0], peek(0x0228));
 	if (!gt())
 	{
+		cy(75);
 		fl::cmp(pos(0x4AC0), peek(0x09A4));
-		if (fC()) return;
+		if (fC()) return cy(21);
 	}
+	cy(30);
 	jsr(0xC4E4, 0xBE0E);
+	cy(21);
 }
 
 // F:BF18: release the current map object's definition: its group (properties bits 0-3) is
@@ -829,6 +1017,7 @@ void map_object_enters()
 // 0x1000 / 0x1400.  Returns the bitmap byte index.
 uint16_t release_map_definition(const Args &)
 {
+	At here(0xBF18);
 	CFrame frame;
 	push(T.r[1]);
 	T.r[0] = 0x1000;
@@ -854,7 +1043,9 @@ uint16_t release_map_definition(const Args &)
 // bank A 0x2400) and returns 0.
 uint16_t turn_map_object(const Args &)
 {
+	At here(0xC114);
 	CFrame frame;
+	cy(IN162 + 600);                                    // F:C118-C170
 	frame.save_regs(SAVE_R2_R5, F162_RET);
 	T.r[6] = (uint16_t)(T.r[6] - 0x0C);                 // six locals
 	uint16_t *R = T.r;
@@ -881,17 +1072,29 @@ uint16_t turn_map_object(const Args &)
 	R[2] = (uint16_t)(R[0] - rw(L2));
 	if (R[2])
 	{
+		cy(12);
 		if ((int16_t)R[2] < 0)
 		{
+			cy(60);
 			R[2] = (uint16_t)-R[2];
 			ww(L6, 0xFFFE);
 		}
 		else
+		{
+			cy(36);
 			ww(L6, 0x0002);
-		if ((int16_t)R[2] > 8) ww(L6, (uint16_t)-rw(L6));   // the short way round
+		}
+		cy(30);
+		if ((int16_t)R[2] > 8)
+		{
+			cy(30);
+			ww(L6, (uint16_t)-rw(L6));                          // the short way round
+		}
+		cy(117);
 		ww(L4, (uint16_t)(0x04B0 + R[3]));
 		if (!(peekb(rw(L4)) & 0x01))
 		{
+			cy(213);
 			R[5] = 0;
 			ww((uint16_t)(sp - 2), (uint16_t)(rw(L2) + 0xFDBA));
 			R[5] = peekb(rw((uint16_t)(sp - 2)));
@@ -901,49 +1104,81 @@ uint16_t turn_map_object(const Args &)
 		}
 		else
 		{
+			cy(51);
 			R[5] = (uint16_t)(R[3] << 1);
 			R[2] = peek((uint16_t)(0x03B0 + R[5]));
 		}
+		cy(57);
 		R[2] = (uint16_t)(R[2] + rw(L6));
-		if ((int16_t)peek(R[2]) < 0) R[2] = peek(R[2]) & 0x7FFF;
+		if ((int16_t)peek(R[2]) < 0)
+		{
+			cy(36);
+			R[2] = peek(R[2]) & 0x7FFF;
+		}
+		cy(63);
 		R[5] = R[0] | rw(L2);
 		const bool odd = (R[5] & 1) != 0;
 		R[5] = (uint16_t)(R[5] >> 1);                           // ROR, carry clear
-		if (odd) R[2] = R[1];
+		if (odd)
+		{
+			cy(12);
+			R[2] = R[1];
+		}
+		cy(24);
 		if (R[2] == R[1])
 		{
+			cy(78);
 			R[5] = 0xFF01;
 			pokeb(rw(L4), peekb(rw(L4)) & ~0x01);
 		}
 		else
 		{
+			cy(42);
 			R[1] = R[2];
 			ww(TURNED, (uint16_t)(rw(TURNED) + 1));
 		}
+		cy(39);
 		if (peekb((uint16_t)(0x6502 + R[4])))
 		{
+			cy(39);
 			if (!rw(TURNED))
-				R[1] = peek(R[1]);
-			else if (peekb(rw(L4)) & 0x01)
 			{
-				R[1] = (uint16_t)(R[1] + rw(L6));
-				if ((int16_t)peek(R[1]) < 0) R[1] = peek(R[1]) & 0x7FFF;
+				cy(18);
+				R[1] = peek(R[1]);
+			}
+			else
+			{
+				cy(51);
+				if (peekb(rw(L4)) & 0x01)
+				{
+					cy(57);
+					R[1] = (uint16_t)(R[1] + rw(L6));
+					if ((int16_t)peek(R[1]) < 0)
+					{
+						cy(48);
+						R[1] = peek(R[1]) & 0x7FFF;
+					}
+				}
 			}
 		}
+		cy(63);
 		R[5] = (uint16_t)(R[3] << 1);
 		if (R[1] != peek((uint16_t)(0x03B0 + R[5])))
 		{
+			cy(159);
 			poke((uint16_t)(0x03B0 + R[5]), R[1]);
 			pokeb((uint16_t)(0x0490 + R[3]), peekb((uint16_t)(0x0490 + R[3])) | 0x18);
 			ww((uint16_t)(sp - 2), (uint16_t)(rw(TW) + 0x6110));
 			R[2] = peek(rw((uint16_t)(sp - 2)));
 			if (R[2])
 			{
+				cy(156);
 				ww(L6, (uint16_t)(peekb((uint16_t)(0xFDBA + R[0])) + R[2]));
 				poke((uint16_t)(0x03F0 + R[5]), peek(rw(L6)));
 			}
 		}
 	}
+	cy(327);                                                    // F:C248-C278
 	ww(L2, (uint16_t)(0x0770 + R[3]));
 	R[5] = (uint16_t)(R[3] << 1);
 	ww(L4, (uint16_t)(0x04F0 + R[5]));
@@ -951,12 +1186,19 @@ uint16_t turn_map_object(const Args &)
 	ww(L0, (uint16_t)(0x0430 + R[5]));
 	if (!rw(TURNED))
 	{
+		cy(57);
 		R[2] = sext8(peekb((uint16_t)(0x649D + R[4]))) & 1;    // stands still
-		if (R[2] && (R[0] & 1))
+		if (R[2])
 		{
-			R[2] = 0;
-			pokeb((uint16_t)(0x0490 + R[3]), peekb((uint16_t)(0x0490 + R[3])) & ~0x01);
+			cy(30);
+			if (R[0] & 1)
+			{
+				cy(48);
+				R[2] = 0;
+				pokeb((uint16_t)(0x0490 + R[3]), peekb((uint16_t)(0x0490 + R[3])) & ~0x01);
+			}
 		}
+		cy(531);
 		R[4] = sext8(peekb((uint16_t)(0x65CC + R[4])));
 		ww((uint16_t)(sp - 2), peekb(rw(L2)) & 0x7F);
 		pokeb(rw(L2), (uint8_t)(peekb(rw(L2)) & 0x7F));
@@ -971,32 +1213,41 @@ uint16_t turn_map_object(const Args &)
 		set_bank_a(0x2400);
 		if (!R[2])
 		{
+			cy(288);
 			R[5] = (uint16_t)((R[0] << 3) + R[4]);
 			R[2] = (uint16_t)(R[5] << 1);
 			poke(rw(L4), peek((uint16_t)(0x4138 + R[2])));
 			poke(rw(L6), peek((uint16_t)(0x4238 + R[2])));
 			if (R[1] == 0x18)
+			{
+				cy(63);
 				pokeb(rw(L0), peekb((uint16_t)(0xFD8A + R[4])));
+			}
 			else
 			{
+				cy(99);
 				R[1] = (uint16_t)((R[1] << 3) + R[4]);
 				pokeb(rw(L0), peekb((uint16_t)(0x3FF8 + R[1])));
 			}
+			cy(54);
 			poke(rw(L0), peek(rw(L0)) & 0x00FF);
 		}
 		else
 		{
+			cy(243);
 			R[1] = (uint16_t)(R[1] << 1);
 			poke(rw(L0), (uint16_t)(peek(rw(L0)) + peek((uint16_t)(0x40F8 + R[1]))));
 			poke(rw(L4), 0);
 			poke(rw(L6), 0);
 			pokeb((uint16_t)(0x0490 + R[3]), peekb((uint16_t)(0x0490 + R[3])) | 0x01);
 		}
+		cy(54);
 		pokeb((uint16_t)(0x07D0 + R[3]), (uint8_t)R[0]);
 		R[0] = 0;
 	}
 	else
 	{
+		cy(276);
 		R[0] = 0x1000;
 		set_bank_a(0x1000);
 		R[0] = 0x1400;
@@ -1004,6 +1255,7 @@ uint16_t turn_map_object(const Args &)
 		push(L8);
 		push(LA);
 		jsr(0xBF5E, 0xC37A);
+		cy(681);
 		R[0] = 0x0400;
 		set_bank_a(0);
 		set_bank_b(0x0400);
@@ -1021,6 +1273,7 @@ uint16_t turn_map_object(const Args &)
 		pokeb((uint16_t)(0x04B0 + R[3]), peekb((uint16_t)(0x04B0 + R[3])) | 0x01);
 		R[0] = 1;
 	}
+	cy(39);
 	set_c(carry(sp, 0x10));                             // ADD #0x10,SP
 	return R[0];
 }
@@ -1033,54 +1286,84 @@ uint16_t turn_map_object(const Args &)
 // 0x1400.  Returns the descriptor's bit 15 (0x1400 when not moved).
 uint16_t move_map_object(const Args &)
 {
+	At here(0xBFBC);
 	CFrame frame;
+	cy(IN162 + 96);                                     // F:BFC0-BFCC
 	frame.save_regs(SAVE_R2_R5, F162_RET);
 	T.r[6] = (uint16_t)(T.r[6] - 2);
 	const uint16_t at_desc = T.r[6];
 	T.r[0] = (uint16_t)(peek(0x09AA) << 1);
 	if ((int16_t)peek((uint16_t)(0x0AF8 + T.r[0])) > 0)
+	{
+		cy(30);
 		jsr(0xC0D8, 0xBFD2);
+		cy(12);
+	}
 	else
+	{
+		cy(30);
 		jsr(0xC114, 0xBFD8);
+	}
+	cy(24);
 	const uint16_t r = T.r[0];
 	set_bank_a(0x1000);
 	set_bank_b(0x1400);
 	set_c(false);                                       // TST (SP)+
-	if (r) return 0x1400;
+	if (r)
+	{
+		cy(144 + 39);
+		return 0x1400;
+	}
+	cy(213);
 	const uint16_t old = peek(0x09B6);
 	const uint8_t old_prop = peekb((uint16_t)(0x4560 + old));
 	if (old_prop & 0x0F)
 	{
-		if (!(peekb((uint16_t)(0x4560 + peek(0x09B4))) & 0x0F)) pokeb((uint16_t)(0x0E6D + (old_prop & 0x0F)), 0);
+		cy(114);
+		if (!(peekb((uint16_t)(0x4560 + peek(0x09B4))) & 0x0F))
+		{
+			cy(42);
+			pokeb((uint16_t)(0x0E6D + (old_prop & 0x0F)), 0);
+		}
 	}
 	else
 	{
+		cy(141);
 		const uint16_t i = asr(old, 3);
 		pokeb((uint16_t)(0x0CF6 + i), (uint8_t)(peekb((uint16_t)(0x0CF6 + i)) & ~peekb((uint16_t)(0xFC74 + (old & 7)))));
 	}
+	cy(120);
 	const uint16_t def = peek(0x09B4);
 	const uint16_t w = (uint16_t)(peek(0x09AA) << 1);
 	ww(at_desc, peek((uint16_t)(0x0AF8 + w)));
 	const uint16_t desc = rw(at_desc);
 	if ((int16_t)desc < 0)
 	{
+		cy(144 + 30);
 		const uint16_t slot = sext8(peekb((uint16_t)(0x09B8 + peek(0x09AA)))) & 0x003F;
 		const uint16_t pal = (uint16_t)(0x0470 + slot);
 		const bool want = (peekb((uint16_t)(0x4560 + def)) & 0x20) != 0, has = (peekb(pal) & 0x80) != 0;
 		if (want != has)
 		{
+			cy((want ? 39 : 27) + 36);
 			pokeb(pal, want ? (uint8_t)(peekb(pal) | 0x80) : (uint8_t)(peekb(pal) & ~0x80));
 			pokeb((uint16_t)(0x0490 + slot), peekb((uint16_t)(0x0490 + slot)) | 0x18);
 		}
 	}
+	cy(45);
 	const uint8_t prop = peekb((uint16_t)(0x4560 + def));
 	if (prop & 0x0F)
+	{
+		cy(123);
 		pokeb((uint16_t)(0x0E6D + (prop & 0x0F)), (uint8_t)(peek(0x09AA) + 1));
+	}
 	else
 	{
+		cy(135);
 		const uint16_t i = asr(def, 3);
 		pokeb((uint16_t)(0x0CF6 + i), peekb((uint16_t)(0x0CF6 + i)) | peekb((uint16_t)(0xFC74 + (def & 7))));
 	}
+	cy(141 + 39);
 	const uint16_t word = peek(peek(0x09B2)), keep = desc & 0x8000;
 	poke((uint16_t)(0x0AF8 + w), word);
 	poke((uint16_t)(0x0AF8 + w), peek((uint16_t)(0x0AF8 + w)) | keep);
@@ -1093,7 +1376,9 @@ uint16_t move_map_object(const Args &)
 // Descriptor and slot entry are cleared.  Returns the definition's properties byte (0x4000).
 uint16_t remove_map_object(const Args &a)
 {
+	At here(0xCF5E);
 	CFrame frame;
+	cy(156);                                            // F:CF5E-CF72
 	push(T.r[1]);
 	uint16_t *R = T.r;
 	poke(0x09AA, a.u(0));
@@ -1104,22 +1389,35 @@ uint16_t remove_map_object(const Args &a)
 		R[0] = sext8(peekb((uint16_t)(0x09B8 + R[1]))) & 0x003F;
 		R[1] = peekb((uint16_t)(0x0370 + R[0]));
 		push(R[0]);
+		cy(138);
 		jsr(0xB56E, 0xCF88);
+		cy(30);
 		R[6] = (uint16_t)(R[6] + 2);
 	}
 	else
+	{
+		cy(45);
 		R[1] = sext8(peekb((uint16_t)(0x09B8 + R[1]))) & 0x007F;
+	}
+	cy(30);
 	jsr(0xBF18, 0xCF98);
+	cy(54);
 	R[0] = peek(0x09AA);
 	if ((int16_t)R[0] < 0x40)
+	{
+		cy(42);
 		pokeb((uint16_t)(0x0AB8 + R[0]), 0);
+	}
 	else
 	{
 		R[0] = peek(0x09B6);
 		push(peekb((uint16_t)(0x4000 + R[0])) & 0x0F);
+		cy(120);
 		jsr(0xD348, 0xCFB8);
+		cy(18);
 		R[6] = (uint16_t)(R[6] + 2);
 	}
+	cy(198);
 	const uint16_t k = peek(0x09AA);
 	poke((uint16_t)(0x0AF8 + 2 * k), 0);
 	pokeb((uint16_t)(0x09B8 + k), 0);
@@ -1135,7 +1433,9 @@ uint16_t remove_map_object(const Args &a)
 // left pointing at the descriptor argument on the stack, as in the original.
 uint16_t add_map_object(const Args &a)
 {
+	At here(0xCE24);
 	CFrame frame;
+	cy(IN162 + 372);                                    // F:CE28-CE60
 	frame.save_regs(SAVE_R2_R5, F162_RET);
 	uint16_t *R = T.r;
 	push(peek(0x01D2));
@@ -1151,6 +1451,7 @@ uint16_t add_map_object(const Args &a)
 	R[5] = 0;
 	if (a.u(0) == 0)
 	{
+		cy(81);
 		R[5] = 1;
 		R[2] = 0;
 		R[1] = 0x09AE;
@@ -1158,6 +1459,7 @@ uint16_t add_map_object(const Args &a)
 	}
 	else
 	{
+		cy(87);
 		R[2] = peekb(0x0E98);
 		R[1] = 0x09B0;
 		poke(0x09AA, 0x0040);
@@ -1165,36 +1467,68 @@ uint16_t add_map_object(const Args &a)
 	const bool fixed = R[5] != 0;
 	const uint16_t top = R[1];
 	uint16_t r0;
-	if (jsr(0xBE7C, 0xCE84) != 0)
+	cy(30);
+	const uint16_t state = jsr(0xBE7C, 0xCE84);
+	cy(24);
+	if (state != 0)
 	{
+		cy(183 + 45);
 		restore_banks(rw((uint16_t)(sp + 2)), rw(sp));
 		r0 = 0xFFFF;
 	}
 	else
 	{
 		uint16_t i = R[2];
-		while (peekb((uint16_t)(0x09B8 + i))) i++;
+		for (;;)
+		{
+			cy(39);
+			if (!peekb((uint16_t)(0x09B8 + i))) break;
+			cy(24);
+			i++;
+		}
 		R[2] = i;
 		R[0] = (uint16_t)(i << 1);
 		poke((uint16_t)(0x0AF8 + R[0]), desc);
 		poke(0x09AA, i);
+		cy(126);
 		jsr(0xBE10, 0xCEC0);
+		cy(270);
 		const uint16_t def = peek(0x09B6), byte = asr(def, 3);
 		set_bank_a(0);
 		set_bank_b(0x0400);
 		if (!(peekb((uint16_t)(0x6438 + type)) & 0x02))
+		{
+			cy(63);
 			pokeb((uint16_t)(0x0CF6 + byte), peekb((uint16_t)(0x0CF6 + byte)) | peekb((uint16_t)(0xFC74 + (def & 7))));
-		if (fixed && !(peekb((uint16_t)(0x649D + type)) & 0x80))
-			pokeb((uint16_t)(0x0AB8 + i), (uint8_t)(peekb(0x0E9A) + 8));
+		}
+		cy(24);
+		if (fixed)
+		{
+			cy(39);
+			if (!(peekb((uint16_t)(0x649D + type)) & 0x80))
+			{
+				cy(84);
+				pokeb((uint16_t)(0x0AB8 + i), (uint8_t)(peekb(0x0E9A) + 8));
+			}
+		}
+		cy(213);
 		pokeb((uint16_t)(0x09B8 + i), (uint8_t)type);
 		set_bank_a(0);
 		set_bank_b(0x0400);
 		poke(0x09AA, i);
 		if ((int16_t)i <= (int16_t)peek(top))
 		{
+			cy(18);
 			i = peek(top);
-			while (!peekb((uint16_t)(0x09B8 + i))) i--;
+			for (;;)
+			{
+				cy(39);
+				if (peekb((uint16_t)(0x09B8 + i))) break;
+				cy(24);
+				i--;
+			}
 		}
+		cy(219 + 45);
 		poke(top, i);
 		pokeb(0x0E99, 1);
 		restore_banks(rw((uint16_t)(sp + 2)), rw(sp));
@@ -1210,6 +1544,7 @@ uint16_t add_map_object(const Args &a)
 // Returns the last F:CE24 result.
 uint16_t init_map_objects(const Args &)
 {
+	At here(0xCFD6);
 	CFrame frame;
 	frame.save_regs(SAVE_R2_R3, F144_RET);
 	uint16_t *R = T.r;
@@ -1218,7 +1553,7 @@ uint16_t init_map_objects(const Args &)
 	for (R[0] = 0x09AA; R[0] <= 0x0E9A;)
 	{
 		pokeb(R[0]++, 0);
-		tick(R[0] <= 0x0E9A ? 0xCFE8 : 0xCFF0, 21 + 18 + 12);       // CLRB (R0)+, CMP, BLOS
+		charge(R[0] <= 0x0E9A ? 0xCFE8 : 0xCFF0, 21 + 18 + 12);       // CLRB (R0)+, CMP, BLOS
 	}
 	pokeb(0x0E93, 0);
 	poke(0x09AE, 0xFFFF);
@@ -1236,7 +1571,7 @@ uint16_t init_map_objects(const Args &)
 		jsr(0xCE24, 0xD032);
 		R[1] = (uint16_t)(R[1] + 4);
 		R[6] = (uint16_t)(R[6] + 6);
-		tick(0xD01E, 24 + 12 + 30 + 39 + 30 + 30 + 18 + 18 + 12);   // D01E-D03A without F:CE24
+		charge(0xD01E, 24 + 12 + 30 + 39 + 30 + 30 + 18 + 18 + 12);   // D01E-D03A without F:CE24
 	}
 	restore_banks(R[2], R[3]);
 	set_c(false);
@@ -1250,7 +1585,9 @@ uint16_t init_map_objects(const Args &)
 // the animation counter (unless 0x649D bit 7) and A5:5D08 is told the type.  Banks restored.
 uint16_t map_object_leaves(const Args &)
 {
+	At here(0xC3E6);
 	CFrame frame;
+	cy(IN162 + 312);                                    // F:C3EA-C41C
 	frame.save_regs(SAVE_R2_R5, F162_RET);
 	uint16_t *R = T.r;
 	R[4] = peek(0x01D2);
@@ -1264,24 +1601,32 @@ uint16_t map_object_leaves(const Args &)
 	R[2] = peekb((uint16_t)(0x0370 + R[3]));
 	if (R[2] == 4)
 	{
+		cy(153);
 		restore_banks(R[4], R[5]);
 		set_c(false);
 		return R[0];
 	}
+	cy(45);
 	if (peekb((uint16_t)(0x649D + R[2])) & 0x40)
 	{
+		cy(63);
 		R[0] = (uint16_t)(sext8(peekb(0x0E97)) + 1);
 		pokeb(0x0E97, (uint8_t)R[0]);
 	}
+	cy(45);
 	if (peekb((uint16_t)(0x649D + R[2])) & 0x10)
 	{
+		cy(63);
 		R[0] = (uint16_t)(sext8(peekb(0x0E96)) + 1);
 		pokeb(0x0E96, (uint8_t)R[0]);
 	}
+	cy(45);
 	if (peekb((uint16_t)(0x04B0 + R[3])) & 0x10)
 	{
 		push(peek(0x09AA));
+		cy(66);
 		jsr(0xCF5E, 0xC468);
+		cy(12);
 	}
 	else
 	{
@@ -1290,30 +1635,38 @@ uint16_t map_object_leaves(const Args &)
 		R[0] = (uint16_t)(R[3] << 1);
 		R[1] = peek((uint16_t)(0x0430 + R[0]));
 		push(R[3]);
+		cy(174);
 		jsr(0xB56E, 0xC482);
+		cy(30);
 		if (R[3] == 5)
 		{
 			ww(R[6], 6);
+			cy(57);
 			jsr(0xB56E, 0xC490);
 		}
+		cy(114);
 		R[3] = peek(0x09AA);
 		R[0] = (uint16_t)(R[3] << 1);
 		poke((uint16_t)(0x0AF8 + R[0]), peek((uint16_t)(0x0AF8 + R[0])) & 0x7FFF);
 		if ((int16_t)R[3] < 0x40)
 		{
+			cy(39);
 			if (!(peekb((uint16_t)(0x649D + R[2])) & 0x80))
 			{
+				cy(102);
 				R[1] = asr(R[1], 2);
 				R[0] = peekb(0x0E9A);
 				R[1] = (uint16_t)(R[1] + R[0]);
 				pokeb((uint16_t)(0x0AB8 + R[3]), (uint8_t)R[1]);
 			}
+			cy(123);
 			R[0] = 0x1800;
 			set_bank_a(0x1800);
 			ww(R[6], R[2]);
 			jsr(0x5D08, 0xC4CC);
 		}
 	}
+	cy(171);
 	restore_banks(R[4], R[5]);
 	set_c(false);
 	return R[0];
@@ -1329,7 +1682,9 @@ uint16_t map_object_leaves(const Args &)
 // nothing was created).
 uint16_t create_map_object(const Args &)
 {
+	At here(0xC4E4);
 	CFrame frame;
+	cy(IN162 + 297);                                    // F:C4E8-C514
 	frame.save_regs(SAVE_R2_R5, F162_RET);
 	uint16_t *R = T.r;
 	R[6] = (uint16_t)(R[6] - 0x0E);                      // seven locals
@@ -1340,8 +1695,14 @@ uint16_t create_map_object(const Args &)
 		PY = (uint16_t)(sp + 0x0A), PROPS = (uint16_t)(sp + 0x0C), OFF_A = (uint16_t)(sp + 0x0E), OFF_B = (uint16_t)(sp + 0x10);
 	auto banks_back = [&]() { restore_banks(rw((uint16_t)(sp + 2)), rw(sp)); };
 	auto done = [&]() {
-		set_c(carry(sp, 0x12));                         // ADD #0x12,SP
+		cy(39);                                         // ADD #0x12,SP; RTS
+		set_c(carry(sp, 0x12));
 		return R[0];
+	};
+	auto give_up = [&]() {                              // F:C5B4: nothing created
+		cy(171);
+		banks_back();
+		return done();
 	};
 	poke(0x01D2, 0);
 	poke(0x1400, 0);
@@ -1351,73 +1712,94 @@ uint16_t create_map_object(const Args &)
 	R[2] = sext8(peekb((uint16_t)(0x09B8 + R[0])));      // type
 	if ((int16_t)R[0] >= 0x40)
 	{
+		cy(45);
 		if (peekb((uint16_t)(0x649D + R[2])) & 0x10)
 		{
+			cy(36);
 			R[0] = sext8(peekb(0x0E96));
-			if (!R[0])
-			{
-				banks_back();
-				return done();
-			}
+			if (!R[0]) return give_up();
+			cy(63);
 			R[1] = (uint16_t)(R[0] - 1);
 			pokeb(0x0E96, (uint8_t)R[1]);
 		}
 	}
-	else if (peekb((uint16_t)(0x649D + R[2])) & 0x40)
-	{
-		R[0] = sext8(peekb(0x0E97));
-		if (!R[0])
-		{
-			// none left: count the event and remove the map object (not reached in the tests)
-			if ((int16_t)R[2] < 0x2F)
-			{
-				R[0] = (uint16_t)(R[2] - 0x0A);
-				R[1] = (uint16_t)(R[0] + 0x0B);
-			}
-			else
-			{
-				R[4] = (uint16_t)(R[2] - 0x2F);
-				R[1] = (uint16_t)(R[4] + 0x12);
-			}
-			push(R[1]);
-			jsr(0xD348, 0xC562);
-			ww(R[6], peek(0x09AA));
-			jsr(0xCF5E, 0xC56A);
-			banks_back();
-			R[6] = (uint16_t)(R[6] + 2);
-			return done();
-		}
-		R[1] = (uint16_t)(R[0] - 1);
-		pokeb(0x0E97, (uint8_t)R[1]);
-		R[0] = 0x1800;
-		set_bank_a(0x1800);
-		push(R[2]);
-		jsr(0x5CC0, 0xC588);
-		poke(0x01D2, 0);
-		poke(0x1400, 0);
-		R[6] = (uint16_t)(R[6] + 2);
-	}
-	if (R[2] == 1)
-	{
-		if (peekb(0x0375))
-		{
-			banks_back();
-			return done();
-		}
-		R[3] = 5;
-	}
-	else if (R[2] == 4)
-		R[3] = 7;
 	else
 	{
-		jsr(0xB5B8, 0xC5A8);
-		R[3] = R[0];
-		if ((int16_t)R[3] < 0)
+		cy(45);
+		if (peekb((uint16_t)(0x649D + R[2])) & 0x40)
 		{
-			banks_back();
-			return done();
+			cy(36);
+			R[0] = sext8(peekb(0x0E97));
+			if (!R[0])
+			{
+				// none left: count the event and remove the map object (not reached in the tests)
+				cy(30);
+				if ((int16_t)R[2] < 0x2F)
+				{
+					cy(72);
+					R[0] = (uint16_t)(R[2] - 0x0A);
+					R[1] = (uint16_t)(R[0] + 0x0B);
+				}
+				else
+				{
+					cy(60);
+					R[4] = (uint16_t)(R[2] - 0x2F);
+					R[1] = (uint16_t)(R[4] + 0x12);
+				}
+				push(R[1]);
+				cy(54);
+				jsr(0xD348, 0xC562);
+				cy(63);
+				ww(R[6], peek(0x09AA));
+				jsr(0xCF5E, 0xC56A);
+				cy(18 + 180);
+				banks_back();
+				R[6] = (uint16_t)(R[6] + 2);
+				return done();
+			}
+			cy(177);
+			R[1] = (uint16_t)(R[0] - 1);
+			pokeb(0x0E97, (uint8_t)R[1]);
+			R[0] = 0x1800;
+			set_bank_a(0x1800);
+			push(R[2]);
+			jsr(0x5CC0, 0xC588);
+			cy(72);
+			poke(0x01D2, 0);
+			poke(0x1400, 0);
+			R[6] = (uint16_t)(R[6] + 2);
 		}
 	}
+	cy(30);
+	if (R[2] == 1)
+	{
+		cy(36);
+		if (peekb(0x0375)) return give_up();
+		cy(18);
+		R[3] = 5;
+	}
+	else
+	{
+		cy(30);
+		if (R[2] == 4)
+		{
+			cy(30 + 12);
+			R[3] = 7;
+		}
+		else
+		{
+			cy(30);
+			jsr(0xB5B8, 0xC5A8);
+			cy(12 + 12);
+			R[3] = R[0];
+			if ((int16_t)R[3] < 0)
+			{
+				cy(12);
+				return give_up();
+			}
+		}
+	}
+	cy(333);                                            // F:C5D2-C600
 	pokeb((uint16_t)(0x0370 + R[3]), (uint8_t)R[2]);
 	pokeb((uint16_t)(0x0390 + R[3]), peekb(0x09AA));
 	ww(PAL, (uint16_t)(0x0470 + R[3]));
@@ -1428,11 +1810,14 @@ uint16_t create_map_object(const Args &)
 	{
 		push(OFF_A);
 		push(OFF_B);
+		cy(132);
 		jsr(0xDF40, 0xC612);
+		cy(36);
 		R[6] = (uint16_t)(R[6] + 2);
 	}
 	else
 	{
+		cy(618);                                        // F:C618-C66E
 		R[5] = (uint16_t)(R[3] << 1);
 		ww(PX, (uint16_t)(0x06F0 + R[5]));
 		R[4] = (uint16_t)(R[2] << 1);
@@ -1447,14 +1832,22 @@ uint16_t create_map_object(const Args &)
 		R[0] = 0x1400;
 		set_bank_b(0x1400);
 		jsr(0xBE10, 0xC672);
+		cy(111);
 		pokeb(rw(PAL), peekb(rw(PAL)) | 0x40);
 		R[0] = peek(0x09B6);
-		if (peekb((uint16_t)(0x4560 + R[0])) & 0x20) pokeb(rw(PAL), peekb(rw(PAL)) | 0x80);
+		if (peekb((uint16_t)(0x4560 + R[0])) & 0x20)
+		{
+			cy(42);
+			pokeb(rw(PAL), peekb(rw(PAL)) | 0x80);
+		}
+		cy(30);
 		if (R[2] != 4)
 		{
 			push(OFF_A);
 			push(OFF_B);
+			cy(132);
 			jsr(0xBF5E, 0xC6A0);
+			cy(201);
 			poke(rw(PX), (uint16_t)(peek(rw(PX)) + rw(OFF_A)));
 			poke(rw(PY), (uint16_t)(peek(rw(PY)) + rw(OFF_B)));
 			R[0] = peekb((uint16_t)(peek(0x09B2) + 2));  // the record's direction
@@ -1463,11 +1856,14 @@ uint16_t create_map_object(const Args &)
 		else
 		{
 			push(R[3]);
+			cy(54);
 			jsr(0xE0C2, 0xC6C2);
+			cy(120);
 			ww(OFF_A, peek(rw(PX)));
 			ww(OFF_B, peek(rw(PY)));
 			R[0] = 6;
 		}
+		cy(240);                                        // F:C6D2-C6F4
 		pokeb((uint16_t)(0x07D0 + R[3]), (uint8_t)R[0]);
 		poke(0x01D2, 0);
 		poke(0x1400, 0);
@@ -1476,59 +1872,94 @@ uint16_t create_map_object(const Args &)
 		poke(0x1402, rw(PY));
 		if (peekb(rw(PROPS)) & 0x80)
 		{
+			cy(141);
 			poke((uint16_t)(0x03B0 + R[5]), peek((uint16_t)(0x5F7C + R[4])));
 			poke((uint16_t)(0x03F0 + R[5]), peek((uint16_t)(0x6110 + R[4])));
-			if (peekb(rw(PROPS)) & 0x04) pokeb((uint16_t)(0x04B0 + R[3]), peekb((uint16_t)(0x04B0 + R[3])) | 0x20);
-			if (R[2] == 0x57 && peekb(0x01E7))
+			if (peekb(rw(PROPS)) & 0x04)
 			{
-				ww(PY, 5);
-				pokeb((uint16_t)(0x0790 + R[3]), 5);
-				pokeb(rw(ANIM), 5);
+				cy(36);
+				pokeb((uint16_t)(0x04B0 + R[3]), peekb((uint16_t)(0x04B0 + R[3])) | 0x20);
+			}
+			cy(30);
+			if (R[2] == 0x57)
+			{
+				cy(36);
+				if (peekb(0x01E7))
+				{
+					cy(126);
+					ww(PY, 5);
+					pokeb((uint16_t)(0x0790 + R[3]), 5);
+					pokeb(rw(ANIM), 5);
+				}
 			}
 		}
 		else
 		{
+			cy(213);
 			const uint16_t d = peekb((uint16_t)(0xFDBA + R[0]));
 			ww((uint16_t)(R[6] - 2), (uint16_t)(d + peek((uint16_t)(0x5F7C + R[4]))));
 			ww(PY, rw((uint16_t)(R[6] - 2)));
 			R[1] = peek(rw(PY));
 			if (peekb((uint16_t)(0x6502 + R[2])))
 			{
+				cy(60);
 				R[1] = peek(R[1]);
 				pokeb(rw(ANIM), peekb(rw(ANIM)) | 0x80);
 			}
+			cy(180);
 			poke((uint16_t)(0x03B0 + R[5]), R[1]);
 			R[4] = peek((uint16_t)(0x6110 + R[4]));
 			ww((uint16_t)(R[6] - 2), d);
 			R[4] = (uint16_t)(R[4] + d);
 			poke((uint16_t)(0x03F0 + R[5]), peek(R[4]));
 		}
+		cy(138);
 		R[0] = sext8(peekb((uint16_t)(0x649D + R[2]))) & 1;
 		pokeb((uint16_t)(0x0490 + R[3]), peekb((uint16_t)(0x0490 + R[3])) | (uint8_t)R[0]);
 		R[0] = peekb((uint16_t)(0x623F + R[2]));
-		if (R[0] && R[0] != 6)
+		if (R[0])
 		{
-			R[0] = peek(0x09AA);
-			if ((int16_t)R[0] < 0x40)
+			cy(30);
+			if (R[0] != 6)
 			{
-				R[4] = peekb((uint16_t)(0x0AB8 + R[0]));
-				R[2] = peekb(0x0E9A);
-				R[4] = (uint16_t)(R[4] - R[2]);
-				R[1] = (uint16_t)((R[4] & 0x00FF) << 2);
-				pokeb((uint16_t)(0x0AB8 + R[0]), 0);
+				cy(54);
+				R[0] = peek(0x09AA);
+				if ((int16_t)R[0] < 0x40)
+				{
+					cy(177);
+					R[4] = peekb((uint16_t)(0x0AB8 + R[0]));
+					R[2] = peekb(0x0E9A);
+					R[4] = (uint16_t)(R[4] - R[2]);
+					R[1] = (uint16_t)((R[4] & 0x00FF) << 2);
+					pokeb((uint16_t)(0x0AB8 + R[0]), 0);
+				}
+				else
+				{
+					cy(18);
+					R[1] = 0x0010;
+				}
+				cy(30);
+				poke((uint16_t)(0x0430 + R[5]), R[1]);
 			}
-			else
-				R[1] = 0x0010;
-			poke((uint16_t)(0x0430 + R[5]), R[1]);
 		}
 	}
+	cy(177);                                            // F:C7B2-C7CC
 	poke(0x01D2, 0);
 	poke(0x1400, 0);
 	R[0] = 0x0400;
 	set_bank_b(0x0400);
-	if (peekb(rw(PROPS)) & 0x08) pokeb((uint16_t)(0x04B0 + R[3]), peekb((uint16_t)(0x04B0 + R[3])) | 0x10);
-	ww(R[6], (peekb(rw(PROPS)) & 0x40) ? (uint16_t)(R[3] | 0x0080) : R[3]);
+	if (peekb(rw(PROPS)) & 0x08)
+	{
+		cy(36);
+		pokeb((uint16_t)(0x04B0 + R[3]), peekb((uint16_t)(0x04B0 + R[3])) | 0x10);
+	}
+	cy(51);
+	const bool no_pieces = (peekb(rw(PROPS)) & 0x40) != 0;
+	cy(no_pieces ? 48 : 33);
+	ww(R[6], no_pieces ? (uint16_t)(R[3] | 0x0080) : R[3]);
+	cy(30);
 	jsr(0xB4B6, 0xC7EA);
+	cy(234);                                            // F:C7EA-C810
 	R[0] = peek(0x09AA);
 	R[4] = (uint16_t)(0x09B8 + R[0]);
 	pokeb(R[4], (uint8_t)R[3]);
@@ -1536,11 +1967,21 @@ uint16_t create_map_object(const Args &)
 	poke((uint16_t)(0x0AF8 + R[0]), peek((uint16_t)(0x0AF8 + R[0])) | 0x8000);
 	R[3] = peek((uint16_t)(0x0AF8 + R[0])) & 0x01F0;
 	R[2] = (uint16_t)(peek(0x0228) + 0x20);
-	if (!((int16_t)R[3] < (int16_t)R[2])) pokeb(R[4], peekb(R[4]) | 0x80);
+	if (!((int16_t)R[3] < (int16_t)R[2]))
+	{
+		cy(27);
+		pokeb(R[4], peekb(R[4]) | 0x80);
+	}
+	cy(123);
 	R[2] = (uint16_t)(peek(0x0224) + 2);
 	R[3] = R[2];
 	R[1] = sext8(peekb((uint16_t)(0x0AF8 + R[0]))) & 0x000F;
-	if (R[1] < R[3]) pokeb(R[4], peekb(R[4]) | 0x40);
+	if (R[1] < R[3])
+	{
+		cy(27);
+		pokeb(R[4], peekb(R[4]) | 0x40);
+	}
+	cy(180);
 	banks_back();
 	R[6] = (uint16_t)(R[6] + 2);
 	return done();
@@ -1552,10 +1993,13 @@ uint16_t create_map_object(const Args &)
 // from one side to the other far off screen (beyond 0xC000) leaves (F:C3E6).
 void check_map_object_view()
 {
+	At here(0xBCB8);
+	cy(87);
 	T.r[1] = peek(0x09AA);
 	T.r[0] = (uint16_t)(T.r[1] << 1);
 	if ((int16_t)peek((uint16_t)(0x0AF8 + T.r[0])) < 0)
 	{
+		cy(117);
 		T.r[1] = (uint16_t)(T.r[1] + 0x09B8);
 		T.r[0] = sext8(peekb(T.r[1])) & 0x003F;
 		T.r[2] = (uint16_t)(T.r[0] << 1);
@@ -1563,6 +2007,7 @@ void check_map_object_view()
 		bool leave;
 		if ((int16_t)T.r[0] >= 0)
 		{
+			cy(30 + 39);
 			fl::cmp(T.r[0], 0x4000);
 			const uint8_t b = lt() ? (uint8_t)(peekb(T.r[1]) & ~0x80) : (uint8_t)(peekb(T.r[1]) | 0x80);
 			pokeb(T.r[1], b);
@@ -1570,41 +2015,72 @@ void check_map_object_view()
 		}
 		else
 		{
+			cy(30);
 			fl::cmp(T.r[0], 0xC000);
 			const uint8_t b = peekb(T.r[1]);
-			leave = fC() ? (int8_t)b > 0 : (int8_t)b < 0;
+			if (fC())
+			{
+				cy(30);
+				leave = (int8_t)b > 0;
+			}
+			else
+			{
+				cy(30);
+				leave = (int8_t)b < 0;
+				if (leave) cy(12);
+			}
 		}
 		if (!leave)
 		{
+			cy(93);
 			T.r[0] = peek(0x09AA);
 			T.r[1] = (uint16_t)(0x09B8 + T.r[0]);
 			T.r[0] = peek((uint16_t)(0x0670 + T.r[2]));
 			if ((int16_t)T.r[0] > 0)
 			{
+				cy(30 + 48);
 				fl::cmp(T.r[0], 0x4000);
 				const uint8_t b = lt() ? (uint8_t)(peekb(T.r[1]) & ~0x40) : (uint8_t)(peekb(T.r[1]) | 0x40);
 				pokeb(T.r[1], b);
 				f_nzv(nzb(b));
 				return;
 			}
+			cy(30);
 			fl::cmp(T.r[0], 0xC000);
+			const bool c = fC();
 			const uint8_t b = peekb(T.r[1]);
 			f_nzv(nzb(b & 0x40));
-			if (fC() ? (b & 0x40) != 0 : (b & 0x40) == 0) return;
+			cy(36);
+			if (c ? (b & 0x40) != 0 : (b & 0x40) == 0)
+			{
+				cy(21);
+				return;
+			}
+			if (!c) cy(12);
 		}
+		cy(30);
 		jsr(0xC3E6, 0xBD36);
+		cy(21);
 		return;
 	}
+	cy(30);
 	jsr(0xBD78, 0xBD3C);
+	cy(36);
 	const uint16_t v = peek(0x099A);
 	fl::tst(v);
-	if ((int16_t)v >= 0) return;
+	if ((int16_t)v >= 0)
+	{
+		cy(21);
+		return;
+	}
 	// a second try with the window widened by the scroll margins
+	cy(162);
 	poke(0x0224, (uint16_t)(peek(0x0224) + 0x0C));
 	poke(0x0226, (uint16_t)(peek(0x0226) + 0x0C));
 	poke(0x0228, (uint16_t)(peek(0x0228) - 0x50));
 	poke(0x022A, (uint16_t)(peek(0x022A) - 0x50));
 	jsr(0xBD78, 0xBD5E);
+	cy(156 + 21);
 	poke(0x0224, peek(0x099A));
 	poke(0x0226, peek(0x099C));
 	poke(0x0228, peek(0x0996));
@@ -1617,14 +2093,19 @@ void check_map_object_view()
 // points to (F:BE7C) when that is free: F:BFBC, R0 = 1; otherwise R0 = -1
 void try_map_object_move()
 {
+	At here(0xC850);
+	cy(30);
 	if (jsr(0xBE7C, 0xC854))
 	{
+		cy(24 + 39);
 		fl::tst(T.r[0]);
 		T.r[0] = 0xFFFF;
 		fl::mov(T.r[0]);
 		return;
 	}
+	cy(24 + 30);
 	jsr(0xBFBC, 0xC85C);
+	cy(39);
 	T.r[0] = 1;
 	fl::mov(T.r[0]);
 }
@@ -1634,26 +2115,35 @@ void try_map_object_move()
 // 0-3; definitions without a group always qualify).  Returns 0 when moved, else -1.
 uint16_t try_next_map_definition(const Args &a)
 {
+	At here(0xC868);
 	CFrame frame;
+	cy(87);
 	push(T.r[1]);
 	poke(0x09B2, (uint16_t)(peek(0x09B2) + 4));
+	cy(24);
 	if (jsr(0xBE7C, 0xC874))
 	{
+		cy(30 + 39);
 		set_c(false);
 		return 0xFFFF;
 	}
+	cy(69);
 	T.r[0] = peek(0x09B4);
 	if (peekb((uint16_t)(0x4000 + T.r[0])) & 0x0F)
 	{
+		cy(123);
 		T.r[0] = sext8(peekb((uint16_t)(0x4000 + T.r[0]))) & 0x000F;
 		T.r[1] = peekb((uint16_t)(0xFD91 + T.r[0]));
 		if (T.r[1] != a.u(0))
 		{
+			cy(30 + 39);
 			set_c(T.r[1] < a.u(0));                     // CMP R1,arg
 			return 0xFFFF;
 		}
 	}
+	cy(30);
 	jsr(0xBFBC, 0xC89C);
+	cy(12 + 12 + 39);
 	set_c(false);
 	return 0;
 }
@@ -1666,50 +2156,75 @@ uint16_t try_next_map_definition(const Args &a)
 // 0x0770 bit 7); flag 0x02 of 0x04B0 records whether it moved (R0 = 0) or not.
 void update_map_object_slot()
 {
+	At here(0xCA4C);
+	cy(90);
 	T.r[1] = peek(0x022C);
 	T.r[5] = (uint16_t)(0x04B0 + T.r[1]);
 	if (peekb(T.r[5]) & 0x01)
 	{
-		if (peekb(T.r[5]) & 0x02) poke(0x09B2, (uint16_t)(peek(0x09B2) + 4));
+		cy(36);
+		if (peekb(T.r[5]) & 0x02)
+		{
+			cy(33);
+			poke(0x09B2, (uint16_t)(peek(0x09B2) + 4));
+		}
+		cy(30);
 		jsr(0xBE7C, 0xCA6C);
+		cy(30);
 		jsr(0xBFBC, 0xCA70);
+		cy(21);
 		return;
 	}
+	cy(195);
 	T.r[0] = 0xFFFF;
 	T.r[2] = peek(0x09B6);
 	T.r[3] = asr(T.r[2], 3);
 	T.r[4] = (uint16_t)(0x0DAA + T.r[3]);
 	T.r[3] = T.r[2] & 7;
 	const uint16_t bit = (uint16_t)(0xFC74 + T.r[3]);
+	bool test = true;                                   // through F:CAD2
 	if (!(peekb(T.r[4]) & peekb(bit)))
 	{
+		cy(30);
 		jsr(0xC850, 0xCA98);
+		cy(45);
 		if (peekb((uint16_t)(0x4560 + T.r[2])) & 0x40)
 		{
+			cy(60);
 			pokeb(T.r[4], peekb(T.r[4]) | peekb(bit));
 			if ((int16_t)T.r[0] < 0)
 			{
 				push(peekb((uint16_t)(0x0370 + T.r[1])));
+				cy(90);
 				jsr(0xC868, 0xCAB2);
+				cy(12 + 18);
 				T.r[6] = (uint16_t)(T.r[6] + 2);
 			}
+			else
+				test = false;
 		}
 	}
 	else
 	{
 		pokeb(T.r[4], (uint8_t)(peekb(T.r[4]) & ~peekb(bit)));
 		push(peekb((uint16_t)(0x0370 + T.r[1])));
+		cy(126);
 		jsr(0xC868, 0xCAC2);
+		cy(24);
 		if ((int16_t)T.r[0] < 0)
 		{
+			cy(63);
 			poke(0x09B2, (uint16_t)(peek(0x09B2) - 4));
 			jsr(0xC850, 0xCAD0);
 		}
+		cy(18);
 		T.r[6] = (uint16_t)(T.r[6] + 2);
 	}
+	if (test) cy(24);
 	fl::tst(T.r[0]);
 	if ((int16_t)T.r[0] < 0)
 	{
+		cy(408);
 		poke(0x01D2, 0);
 		poke(0x1400, 0);
 		T.r[0] = 0x0400;
@@ -1727,13 +2242,16 @@ void update_map_object_slot()
 		f_nzv(nzb(f));
 		return;
 	}
+	cy(12);
 	if (!T.r[0])
 	{
+		cy(48);
 		const uint8_t f = peekb(T.r[5]) | 0x02;
 		pokeb(T.r[5], f);
 		f_nzv(nzb(f));
 		return;
 	}
+	cy(72);
 	T.r[0] = 0xFF02;                                    // MOV #0xFFFD,R0; COMB R0
 	const uint8_t f = (uint8_t)(peekb(T.r[5]) & ~0x02);
 	pokeb(T.r[5], f);
@@ -1745,6 +2263,8 @@ void update_map_object_slot()
 // entry); the view window 0x0224-0x022A is taken from 0x0996-0x099C.  Banks 0x1000 / 0x1400.
 void check_map_objects_in_view()
 {
+	At here(0xBC52);
+	cy(330);
 	T.r[0] = 0x1000;
 	set_bank_a(0x1000);
 	T.r[0] = 0x1400;
@@ -1756,13 +2276,31 @@ void check_map_objects_in_view()
 	push(4);
 	do
 	{
+		int c = 126;                                    // F:BC86-BC98
 		poke(0x09AA, peek(0x09AC));
 		poke(0x09AC, (uint16_t)(peek(0x09AC) + 1));
 		T.r[0] = peek(0x09AA);
-		if (T.r[0] != peek(0x09A8) && (int16_t)T.r[0] <= (int16_t)peek(0x09AE) && peekb((uint16_t)(0x09B8 + T.r[0])))
+		bool go = T.r[0] != peek(0x09A8);
+		if (go)
+		{
+			c += 36;
+			go = (int16_t)T.r[0] <= (int16_t)peek(0x09AE);
+		}
+		if (go)
+		{
+			c += 39;
+			go = peekb((uint16_t)(0x09B8 + T.r[0])) != 0;
+		}
+		if (go)
+		{
+			cy(c + 30);
+			c = 0;
 			jsr(0xBCB8, 0xBCAA);
+		}
 		ww(T.r[6], (uint16_t)(rw(T.r[6]) - 1));
+		charge(rw(T.r[6]) ? 0xBC86 : 0xBCAE, c + 33);   // DEC (SP), BNE
 	} while (rw(T.r[6]));
+	cy(72);
 	poke(0x09AC, peek(0x09AC) & 0x003F);
 	fl::tst(pop());
 }
@@ -1774,18 +2312,25 @@ void check_map_objects_in_view()
 // which the original tests on return.
 void tick_map_object_timers()
 {
+	At here(0xC8AA);
+	cy(108);
 	T.r[6] = (uint16_t)(T.r[6] - 2);
 	const uint16_t result = T.r[6];
 	pokeb(0x0E9A, (uint8_t)(peekb(0x0E9A) + 1));
 	T.r[0] = peekb(0x0E9A);
 	if (T.r[0])
 	{
+		cy(51);
 		poke(0x09AA, peek(0x09AE));
 		T.r[1] = T.r[0];
 		for (;;)
 		{
 			T.r[0] = peek(0x09AA);
-			if ((int16_t)T.r[0] < 0) break;
+			if ((int16_t)T.r[0] < 0)
+			{
+				cy(36);
+				break;
+			}
 			// cycles of this pass at C8C2, without the routines it calls
 			int cycles = 99;                            // C8C2-C8D0
 			T.r[4] = peekb((uint16_t)(0x0AB8 + T.r[0]));
@@ -1864,9 +2409,10 @@ void tick_map_object_timers()
 				}
 			}
 			poke(0x09AA, (uint16_t)(peek(0x09AA) - 1));
-			tick(0xC8C2, cycles + 39);                  // C984 DEC, BR C8C2
+			charge(0xC8C2, cycles + 39);                  // C984 DEC, BR C8C2
 		}
 	}
+	cy(39);
 	fl::tst(rw(result));
 	T.r[6] = (uint16_t)(T.r[6] + 2);
 }
@@ -1880,14 +2426,18 @@ void tick_map_object_timers()
 // started (A7:4F42).  The last mode stays in the routine's stack word, tested on return.
 void update_objects()
 {
+	At here(0xCB24);
+	cy(57);                                             // F:CB24-CB2A
 	T.r[6] = (uint16_t)(T.r[6] - 2);
 	const uint16_t mode_at = T.r[6];
 	if (peekb(0x0E68))
 	{
+		cy(39);
 		const uint8_t n = (uint8_t)(peekb(0x0E68) - 1);
 		pokeb(0x0E68, n);
 		if (!n)
 		{
+			cy(174);
 			T.r[0] = 0x3800;
 			set_bank_a(0x3800);
 			T.r[0] = 0x3C00;
@@ -1895,189 +2445,271 @@ void update_objects()
 			jsr(0x4F42, 0xCB4E);
 		}
 	}
+	cy(51);
 	T.r[0] = sext8(peekb(0x0994));
 	poke(0x022C, T.r[0]);
 	auto slot2 = []() { return (uint16_t)(peek(0x022C) << 1); };
-	for (;; poke(0x022C, (uint16_t)(peek(0x022C) - 1)))
+	for (;;)
 	{
+		int c = 54;                                     // F:CB56-CB5E
 		T.r[0] = peek(0x022C);
-		if ((int16_t)T.r[0] < 5) break;
-		T.r[1] = (uint16_t)((T.r[0] << 1) + 0x0430);
-		if (!peek(T.r[1])) continue;
-		const uint16_t count = (uint16_t)(peek(T.r[1]) - 1);
-		poke(T.r[1], count);
-		if ((int16_t)count > 0 && (peekb((uint16_t)(0x04B0 + T.r[0])) & 0x0C)) continue;
-		pokeb((uint16_t)(0x04B0 + T.r[0]), peekb((uint16_t)(0x04B0 + T.r[0])) | 0x08);
-		poke(0x01D2, 0);
-		poke(0x1400, 0);
-		T.r[1] = 0x0400;
-		set_bank_b(0x0400);
-		T.r[1] = peekb((uint16_t)(0x0370 + T.r[0]));
-		ww(mode_at, peekb((uint16_t)(0x623F + T.r[1])));
-		T.r[1] = 0x1000;
-		set_bank_a(0x1000);
-		T.r[1] = 0x1400;
-		set_bank_b(0x1400);
-		pokeb(0x09AA, peekb((uint16_t)(0x0390 + T.r[0])));
-		pokeb(0x09AB, 0);
-		jsr(0xBE10, 0xCBCC);
-		const uint16_t mode = rw(mode_at);
-		T.r[0] = (uint16_t)(mode << 1);
-		switch (mode)
+		if ((int16_t)T.r[0] < 5)
 		{
-		case 0:
-		case 11:
-			T.r[0] = slot2();
-			poke((uint16_t)(0x0430 + T.r[0]), 0);
-			break;
-		case 1:
-			jsr(0xCA4C, 0xCCEA);
-			break;
-		case 2:
-			jsr(0xDE28, 0xCBE4);
-			break;
-		case 3:
-			jsr(0xCA0C, 0xCBEA);
-			jsr(0xCA4C, 0xCCEA);
-			break;
-		case 4:
-			T.r[0] = 0x3800;
-			set_bank_a(0x3800);
-			T.r[0] = 0x3C00;
-			set_bank_b(0x3C00);
-			jsr(0x5018, 0xCC08);
-			break;
-		case 5:
-			T.r[0] = slot2();
-			poke((uint16_t)(0x0430 + T.r[0]), 0x0010);
-			jsr(0xBCB8, 0xCC1A);
-			break;
-		case 6:
-		case 10:
-			poke(0x01D2, 0);
-			poke(0x1400, 0);
-			T.r[0] = 0x0400;
-			set_bank_b(0x0400);
-			T.r[0] = peekb((uint16_t)(0x0370 + peek(0x022C)));
-			if (peekb((uint16_t)(0x649D + T.r[0])) & 0x10)
-			{
-				T.r[0] = (uint16_t)(sext8(peekb(0x0E96)) + 1);
-				pokeb(0x0E96, (uint8_t)T.r[0]);
-			}
-			push(peek(0x09AA));
-			jsr(0xCF5E, 0xCC56);
-			T.r[6] = (uint16_t)(T.r[6] + 2);
-			break;
-		case 7:
-			T.r[0] = sext8(peekb((uint16_t)(0x4000 + peek(0x09B6)))) & 0x000F;
-			T.r[1] = slot2();
-			if (T.r[0] && (peekb(0x0EA4) & peekb((uint16_t)(0xFC73 + T.r[0]))))
-			{
-				poke((uint16_t)(0x03F0 + T.r[1]), 0);
-				jsr(0xCA4C, 0xCCEA);
-			}
-			else
-			{
-				poke((uint16_t)(0x04F0 + T.r[1]), 0);
-				poke((uint16_t)(0x0570 + T.r[1]), 0);
-				poke((uint16_t)(0x0430 + T.r[1]), 0);
-			}
-			break;
-		case 8:
-			T.r[0] = (uint16_t)((sext8(peekb((uint16_t)(0x4000 + peek(0x09B6)))) & 0x000F) << 1);
-			switch (T.r[0] >> 1)
-			{
-			case 0:
-				jsr(0xCA4C, 0xCCEA);
-				break;
-			case 1:
-				poke(0x01D2, 0);
-				poke(0x1400, 0);
-				T.r[0] = 0x0400;
-				set_bank_b(0x0400);
-				T.r[0] = peek(0x022C);
-				T.r[1] = (uint16_t)(T.r[0] << 1);
-				T.r[0] = (uint16_t)((peekb((uint16_t)(0x0370 + T.r[0])) - 0x2B) << 1);
-				poke((uint16_t)(0x03B0 + T.r[1]), peek((uint16_t)(0x5408 + T.r[0])));
-				T.r[0] = 0x1000;
-				set_bank_a(0x1000);
-				T.r[0] = 0x1400;
-				set_bank_b(0x1400);
-				jsr(0xCA4C, 0xCCEA);
-				break;
-			case 2:
-				T.r[0] = peek(0x022C);
-				if (!(peekb((uint16_t)(0x04B0 + T.r[0])) & 0x01))
-				{
-					// another map object on the same cell (descriptor + 0x400, then + 0x600)
-					T.r[0] = (uint16_t)(peek(0x09AA) << 1);
-					push((uint16_t)(peek((uint16_t)(0x0AF8 + T.r[0])) + 0x0400));
-					push(peek(0x09AA));
-					jsr(0xCDD0, 0xCD0E);
-					T.r[1] = T.r[0];
-					bool found = T.r[1] != 0xFFFF;
-					if (!found)
-					{
-						T.r[0] = (uint16_t)(peek(0x09AA) << 1);
-						ww(T.r[6], (uint16_t)(peek((uint16_t)(0x0AF8 + T.r[0])) + 0x0600));
-						push(peek(0x09AA));
-						jsr(0xCDD0, 0xCD2C);
-						T.r[1] = T.r[0];
-						T.r[6] = (uint16_t)(T.r[6] + 2);
-						found = T.r[1] != 0xFFFF;
-					}
-					if (found)
-					{
-						T.r[0] = sext8(peekb((uint16_t)(0x09B8 + T.r[1]))) & 0x003F;
-						if (peekb((uint16_t)(0x0770 + T.r[0])) & 0x80)
-						{
-							ww(T.r[6], T.r[1]);
-							push(4);
-							jsr(0xC98E, 0xCD4E);
-							T.r[0] = (uint16_t)((sext8(peekb((uint16_t)(0x09B8 + T.r[1]))) & 0x003F) << 1);
-							poke((uint16_t)(0x0430 + T.r[0]), 0x0700);
-							T.r[6] = (uint16_t)(T.r[6] + 2);
-						}
-					}
-					T.r[6] = (uint16_t)(T.r[6] + 4);
-				}
-				jsr(0xCA4C, 0xCD66);
-				T.r[0] = peek(0x022C);
-				if (!(peekb((uint16_t)(0x04B0 + T.r[0])) & 0x01))
-				{
-					pokeb((uint16_t)(0x0770 + T.r[0]), peekb((uint16_t)(0x0770 + T.r[0])) | 0x80);
-					T.r[0] = (uint16_t)(T.r[0] << 1);
-					poke((uint16_t)(0x0430 + T.r[0]), 0x7FFF);
-				}
-				break;
-			default:                                    // the table's other entries are not code
-				break;
-			}
-			break;
-		case 9:
-			T.r[0] = peek(0x022C);
-			if (peekb((uint16_t)(0x0490 + T.r[0])) & 0x06)
-			{
-				T.r[0] = (uint16_t)(T.r[0] << 1);
-				poke((uint16_t)(0x0430 + T.r[0]), 0x000F);
-			}
-			else
-			{
-				poke(0x01D2, 0);
-				poke(0x1400, 0);
-				T.r[0] = 0x0400;
-				set_bank_b(0x0400);
-				push(peek(0x09AA));
-				jsr(0xCF5E, 0xCDAA);
-				T.r[0] = (uint16_t)(sext8(peekb(0x0E96)) + 1);
-				pokeb(0x0E96, (uint8_t)T.r[0]);
-				T.r[6] = (uint16_t)(T.r[6] + 2);
-			}
-			break;
-		default:                                        // beyond the jump table (not in 0x623F)
+			cy(c + 18);                                 // JMP F:CDCC
 			break;
 		}
+		c += 72;                                        // F:CB64-CB6E
+		T.r[1] = (uint16_t)((T.r[0] << 1) + 0x0430);
+		bool act = false;
+		if (peek(T.r[1]))
+		{
+			c += 51;                                    // F:CB70-CB74
+			const uint16_t count = (uint16_t)(peek(T.r[1]) - 1);
+			poke(T.r[1], count);
+			act = true;
+			if ((int16_t)count > 0)
+			{
+				c += 45;                                // F:CB76-CB7C
+				act = !(peekb((uint16_t)(0x04B0 + T.r[0])) & 0x0C);
+			}
+		}
+		if (act)
+		{
+			pokeb((uint16_t)(0x04B0 + T.r[0]), peekb((uint16_t)(0x04B0 + T.r[0])) | 0x08);
+			poke(0x01D2, 0);
+			poke(0x1400, 0);
+			T.r[1] = 0x0400;
+			set_bank_b(0x0400);
+			T.r[1] = peekb((uint16_t)(0x0370 + T.r[0]));
+			ww(mode_at, peekb((uint16_t)(0x623F + T.r[1])));
+			T.r[1] = 0x1000;
+			set_bank_a(0x1000);
+			T.r[1] = 0x1400;
+			set_bank_b(0x1400);
+			pokeb(0x09AA, peekb((uint16_t)(0x0390 + T.r[0])));
+			pokeb(0x09AB, 0);
+			cy(c + 510);                                // F:CB7E-CBC8
+			c = 0;
+			jsr(0xBE10, 0xCBCC);
+			c += 57;                                    // dispatch F:CBCC-CBD0
+			const uint16_t mode = rw(mode_at);
+			T.r[0] = (uint16_t)(mode << 1);
+			auto call_ca4c = [&](uint16_t ret) {
+				cy(c + 30);
+				c = 0;
+				jsr(0xCA4C, ret);
+			};
+			switch (mode)
+			{
+			case 0:
+			case 11:
+				c += 78 + 12 + 12;
+				T.r[0] = slot2();
+				poke((uint16_t)(0x0430 + T.r[0]), 0);
+				break;
+			case 1:
+				call_ca4c(0xCCEA);
+				c += 12;
+				break;
+			case 2:
+				cy(c + 30);
+				c = 0;
+				jsr(0xDE28, 0xCBE4);
+				c += 12 + 12 + 12;
+				break;
+			case 3:
+				cy(c + 30);
+				c = 0;
+				jsr(0xCA0C, 0xCBEA);
+				c += 12;
+				call_ca4c(0xCCEA);
+				c += 12;
+				break;
+			case 4:
+				cy(c + 174);
+				c = 0;
+				T.r[0] = 0x3800;
+				set_bank_a(0x3800);
+				T.r[0] = 0x3C00;
+				set_bank_b(0x3C00);
+				jsr(0x5018, 0xCC08);
+				c += 12 + 12;
+				break;
+			case 5:
+				cy(c + 102);
+				c = 0;
+				T.r[0] = slot2();
+				poke((uint16_t)(0x0430 + T.r[0]), 0x0010);
+				jsr(0xBCB8, 0xCC1A);
+				c += 12 + 12;
+				break;
+			case 6:
+			case 10:
+				c += 240;
+				poke(0x01D2, 0);
+				poke(0x1400, 0);
+				T.r[0] = 0x0400;
+				set_bank_b(0x0400);
+				T.r[0] = peekb((uint16_t)(0x0370 + peek(0x022C)));
+				if (peekb((uint16_t)(0x649D + T.r[0])) & 0x10)
+				{
+					c += 63;
+					T.r[0] = (uint16_t)(sext8(peekb(0x0E96)) + 1);
+					pokeb(0x0E96, (uint8_t)T.r[0]);
+				}
+				push(peek(0x09AA));
+				cy(c + 66);
+				c = 0;
+				jsr(0xCF5E, 0xCC56);
+				c += 18 + 30;
+				T.r[6] = (uint16_t)(T.r[6] + 2);
+				break;
+			case 7:
+				c += 129;
+				T.r[0] = sext8(peekb((uint16_t)(0x4000 + peek(0x09B6)))) & 0x000F;
+				T.r[1] = slot2();
+				if (T.r[0]) c += 51;
+				if (T.r[0] && (peekb(0x0EA4) & peekb((uint16_t)(0xFC73 + T.r[0]))))
+				{
+					c += 42;
+					poke((uint16_t)(0x03F0 + T.r[1]), 0);
+					call_ca4c(0xCCEA);
+					c += 12;
+				}
+				else
+				{
+					c += 90 + 12 + 12;
+					poke((uint16_t)(0x04F0 + T.r[1]), 0);
+					poke((uint16_t)(0x0570 + T.r[1]), 0);
+					poke((uint16_t)(0x0430 + T.r[1]), 0);
+				}
+				break;
+			case 8:
+				c += 108;
+				T.r[0] = (uint16_t)((sext8(peekb((uint16_t)(0x4000 + peek(0x09B6)))) & 0x000F) << 1);
+				switch (T.r[0] >> 1)
+				{
+				case 0:
+					call_ca4c(0xCCEA);
+					c += 12;
+					break;
+				case 1:
+					c += 438;
+					poke(0x01D2, 0);
+					poke(0x1400, 0);
+					T.r[0] = 0x0400;
+					set_bank_b(0x0400);
+					T.r[0] = peek(0x022C);
+					T.r[1] = (uint16_t)(T.r[0] << 1);
+					T.r[0] = (uint16_t)((peekb((uint16_t)(0x0370 + T.r[0])) - 0x2B) << 1);
+					poke((uint16_t)(0x03B0 + T.r[1]), peek((uint16_t)(0x5408 + T.r[0])));
+					T.r[0] = 0x1000;
+					set_bank_a(0x1000);
+					T.r[0] = 0x1400;
+					set_bank_b(0x1400);
+					call_ca4c(0xCCEA);
+					c += 12;
+					break;
+				case 2:
+					c += 69;
+					T.r[0] = peek(0x022C);
+					if (!(peekb((uint16_t)(0x04B0 + T.r[0])) & 0x01))
+					{
+						// another map object on the same cell (descriptor + 0x400, then + 0x600)
+						T.r[0] = (uint16_t)(peek(0x09AA) << 1);
+						push((uint16_t)(peek((uint16_t)(0x0AF8 + T.r[0])) + 0x0400));
+						push(peek(0x09AA));
+						cy(c + 168);
+						c = 0;
+						jsr(0xCDD0, 0xCD0E);
+						c += 42;
+						T.r[1] = T.r[0];
+						bool found = T.r[1] != 0xFFFF;
+						if (!found)
+						{
+							T.r[0] = (uint16_t)(peek(0x09AA) << 1);
+							ww(T.r[6], (uint16_t)(peek((uint16_t)(0x0AF8 + T.r[0])) + 0x0600));
+							push(peek(0x09AA));
+							cy(c + 165);
+							c = 0;
+							jsr(0xCDD0, 0xCD2C);
+							c += 60;
+							T.r[1] = T.r[0];
+							T.r[6] = (uint16_t)(T.r[6] + 2);
+							found = T.r[1] != 0xFFFF;
+						}
+						if (found)
+						{
+							c += 84;
+							T.r[0] = sext8(peekb((uint16_t)(0x09B8 + T.r[1]))) & 0x003F;
+							if (peekb((uint16_t)(0x0770 + T.r[0])) & 0x80)
+							{
+								ww(T.r[6], T.r[1]);
+								push(4);
+								cy(c + 81);
+								c = 0;
+								jsr(0xC98E, 0xCD4E);
+								c += 111;
+								T.r[0] = (uint16_t)((sext8(peekb((uint16_t)(0x09B8 + T.r[1]))) & 0x003F) << 1);
+								poke((uint16_t)(0x0430 + T.r[0]), 0x0700);
+								T.r[6] = (uint16_t)(T.r[6] + 2);
+							}
+						}
+						c += 24;
+						T.r[6] = (uint16_t)(T.r[6] + 4);
+					}
+					cy(c + 30);
+					c = 0;
+					jsr(0xCA4C, 0xCD66);
+					c += 69;
+					T.r[0] = peek(0x022C);
+					if (!(peekb((uint16_t)(0x04B0 + T.r[0])) & 0x01))
+					{
+						c += 84 + 12;
+						pokeb((uint16_t)(0x0770 + T.r[0]), peekb((uint16_t)(0x0770 + T.r[0])) | 0x80);
+						T.r[0] = (uint16_t)(T.r[0] << 1);
+						poke((uint16_t)(0x0430 + T.r[0]), 0x7FFF);
+					}
+					break;
+				default:                                // the table's other entries are not code
+					break;
+				}
+				break;
+			case 9:
+				c += 69;
+				T.r[0] = peek(0x022C);
+				if (peekb((uint16_t)(0x0490 + T.r[0])) & 0x06)
+				{
+					c += 72;
+					T.r[0] = (uint16_t)(T.r[0] << 1);
+					poke((uint16_t)(0x0430 + T.r[0]), 0x000F);
+				}
+				else
+				{
+					poke(0x01D2, 0);
+					poke(0x1400, 0);
+					T.r[0] = 0x0400;
+					set_bank_b(0x0400);
+					push(peek(0x09AA));
+					cy(c + 192);
+					c = 0;
+					jsr(0xCF5E, 0xCDAA);
+					c += 63 + 30;
+					T.r[0] = (uint16_t)(sext8(peekb(0x0E96)) + 1);
+					pokeb(0x0E96, (uint8_t)T.r[0]);
+					T.r[6] = (uint16_t)(T.r[6] + 2);
+				}
+				break;
+			default:                                    // beyond the jump table (not in 0x623F)
+				break;
+			}
+		}
+		else
+			c += 12 + 12;                               // F:CC1A, F:CCEA
+		poke(0x022C, (uint16_t)(peek(0x022C) - 1));
+		charge(0xCB56, c + 45);                           // F:CDC4-CDC8 DEC, JMP
 	}
+	cy(39);
 	fl::tst(rw(mode_at));
 	T.r[6] = (uint16_t)(T.r[6] + 2);
 }
@@ -2097,21 +2729,26 @@ struct Irq32v {
 		poke(0x15C0, 0);                                // acknowledge
 		pokeb(0x0191, (uint8_t)(peekb(0x0191) + 1));
 	}
+	int unwinding = std::uncaught_exceptions();
 	~Irq32v()
 	{
+		if (std::uncaught_exceptions() > unwinding) return;
 		T.r[6] = (uint16_t)(T.r[6] + 6);
 		for (int i = 5; i >= 0; i--) T.r[i] = pop();
 	}
 	Irq32v(const Irq32v &) = delete;
 	Irq32v &operator=(const Irq32v &) = delete;
 	// false when a handler is already running (this one only reselects the video bank)
-	bool enter(uint16_t ret_8096, uint16_t ret_8068)
+	bool enter(uint16_t ret_8096, uint16_t ret_8068, int to_exit)
 	{
 		if (peekb(0x0FED))
 		{
+			cy(30);
 			jsr(0x8096, ret_8096);
+			cy(to_exit + 150);                          // JMP / BR to the exit; registers back, RTI
 			return false;
 		}
+		cy(216);                                        // up to and with JSR F:8068
 		pokeb(0x0FED, (uint8_t)(peekb(0x0FED) + 1));
 		ww((uint16_t)(T.r[6] + 4), peek(0x01D2));
 		ww((uint16_t)(T.r[6] + 2), peek(0x01D4));
@@ -2124,12 +2761,14 @@ struct Irq32v {
 	}
 	void leave(uint16_t ret)
 	{
+		cy(225);                                        // banks back, JSR F:8096
 		poke(0x01D0, rw(T.r[6]));
 		poke(0x01D2, rw((uint16_t)(T.r[6] + 4)));
 		poke(0x1400, peek(0x01D2));
 		poke(0x01D4, rw((uint16_t)(T.r[6] + 2)));
 		poke(0x1402, peek(0x01D4));
 		jsr(0x8096, ret);
+		cy(27 + 150);                                   // DECB 0x0FED; registers back, RTI
 		pokeb(0x0FED, (uint8_t)(peekb(0x0FED) - 1));
 	}
 };
@@ -2139,26 +2778,41 @@ struct Irq32v {
 // quarter 4 rebuilds list 0 and updates the first chains (F:B092)
 void irq_32v_sprites()
 {
+	At here(0xB8FC);
 	Irq32v irq;
-	if (!irq.enter(0xB91E, 0xB93E)) return;
+	cy(252);                                            // F:B8FC-B918
+	if (!irq.enter(0xB91E, 0xB93E, 12)) return;
+	cy(102);
 	const uint8_t quarter = peekb(0x0191);
 	if (quarter == 1)
 	{
+		cy(63);
 		pokeb(0x0993, 1);
 		jsr(0xB1C8, 0xB95A);
+		cy(30);
 		jsr(0xB1EA, 0xB95E);
+		cy(90);
 		hw_banks(0, 0x0400);
 		jsr(0xB378, 0xB96C);
+		cy(90);
 		hw_banks(0, 0x0400);
 		jsr(0xB120, 0xB97A);
+		cy(12);
 	}
-	else if (quarter == 4)
+	else
 	{
-		pokeb(0x0993, 0);
-		jsr(0xB1C8, 0xB98C);
-		jsr(0xB1EA, 0xB990);
-		hw_banks(0, 0x0400);
-		jsr(0xB092, 0xB99E);
+		cy(42);
+		if (quarter == 4)
+		{
+			cy(57);
+			pokeb(0x0993, 0);
+			jsr(0xB1C8, 0xB98C);
+			cy(30);
+			jsr(0xB1EA, 0xB990);
+			cy(90);
+			hw_banks(0, 0x0400);
+			jsr(0xB092, 0xB99E);
+		}
 	}
 	irq.leave(0xB9BE);
 }
@@ -2173,132 +2827,239 @@ void irq_32v_sprites()
 // single-steps them.
 void irq_32v_game()
 {
+	At here(0xB66E);
 	Irq32v irq;
-	if (!irq.enter(0xB690, 0xB6B2)) return;
+	cy(252);                                            // F:B66E-B68A
+	if (!irq.enter(0xB690, 0xB6B2, 18)) return;
+	cy(102);
 	const uint8_t quarter = peekb(0x0191);
 	if (quarter == 1)
 	{
+		cy(75);
 		pokeb(0x0993, 1);
 		if (peekb(0x0193) & 0x01)
 		{
+			cy(108);
 			poke(0x0180, 1);
 			pokeb(0x0995, 1);
 			if (peekb(0x0193) & 0x04)
 			{
+				cy(63);
 				pokeb(0x0FEB, (uint8_t)(peekb(0x0FEB) - 1));
-				if (!peekb(0x0FEA) || !peekb(0x0FEB))
+				bool reset = true;
+				if (peekb(0x0FEA))
 				{
+					cy(36);
+					reset = !peekb(0x0FEB);
+				}
+				if (reset)
+				{
+					cy(96);
 					pokeb(0x0FEA, 1);
 					pokeb(0x0995, 0);
-					if (!peekb(0x0FEB)) pokeb(0x0FEB, 2);
+					if (!peekb(0x0FEB))
+					{
+						cy(45);
+						pokeb(0x0FEB, 2);
+					}
 				}
 			}
 			else
 			{
+				cy(72);
 				pokeb(0x0FEB, 0x3C);
 				pokeb(0x0FEA, 0);
 			}
 		}
 		else
+		{
+			cy(27);
 			pokeb(0x0995, 0);
+		}
+		cy(30);
 		jsr(0xB1C8, 0xB722);
+		cy(36);
 		if (!peekb(0x0995))
 		{
+			cy(30);
 			jsr(0xB03C, 0xB72C);
+			cy(30);
 			jsr(0xB1EA, 0xB730);
+			cy(60);
 			hw_banks(0, 0x0400);
 		}
+		cy(42);
 		if (peek(0x01C4) & 1)
+		{
+			cy(30);
 			jsr(0xB120, 0xB746);
-		else if (!(peek(0x01C4) & 3))
-			jsr(0xAF32, 0xB754);
+			cy(12);
+		}
+		else
+		{
+			cy(42);
+			if (!(peek(0x01C4) & 3))
+			{
+				cy(30);
+				jsr(0xAF32, 0xB754);
+			}
+		}
+		cy(36);
 		if (!peekb(0x0995))
 		{
+			cy(42);
 			if (peekb(0x018F) != 4)
 			{
+				cy(42);
 				if (peekb(0x0F59) != 7)
 				{
+					cy(174);
 					T.r[0] = 0x2400;
 					set_bank_a(0x2400);
 					T.r[0] = 0x2800;
 					set_bank_b(0x2800);
 					jsr(0x7942, 0xB786);
 				}
+				cy(30);
 				jsr(0xE254, 0xB78A);
+				cy(102);
 				T.r[0] = 0x3800;
 				set_bank_a(0x3800);
 				jsr(0x4098, 0xB79A);
+				cy(60);
 				hw_banks(0, 0x0400);
 			}
+			cy(90);
 			hw_banks(0, 0x0400);
 			jsr(0xB378, 0xB7B2);
 		}
+		cy(18);
 	}
-	else if (quarter == 4)
+	else
 	{
-		pokeb(0x0993, 0);
-		jsr(0xB1C8, 0xB7C6);
-		if (!peekb(0x0995))
+		cy(42);
+		if (quarter == 4)
 		{
-			jsr(0xAFF0, 0xB7D0);
-			jsr(0xB1EA, 0xB7D4);
-			hw_banks(0, 0x0400);
-		}
-		T.r[0] = (uint16_t)(peek(0x01C4) + 1);
-		if (T.r[0] & 1)
-			jsr(0xB092, 0xB7EE);
-		else if (!(T.r[0] & 3))
-			jsr(0xAF32, 0xB7FA);
-		if (peekb(0x018F) != 4 && !peekb(0x0995))
-		{
-			if (peekb(0x031F) == 5)
+			cy(57);
+			pokeb(0x0993, 0);
+			jsr(0xB1C8, 0xB7C6);
+			cy(36);
+			if (!peekb(0x0995))
 			{
-				T.r[0] = 0x1800;
-				set_bank_a(0x1800);
-				T.r[0] = 0x1C00;
-				set_bank_b(0x1C00);
-				jsr(0x792A, 0xB8B6);
+				cy(30);
+				jsr(0xAFF0, 0xB7D0);
+				cy(30);
+				jsr(0xB1EA, 0xB7D4);
+				cy(60);
+				hw_banks(0, 0x0400);
+			}
+			cy(66);
+			T.r[0] = (uint16_t)(peek(0x01C4) + 1);
+			if (T.r[0] & 1)
+			{
+				cy(30);
+				jsr(0xB092, 0xB7EE);
+				cy(12);
 			}
 			else
 			{
-				if (peekb(0x0EA0) & 0x80) jsr(0xD566, 0xB81A);
-				if (peekb(0x0EA0))
-					jsr(0xD632, 0xB868);
-				else
+				cy(30);
+				if (!(T.r[0] & 3))
 				{
-					jsr(0x934C, 0xB824);
-					T.r[0] = 0x1800;
-					set_bank_a(0x1800);
-					bool usual = true;
-					if (peekb(0x0F59) == 3 && jsr(0x58D0, 0xB83C) == 0)
+					cy(30);
+					jsr(0xAF32, 0xB7FA);
+				}
+			}
+			cy(42);
+			if (peekb(0x018F) != 4)
+			{
+				cy(36);
+				if (!peekb(0x0995))
+				{
+					cy(42);
+					if (peekb(0x031F) == 5)
 					{
-						jsr(0x944C, 0xB844);
+						cy(174);
 						T.r[0] = 0x1800;
 						set_bank_a(0x1800);
-						jsr(0x5A50, 0xB854);
-						usual = false;
+						T.r[0] = 0x1C00;
+						set_bank_b(0x1C00);
+						jsr(0x792A, 0xB8B6);
 					}
-					if (usual)
+					else
 					{
-						jsr(0x94DC, 0xB85A);
-						jsr(0x944C, 0xB85E);
+						cy(36);
+						if (peekb(0x0EA0) & 0x80)
+						{
+							cy(30);
+							jsr(0xD566, 0xB81A);
+							cy(24);
+						}
+						cy(12);
+						if (peekb(0x0EA0))
+						{
+							cy(30);
+							jsr(0xD632, 0xB868);
+						}
+						else
+						{
+							cy(30);
+							jsr(0x934C, 0xB824);
+							cy(114);
+							T.r[0] = 0x1800;
+							set_bank_a(0x1800);
+							bool usual = true;
+							if (peekb(0x0F59) == 3)
+							{
+								cy(30);
+								const uint16_t r = jsr(0x58D0, 0xB83C);
+								cy(24);
+								if (r == 0)
+								{
+									cy(30);
+									jsr(0x944C, 0xB844);
+									cy(102);
+									T.r[0] = 0x1800;
+									set_bank_a(0x1800);
+									jsr(0x5A50, 0xB854);
+									cy(12);
+									usual = false;
+								}
+							}
+							if (usual)
+							{
+								cy(30);
+								jsr(0x94DC, 0xB85A);
+								cy(30);
+								jsr(0x944C, 0xB85E);
+							}
+							cy(30);
+							jsr(0x979A, 0xB862);
+							cy(12);
+						}
+						cy(30);
+						jsr(0x9A32, 0xB86C);
+						cy(174);
+						T.r[0] = 0x1800;
+						set_bank_a(0x1800);
+						T.r[0] = 0x1C00;
+						set_bank_b(0x1C00);
+						jsr(0x7854, 0xB888);
+						cy(102);
+						T.r[0] = 0x1800;
+						set_bank_a(0x1800);
+						jsr(0x4A2A, 0xB898);
+						cy(12);
 					}
-					jsr(0x979A, 0xB862);
+					cy(102);
+					T.r[0] = 0x1800;
+					set_bank_a(0x1800);
+					jsr(0x5166, 0xB8C6);
 				}
-				jsr(0x9A32, 0xB86C);
-				T.r[0] = 0x1800;
-				set_bank_a(0x1800);
-				T.r[0] = 0x1C00;
-				set_bank_b(0x1C00);
-				jsr(0x7854, 0xB888);
-				T.r[0] = 0x1800;
-				set_bank_a(0x1800);
-				jsr(0x4A2A, 0xB898);
 			}
-			T.r[0] = 0x1800;
-			set_bank_a(0x1800);
-			jsr(0x5166, 0xB8C6);
 		}
+		else
+			cy(18);
 	}
 	irq.leave(0xB8E6);
 }
@@ -2317,191 +3078,338 @@ constexpr uint16_t POW10 = 0xBA6A;                     // 10^n at 0xBA6A + 4n (h
 uint16_t print_number(const Args &a, uint16_t font)
 {
 	CFrame frame;
+	cy(33 + 177);                                       // JSR R1,F162 (PC-relative) and its prologue
 	frame.save_regs(SAVE_R2_R5, F162_RET);
-	T.r[0] = font;
-	push(font);
-	jsr(0x8068, 0xBAA8);
-	uint16_t r0, r1, r2 = a.u(4), r3 = a.u(3), r4 = pop(), r5;
-	r4 = (uint16_t)(r4 | (a.u(2) & 0x00FF));
-	if ((uint8_t)r4 > 10) r4 = (uint16_t)((r4 & 0xFF00) | 10);
-	r5 = sext8((uint8_t)r4);
-	r0 = sext8((uint8_t)a.u(1));
-	if (!(r0 & 0x00FF)) r0 = 0x8001;
-	r5 = (uint16_t)(r5 - r0);
-	r1 = (uint16_t)((sext8((uint8_t)r4) << 2) + POW10);
-	const bool large = (r4 & 0x8000) != 0;
-	const bool separators = a.u(0) != 0;
-
-	auto pow10 = [](uint16_t p) { return ((uint32_t)peek(p) << 16) | peek((uint16_t)(p + 2)); };
-	uint32_t v = ((uint32_t)r3 << 16) | r2;
-	if (v >= pow10(r1))
-	{
-		// too many digits: keep the low ones (value modulo 10^digits)
-		r5 &= 0xFF00;
-		r0 = r1;
-		bool reduce = false;
-		for (;;)
-		{
-			if (r1 > 0xBA8E) break;
-			if (r1 == 0xBA8E) { reduce = true; break; }
-			r1 = (uint16_t)(r1 + 4);
-			if (pow10(r1) > v) break;
-		}
-		for (;;)
-		{
-			if (reduce)
-			{
-				const uint32_t p = pow10(r1);
-				while (v >= p) v -= p;
-			}
-			reduce = true;
-			r1 = (uint16_t)(r1 - 4);
-			if (r1 < r0)
-			{
-				r1 = (uint16_t)(r1 + 4);
-				break;
-			}
-		}
-		r2 = (uint16_t)v;
-		r3 = (uint16_t)(v >> 16);
-	}
-
-	// the character routines, called with the original's registers from its call sites
+	const uint16_t H = T.r[6];
+	auto arg = [&](int off) { return rw((uint16_t)(H + off)); };
+	uint16_t r0 = font, r1 = T.r[1], r2 = T.r[2], r3 = T.r[3], r4 = T.r[4], r5 = T.r[5];
+	// the character routines get the original's registers
 	auto put = [&](uint16_t routine, uint16_t ret, uint16_t c) {
+		cy(33);                                         // JSR PC,... (PC-relative)
 		T.r[0] = c;
 		T.r[1] = r1; T.r[2] = r2; T.r[3] = r3; T.r[4] = r4; T.r[5] = r5;
 		jsr(routine, ret);
 		r0 = T.r[0];
 		r1 = T.r[1]; r2 = T.r[2]; r3 = T.r[3]; r4 = T.r[4]; r5 = T.r[5];
 	};
+	// DECB R4 and the condition codes BGT / BGE test
+	bool n = false, z = false, v = false;
+	auto decb_r4 = [&]() {
+		const uint8_t b = (uint8_t)r4, d = (uint8_t)(b - 1);
+		r4 = (uint16_t)((r4 & 0xFF00) | d);
+		n = (d & 0x80) != 0;
+		z = d == 0;
+		v = b == 0x80;
+	};
+	// [R3:R2] -= the power of ten at R1 while it does not borrow (F:BB0A / F:BB32 loops); the
+	// failing subtraction is undone.  extra: cycles of the INC R0 in front of each try
+	auto divide = [&](int extra) {
+		uint16_t q = 0;
+		for (;;)
+		{
+			cy(extra + 27 + 12 + 12);                   // (INC R0,) SUB 2(R1),R2; SBC R3; BCS
+			if (extra) q++;
+			const uint16_t lo = peek((uint16_t)(r1 + 2)), hi = peek(r1);
+			const bool b1 = r2 < lo;
+			r2 = (uint16_t)(r2 - lo);
+			bool b2 = false;
+			if (b1)
+			{
+				b2 = r3 == 0;
+				r3 = (uint16_t)(r3 - 1);
+			}
+			if (b2) break;
+			cy(18 + 12);                                // SUB (R1),R3; BCC
+			const bool b3 = r3 < hi;
+			r3 = (uint16_t)(r3 - hi);
+			if (!b3) continue;
+			cy(18);                                     // ADD (R1),R3
+			r3 = (uint16_t)(r3 + hi);
+			break;
+		}
+		cy(27 + 12);                                    // ADD 2(R1),R2; ADC R3
+		const uint16_t lo = peek((uint16_t)(r1 + 2));
+		const bool c = (uint32_t)r2 + lo > 0xFFFF;
+		r2 = (uint16_t)(r2 + lo);
+		r3 = (uint16_t)(r3 + (c ? 1 : 0));
+		return q;
+	};
 
-	r4 = (uint16_t)((r4 & 0xFF00) | (uint8_t)(r4 - 1));
+	cy(24);                                             // MOV R0,-(SP)
+	push(r0);
+	cy(33);
+	T.r[0] = r0; T.r[1] = r1; T.r[2] = r2; T.r[3] = r3; T.r[4] = r4; T.r[5] = r5;
+	jsr(0x8068, 0xBAA8);
+	r0 = T.r[0];
+	cy(18 + 27 + 27 + 27);                              // MOV (SP)+,R4; MOV args; BISB
+	r4 = pop();
+	r2 = arg(0x16);
+	r3 = arg(0x14);
+	r4 = (uint16_t)((r4 & 0xFF00) | (uint8_t)(r4 | arg(0x12)));
+	cy(18 + 12);                                        // CMPB #10,R4; BCC
+	if ((uint8_t)r4 > 10)
+	{
+		cy(12 + 18);
+		r4 = (uint16_t)((r4 & 0xFF00) | 10);
+	}
+	cy(12 + 27 + 12);                                   // MOVB R4,R5; MOVB lead,R0; BNE
+	r5 = sext8((uint8_t)r4);
+	r0 = sext8((uint8_t)arg(0x10));
+	if (!(uint8_t)r0)
+	{
+		cy(18);
+		r0 = 0x8001;
+	}
+	cy(12 + 12 + 12 + 12 + 18);                         // SUB R0,R5; MOVB R4,R1; ASL; ASL; ADD
+	r5 = (uint16_t)(r5 - r0);
+	r1 = (uint16_t)((uint16_t)(sext8((uint8_t)r4) << 2) + 0xBA6A);
+	cy(18 + 12);                                        // CMP (R1),R3; BHI
+	bool reduce;
+	if (peek(r1) > r3)
+		reduce = false;
+	else
+	{
+		cy(12);                                         // BNE
+		if (peek(r1) != r3)
+			reduce = true;
+		else
+		{
+			cy(27 + 12);                                // CMP 2(R1),R2; BHI
+			reduce = !(peek((uint16_t)(r1 + 2)) > r2);
+		}
+	}
+	if (reduce)
+	{
+		// too many digits: the value is reduced modulo 10^digits (F:BAE6-BB20)
+		cy(12 + 12);                                    // CLRB R5; MOV R1,R0
+		r5 &= 0xFF00;
+		r0 = r1;
+		bool at_top = false;
+		for (;;)
+		{
+			cy(18 + 12);                                // CMP #0xBA8E,R1; BCS
+			if (0xBA8E < r1) break;
+			cy(12);                                     // BEQ
+			if (r1 == 0xBA8E)
+			{
+				at_top = true;
+				break;
+			}
+			cy(18 + 18 + 12);                           // ADD #4,R1; CMP (R1),R3; BHI
+			r1 = (uint16_t)(r1 + 4);
+			if (peek(r1) > r3) break;
+			cy(12);                                     // BNE
+			if (peek(r1) != r3) continue;
+			cy(27 + 12);                                // CMP 2(R1),R2; BLOS
+			if (peek((uint16_t)(r1 + 2)) <= r2) continue;
+			break;
+		}
+		for (;;)
+		{
+			if (!at_top)
+			{
+				cy(18 + 12 + 12);                       // SUB #4,R1; CMP R1,R0; BCS
+				r1 = (uint16_t)(r1 - 4);
+				if (r1 < r0)
+				{
+					cy(18);                             // ADD #4,R1
+					r1 = (uint16_t)(r1 + 4);
+					break;
+				}
+			}
+			at_top = false;
+			divide(0);
+			cy(12);                                     // BR F:BB02
+		}
+	}
+	cy(12);                                             // DECB R4
+	decb_r4();
 	for (;;)
 	{
-		bool print = true, separator = false, last = false;
-		if ((int8_t)r4 > 0)
+		cy(12);                                         // BGT
+		bool last = false, blank = false;
+		if (!z && n == v)
 		{
+			cy(18 + 12);                                // SUB #4,R1; CLR R0
 			r1 = (uint16_t)(r1 - 4);
-			const uint32_t p = pow10(r1);
-			r0 = p ? (uint16_t)(v / p) : 0;           // (the table has no zero entry)
-			if (p) v %= p;
-			r2 = (uint16_t)v;
-			r3 = (uint16_t)(v >> 16);
-			if (r0 == 0)
+			const uint16_t q = divide(12);
+			cy(12 + 12);                                // DEC R0; BNE
+			r0 = (uint16_t)(q - 1);
+			if (r0)
 			{
+				cy(12);                                 // CLRB R5
+				r5 &= 0xFF00;
+			}
+			else
+			{
+				cy(12 + 12);                            // DECB R5; BMI
 				r5 = (uint16_t)((r5 & 0xFF00) | (uint8_t)(r5 - 1));
-				if (!(r5 & 0x0080))
+				if (r5 & 0x0080)
 				{
-					print = false;
-					if ((int16_t)r5 < 0) goto next;     // dropped leading zero: not counted
-					if (large)                          // blank leading zero
+					cy(12);                             // CLRB R5
+					r5 &= 0xFF00;
+				}
+				else
+				{
+					cy(12 + 12);                        // TST R5; BMI
+					if (r5 & 0x8000) goto next;         // a dropped leading zero
+					cy(18 + 12 + 12);                   // MOV #0,R0; TST R4; BPL
+					r0 = 0;
+					if (r4 & 0x8000)
+					{
 						put(0x8B52, 0xBB60, 0);
+						cy(27 + 12);                    // TST separators; BNE
+						if (!arg(0x0E))
+						{
+							cy(12);                     // BR F:BBBA
+							goto count;
+						}
+					}
 					else
 						put(0x8C12, 0xBB6C, 0);
-					if (large && !separators) goto count;
+					cy(18 + 12);                        // MOV #0,R0; BR F:BB90
 					r0 = 0;
-					separator = true;
+					blank = true;
 				}
 			}
 		}
 		else
 		{
-			r0 = r2;                                    // last digit: the remainder
+			cy(12 + 12);                                // MOV R2,R0; BR F:BB74
+			r0 = r2;
 			last = true;
 		}
-		if (print)
+		if (!blank)
 		{
-			if (!last) r5 &= 0xFF00;                    // a digit was shown: later zeros print
+			cy(18 + 12 + 12);                           // ADD #'0',R0; TST R4; BPL
 			r0 = (uint16_t)(r0 + 0x30);
-			if (large)
-				put(0x8C56, 0xBB80, r0);
-			else
-				put(0x8C12, 0xBB86, r0);
-			if (!separators) goto count;
-			r0 = 0x002C;
-			separator = true;
-		}
-		if (separator && (r1 == POW10 + 12 || r1 == POW10 + 24 || r1 == POW10 + 36))
-		{
-			if (large)
+			if (r4 & 0x8000)
 			{
-				if (!r0) poke(0x0186, (uint16_t)(peek(0x0186) - 2));
-				put(0x8B52, 0xBBB4, r0);
+				put(0x8C56, 0xBB80, r0);
+				cy(12);                                 // BR
 			}
 			else
-				put(0x8C12, 0xBBBA, r0);
+				put(0x8C12, 0xBB86, r0);
+			cy(27 + 12);                                // TST separators; BEQ
+			if (!arg(0x0E)) goto count;
+			cy(18);                                     // MOV #',',R0
+			r0 = 0x002C;
 		}
+		(void)last;
+		cy(18 + 12);                                    // CMP R1,#0xBA76; BEQ
+		if (r1 != 0xBA76)
+		{
+			cy(18 + 12);
+			if (r1 != 0xBA82)
+			{
+				cy(18 + 12);
+				if (r1 != 0xBA8E) goto count;
+			}
+		}
+		cy(12 + 12);                                    // TST R4; BPL
+		if (r4 & 0x8000)
+		{
+			cy(12 + 12);                                // TST R0; BNE
+			if (!r0)
+			{
+				cy(36);
+				poke(0x0186, (uint16_t)(peek(0x0186) - 2));
+			}
+			put(0x8B52, 0xBBB4, r0);
+			cy(12);                                     // BR
+		}
+		else
+			put(0x8C12, 0xBBBA, r0);
 	count:
+		cy(18);                                         // ADD #0x100,R5
 		r5 = (uint16_t)(r5 + 0x0100);
 	next:
-		r4 = (uint16_t)((r4 & 0xFF00) | (uint8_t)(r4 - 1));
-		if (r4 & 0x0080) break;
+		cy(12 + 12);                                    // DECB R4; BGE
+		decb_r4();
+		if (n != v) break;
 	}
 	bool c = false;
-	if ((int16_t)r5 < 0)
+	cy(12 + 12);                                        // TST R5; BPL
+	if (r5 & 0x8000)
 	{
-		const uint16_t printed = (uint16_t)(((r5 >> 8) | (r5 << 8)) & 0x003F);
-		r5 = printed;
-		r1 = a.u(2);
-		c = r1 < printed;
-		r1 = (uint16_t)(r1 - printed);
+		cy(27 + 12 + 18 + 12 + 12);                     // MOV digits,R1; SWAB; BIC; SUB; BEQ
+		r1 = arg(0x12);
+		r5 = (uint16_t)(((r5 >> 8) | (r5 << 8)) & 0x003F);
+		c = r1 < r5;
+		r1 = (uint16_t)(r1 - r5);
 		if (r1)
-		{
 			for (;;)
 			{
-				if (large)
+				cy(18 + 12 + 12);                       // MOV #0,R0; TST R4; BPL
+				r0 = 0;
+				if (r4 & 0x8000)
+				{
 					put(0x8B52, 0xBBE0, 0);
+					cy(12);
+				}
 				else
 					put(0x8C12, 0xBBE6, 0);
 				c = fC();
+				cy(12 + 12);                            // DEC R1; BGT
 				const uint16_t old = r1;
-				r1--;
+				r1 = (uint16_t)(r1 - 1);
 				if (!((int16_t)r1 > 0 && old != 0x8000)) break;
 			}
-		}
 	}
+	cy(21);                                             // RTS
+	T.r[1] = r1; T.r[2] = r2; T.r[3] = r3; T.r[4] = r4; T.r[5] = r5;
 	set_c(c);
 	return r0;
 }
 
-uint16_t print_number_small(const Args &a) { return print_number(a, 0x0000); }
-uint16_t print_number_large(const Args &a) { return print_number(a, 0x8000); }
+uint16_t print_number_small(const Args &a)
+{
+	At here(0xBA96);
+	cy(12 + 12);                                        // CLR R0; BR
+	return print_number(a, 0x0000);
+}
+uint16_t print_number_large(const Args &a)
+{
+	At here(0xBA9A);
+	cy(18);                                             // MOV #0x8000,R0
+	return print_number(a, 0x8000);
+}
 
 }
 
 LOGIC_TABLE(fmid,
-	asm_routine("F", 0xB03C, "apply_queued_piece_counts", apply_queued_piece_counts, 58),
-	asm_routine("F", 0xB092, "update_chains_a", update_chains_a, 3372),
-	asm_routine("F", 0xB120, "update_chains_b", update_chains_b, 3278),
+	asm_routine("F", 0xB03C, "apply_queued_piece_counts", apply_queued_piece_counts, 0),
+	asm_routine("F", 0xB092, "update_chains_a", update_chains_a, 0),
+	asm_routine("F", 0xB120, "update_chains_b", update_chains_b, 0),
 	asm_routine("F", 0xB1EA, "build_sprite_pieces", build_sprite_pieces, 183),
 	asm_routine("F", 0xB378, "move_objects", move_objects, 111),
-	c_routine("F", 0xB4B6, "show_object", show_object, 0, 1240),
+	c_routine("F", 0xB4B6, "show_object", show_object, 0, OUT152),
 	c_routine("F", 0xB602, "queue_piece_count", queue_piece_count, 0, 990),
 	c_routine("F", 0xBA2E, "clear_objects_and_text", clear_objects_and_text, 0, 279),
 	c_routine("F", 0xC98E, "restart_object_animation", restart_object_animation, 0, 1047),
-	c_routine("F", 0xBE10, "locate_map_object", locate_map_object, 0, 686),
-	c_routine("F", 0xBE7C, "map_object_state", map_object_state, 0, 729),
+	c_routine("F", 0xBE10, "locate_map_object", locate_map_object, 0, OUT144),
+	c_routine("F", 0xBE7C, "map_object_state", map_object_state, 0, OUT144),
 	c_routine("F", 0xBF5E, "map_object_position", map_object_position, 0, 798),
-	asm_routine("F", 0xBD78, "map_object_enters", map_object_enters, 263),
-	c_routine("F", 0xBA96, "print_number_small", print_number_small, 0, 3276),
-	c_routine("F", 0xBA9A, "print_number_large", print_number_large, 0, 2648),
+	asm_routine("F", 0xBD78, "map_object_enters", map_object_enters, 0),
+	c_routine("F", 0xBA96, "print_number_small", print_number_small, 0, OUT162),
+	c_routine("F", 0xBA9A, "print_number_large", print_number_large, 0, OUT162),
 	c_routine("F", 0xBF18, "release_map_definition", release_map_definition, 0, 429),
-	c_routine("F", 0xC114, "turn_map_object", turn_map_object, 0, 2946),
-	c_routine("F", 0xCF5E, "remove_map_object", remove_map_object, 0, 611),
-	c_routine("F", 0xCE24, "add_map_object", add_map_object, 0, 3777),
+	c_routine("F", 0xC114, "turn_map_object", turn_map_object, 0, OUT162),
+	c_routine("F", 0xCF5E, "remove_map_object", remove_map_object, 0, 0),
+	c_routine("F", 0xCE24, "add_map_object", add_map_object, 0, OUT162),
 	c_routine("F", 0xCFD6, "init_map_objects", init_map_objects, 0, 813),
-	c_routine("F", 0xC3E6, "map_object_leaves", map_object_leaves, 0, 1405),
-	asm_routine("F", 0xBCB8, "check_map_object_view", check_map_object_view, 232),
-	c_routine("F", 0xBFBC, "move_map_object", move_map_object, 0, 1298),
-	c_routine("F", 0xC4E4, "create_map_object", create_map_object, 0, 4033),
-	irq_routine("F", 0xB8FC, "irq_32v_sprites", irq_32v_sprites, 1084),
-	irq_routine("F", 0xB66E, "irq_32v_game", irq_32v_game, 1371),
-	asm_routine("F", 0xC850, "try_map_object_move", try_map_object_move, 115),
-	c_routine("F", 0xC868, "try_next_map_definition", try_next_map_definition, 0, 289),
-	asm_routine("F", 0xCA4C, "update_map_object_slot", update_map_object_slot, 390),
-	asm_routine("F", 0xBC52, "check_map_objects_in_view", check_map_objects_in_view, 1295),
-	asm_routine("F", 0xC8AA, "tick_map_object_timers", tick_map_object_timers, 234),
-	asm_routine("F", 0xCB24, "update_objects", update_objects, 2617),
+	c_routine("F", 0xC3E6, "map_object_leaves", map_object_leaves, 0, OUT162),
+	asm_routine("F", 0xBCB8, "check_map_object_view", check_map_object_view, 0),
+	c_routine("F", 0xBFBC, "move_map_object", move_map_object, 0, OUT162),
+	c_routine("F", 0xC4E4, "create_map_object", create_map_object, 0, OUT162),
+	irq_routine("F", 0xB8FC, "irq_32v_sprites", irq_32v_sprites, 0),
+	irq_routine("F", 0xB66E, "irq_32v_game", irq_32v_game, 0),
+	asm_routine("F", 0xC850, "try_map_object_move", try_map_object_move, 0),
+	c_routine("F", 0xC868, "try_next_map_definition", try_next_map_definition, 0, 0),
+	asm_routine("F", 0xCA4C, "update_map_object_slot", update_map_object_slot, 0),
+	asm_routine("F", 0xBC52, "check_map_objects_in_view", check_map_objects_in_view, 0),
+	asm_routine("F", 0xC8AA, "tick_map_object_timers", tick_map_object_timers, 0),
+	asm_routine("F", 0xCB24, "update_objects", update_objects, 0),
 )
 
 }
