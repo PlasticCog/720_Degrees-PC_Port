@@ -51,6 +51,7 @@ void wait_vblank()
 void wait_fade()
 {
 	T.r[0] = sext8(peekb(0x0EA7));
+	fl::movb((uint8_t)T.r[0]);
 	tick(0xDC28, 24);                                  // MOVB @#0x0EA7,R0
 	const uint16_t level = rw((uint16_t)(T.r[6] + 2));
 	fl::cmp(T.r[0], level);
@@ -88,8 +89,10 @@ void wait_fade()
 uint16_t send_sound_command(const Args &a)
 {
 	push(T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0x8EA4, 24);                                  // MOV R1,-(SP)
 	const bool dead = peekb(0x01A2) != 0;
+	fl::tstb(peekb(0x01A2));
 	tick(0x8EA8, 24);                                  // TSTB @#0x01A2
 	if (dead)
 		tick(0x8ECE, 12);                              // BNE
@@ -97,15 +100,18 @@ uint16_t send_sound_command(const Args &a)
 	{
 		tick(0x8EAA, 12);
 		T.r[1] = 0xFDE8;
+		fl::mov(T.r[1]);
 		tick(0x8EAE, 18);                              // MOV #0xFDE8,R1
 		for (;;)
 		{
 			const bool busy = (peek(0x1800) & 0x0020) != 0;
+			fl::logic((uint16_t)(0x0020 & peek(0x1800)));
 			tick(0x8EB4, 30);                          // BIT #0x20,@#IN0
 			if (!busy)
 			{
 				tick(0x8EC8, 12);                      // BEQ
 				poke(0x1680, a.u(0));
+				fl::mov(peek((uint16_t)(T.r[6] + 4)));
 				tick(0x8ECE, 42);                      // MOV 4(SP),@#SOUND_CMD
 				break;
 			}
@@ -126,6 +132,7 @@ uint16_t send_sound_command(const Args &a)
 		}
 	}
 	T.r[1] = pop();
+	fl::mov(T.r[1]);
 	tick(0x8ED0, 18);                                  // MOV (SP)+,R1
 	rts();
 	return T.r[0];
@@ -138,8 +145,10 @@ uint16_t read_sound_response(const Args &)
 {
 	c_save(2, 0x8ED6);
 	T.r[1] = 0;
+	fl::clr();
 	tick(0x8ED8, 12);                                  // CLR R1
 	const bool dead = peekb(0x01A2) != 0;
+	fl::tstb(peekb(0x01A2));
 	tick(0x8EDC, 24);                                  // TSTB @#0x01A2
 	if (dead)
 		tick(0x8F08, 12);                              // BNE
@@ -147,6 +156,7 @@ uint16_t read_sound_response(const Args &)
 	{
 		tick(0x8EDE, 12);
 		T.r[2] = 3;
+		fl::mov(T.r[2]);
 		tick(0x8EE2, 18);                              // MOV #3,R2
 		for (;;)
 		{
@@ -156,10 +166,13 @@ uint16_t read_sound_response(const Args &)
 			{
 				tick(0x8EEA, 12);
 				T.r[3] = 0;
+				fl::clr();
 				tick(0x8EEC, 12);                      // CLR R3
 				T.r[3] = peekb(0x1C00);
+				fl::logicb((uint8_t)T.r[3]);
 				tick(0x8EF0, 24);                      // BISB @#SOUND_RESPONSE,R3
 				T.r[0] = T.r[3];
+				fl::mov(T.r[0]);
 				tick(0x8EF2, 12);                      // MOV R3,R0
 				c_restore(2);
 				return T.r[0];
@@ -187,6 +200,7 @@ uint16_t read_sound_response(const Args &)
 		}
 	}
 	T.r[0] = 0;
+	fl::clr();
 	tick(0x8F0A, 12);                                  // CLR R0
 	c_restore(2);
 	return 0;

@@ -83,7 +83,7 @@ def parse(text):
         if m:
             key, name, calls, rest = m.group(1), m.group(2), int(m.group(3)), m.group(4)
             r = {'name': name, 'calls': calls, 'tested': 0, 'bad': 0, 'cycles': 0.0, 'native': 0.0, 'charged': None,
-                 'waits': 0, 'unwound': 0, 'first': None}
+                 'waits': 0, 'unwound': 0, 'first': None, 'steps': 0, 'first_step': None, 'wrong': {}}
             t = re.search(r'tested\s+(\d+)\s+mismatches (\d+)\s+original (\d+) cycles/call \(charged (-?\d+)\)', rest)
             if t:
                 r['tested'], r['bad'] = int(t.group(1)), int(t.group(2))
@@ -97,10 +97,18 @@ def parse(text):
             u = re.search(r'left by an interrupt (\d+)', rest)
             if u:
                 r['unwound'] = int(u.group(1))
+            st = re.search(r'steps differ in (\d+)', rest)
+            if st:
+                r['steps'] = int(st.group(1))
             out[key] = r
             last = key
         elif last and line.strip().startswith('first mismatch:'):
             out[last]['first'] = line.strip()[len('first mismatch:'):].strip()
+        elif last and line.strip().startswith('condition codes differ after:'):
+            for t in line.split(':', 1)[1].split():
+                out[last]['wrong'].setdefault(t[:4], t)
+        elif last and line.strip().startswith('first step difference:'):
+            out[last]['first_step'] = line.strip()[len('first step difference:'):].strip()
     return out
 
 
@@ -182,7 +190,7 @@ def main():
             for key, r in parse(text).items():
                 m = merged.setdefault(key, {'name': r['name'], 'calls': 0, 'tested': 0, 'bad': 0, 'cyc': 0.0, 'ncyc': 0.0,
                                             'charged': r['charged'], 'waits': 0, 'unwound': 0, 'first': None,
-                                            'where': set()})
+                                            'steps': 0, 'first_step': None, 'wrong': {}, 'where': set()})
                 m['calls'] += r['calls']
                 m['tested'] += r['tested']
                 m['bad'] += r['bad']
@@ -196,6 +204,11 @@ def main():
                     m['where'].add(name)
                 if r['first'] and not m['first']:
                     m['first'] = '[%s] %s' % (name, r['first'])
+                m['steps'] += r['steps']
+                for a, t in r['wrong'].items():
+                    m['wrong'].setdefault(a, t)
+                if r['first_step'] and not m['first_step']:
+                    m['first_step'] = '[%s] %s' % (name, r['first_step'])
 
     lines = [header, 'scenarios: ' + ', '.join(s[0] for s in todo) + (' (quick)' if args.quick else '')]
     untested = []
@@ -211,9 +224,15 @@ def main():
             s += '  waits (not compared) %d' % m['waits']
         if m['unwound']:
             s += '  left by an interrupt %d' % m['unwound']
+        if m['steps']:
+            s += '  steps differ in %d' % m['steps']
         lines.append(s)
         if m['first']:
             lines.append('      first mismatch: ' + m['first'])
+        if m['first_step']:
+            lines.append('      first step difference: ' + m['first_step'])
+        if m['wrong']:
+            lines.append('      condition codes differ after: ' + ' '.join(m['wrong'][a] for a in sorted(m['wrong'])))
     for line in open(os.path.join(ROOT, 'port', 'src', 'logic', 'routines.txt'), encoding='utf-8'):
         f = line.split()
         if f and not f[0].startswith('#') and f[0] not in merged:
@@ -221,6 +240,10 @@ def main():
     bad = sum(m['bad'] for m in merged.values())
     lines.append('')
     lines.append('total mismatches: %d' % bad)
+    # the steps (next PC, SP, condition codes at every instruction boundary) of a tested call
+    # must be the original's: an interrupt can come in at any of them and pushes them
+    steps = [m for m in merged.values() if m['steps']]
+    lines.append('calls whose steps differ: %d (%d routines)' % (sum(m['steps'] for m in steps), len(steps)))
     if untested:
         lines.append('never tested (%d): %s' % (len(untested), ', '.join(untested)))
     lines += problems
@@ -228,7 +251,7 @@ def main():
     if args.out:
         open(args.out, 'w', encoding='utf-8').write(report)
     sys.stdout.write(report)
-    sys.exit(1 if bad or problems else 0)
+    sys.exit(1 if bad or steps or problems else 0)
 
 
 if __name__ == '__main__':

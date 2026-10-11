@@ -6,6 +6,7 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
+#include <vector>
 #include "board.h"
 
 namespace t11rt {
@@ -72,6 +73,12 @@ extern uint16_t g_min_sp;
 extern uint32_t g_atomic_steps, g_atomic_limit;
 constexpr uint32_t ATOMIC_STEP_LIMIT = 4000000;
 struct AtomicTimeout {};
+// atomic mode also appends every instruction boundary (next PC << 32 | SP << 16 | PSW) to the
+// active traces, so the difference tester can compare the rewritten routines' steps with the
+// original's
+constexpr int MAX_TRACES = 8;
+extern std::vector<uint64_t> *g_traces[MAX_TRACES];
+extern int g_trace_count;
 inline bool sync(uint16_t next)
 {
 	if (T.icount > 0 && !T.check_irqs) return true;

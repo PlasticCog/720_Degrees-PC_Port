@@ -53,13 +53,16 @@ void c_save(int n, uint16_t body)
 	for (int i = 2; i <= n + 1; i++)
 	{
 		push(T.r[i]);
+		fl::mov(T.r[i]);
 		pc += 2;
 		tick(pc, 24);                                  // MOV Ri,-(SP)
 	}
 	push(T.r[1]);
+	fl::mov(T.r[1]);
 	pc += 2;
 	tick(pc, 24);                                      // MOV R1,-(SP)
 	T.r[1] = r1;
+	fl::mov(r1);
 	pc += 4;
 	tick(pc, 27);                                      // MOV k(SP),R1
 	ww(T.r[6], (uint16_t)(pc + 2));
@@ -81,6 +84,7 @@ void c_restore(int n)
 	for (int i = n + 1; i >= 2; i--)
 	{
 		T.r[i] = pop();
+		fl::mov(T.r[i]);
 		pc += 2;
 		tick(pc, 18);                                  // MOV (SP)+,Ri
 	}
@@ -103,6 +107,7 @@ using namespace steps;
 void select_video_bank()
 {
 	const bool upper = (T.r[0] & 0x2000) != 0;
+	fl::logic((uint16_t)(0x2000 & T.r[0]));
 	tick(0x807C, 18);                                  // BIT #0x2000,R0
 	if (upper)
 	{
@@ -114,12 +119,14 @@ void select_video_bank()
 	{
 		tick(0x807E, 12);
 		T.r[0] = 0x0038;
+		fl::mov(T.r[0]);
 		tick(0x8082, 18);
 		tick(0x8088, 12);                              // BR
 	}
 	ww(0x01D0, T.r[0]);                                // current bank, as seen by the game
 	tick(0x808C, 27);
 	rw(0x8000);
+	fl::tst(peek(0x8000));
 	tick(0x8090, 24);
 	const uint16_t v = rw(0x8000 + T.r[0]);
 	T.psw = (uint8_t)((T.psw & ~(NF | ZF | VF | CF)) | nzw(v));
@@ -133,23 +140,27 @@ uint16_t mul16(const Args &a)
 {
 	c_save(1, 0x80DC);
 	T.r[2] = 0;
+	fl::clr();
 	tick(0x80DE, 12);
 	T.r[1] = a.u(1);
+	fl::mov(T.r[1]);
 	tick(0x80E2, 27);
 	T.r[0] = a.u(0);
+	fl::mov(T.r[0]);
 	tick(0x80E6, 27);
 	for (;;)
 	{
+		fl::logic((uint16_t)(0x0001 & T.r[0]));
 		tick(0x80EA, 18);                              // BIT #1,R0
 		if (T.r[0] & 1)
 		{
 			tick(0x80EC, 12);
-			T.r[2] = (uint16_t)(T.r[2] + T.r[1]);
+			T.r[2] = fl::add(T.r[2], T.r[1]);
 			tick(0x80EE, 12);
 		}
 		else
 			tick(0x80EE, 12);                          // BEQ
-		T.r[1] = (uint16_t)(T.r[1] << 1);
+		T.r[1] = fl::asl(T.r[1]);
 		tick(0x80F0, 12);
 		if (!T.r[1])
 		{
@@ -157,7 +168,7 @@ uint16_t mul16(const Args &a)
 			break;
 		}
 		tick(0x80F2, 12);
-		T.r[0] = (uint16_t)((int16_t)T.r[0] >> 1);
+		T.r[0] = fl::asr(T.r[0]);
 		tick(0x80F4, 12);
 		if (!T.r[0])
 		{
@@ -167,6 +178,7 @@ uint16_t mul16(const Args &a)
 		tick(0x80E6, 12);                              // BNE
 	}
 	T.r[0] = T.r[2];
+	fl::mov(T.r[0]);
 	tick(0x80F8, 12);
 	c_restore(1);
 	return T.r[0];
@@ -178,12 +190,14 @@ uint16_t mul32(const Args &a)
 {
 	c_save(3, 0x80FE);
 	T.r[2] = 0;
+	fl::clr();
 	tick(0x8100, 12);
 	T.r[3] = 0;
 	tick(0x8102, 12);
 	T.r[4] = 0;
 	tick(0x8104, 12);
 	T.r[1] = a.u(1);
+	fl::mov(T.r[1]);
 	tick(0x8108, 27);
 	if ((int16_t)T.r[1] < 0)
 	{
@@ -194,24 +208,27 @@ uint16_t mul32(const Args &a)
 	else
 		tick(0x810C, 12);                              // BPL
 	T.r[0] = a.u(0);
+	fl::mov(T.r[0]);
 	tick(0x8110, 27);
 	for (;;)
 	{
+		fl::logic((uint16_t)(0x0001 & T.r[0]));
 		tick(0x8114, 18);                              // BIT #1,R0
 		if (T.r[0] & 1)
 		{
 			tick(0x8116, 12);
 			const uint32_t s = (uint32_t)T.r[2] + T.r[1];
 			T.r[2] = (uint16_t)s;
+			fl::add((uint16_t)(T.r[2] - T.r[1]), T.r[1]);
 			tick(0x8118, 12);                          // ADD R1,R2
 			T.r[3] = (uint16_t)(T.r[3] + (s >> 16));
 			tick(0x811A, 12);                          // ADC R3
-			T.r[3] = (uint16_t)(T.r[3] + T.r[4]);
+			T.r[3] = fl::add(T.r[3], T.r[4]);
 			tick(0x811C, 12);
 		}
 		else
 			tick(0x811C, 12);                          // BEQ
-		T.r[0] = (uint16_t)((int16_t)T.r[0] >> 1);
+		T.r[0] = fl::asr(T.r[0]);
 		tick(0x811E, 12);
 		if (!T.r[0])
 		{
@@ -220,7 +237,7 @@ uint16_t mul32(const Args &a)
 		}
 		tick(0x8120, 12);
 		const uint16_t carry = T.r[1] >> 15;
-		T.r[1] = (uint16_t)(T.r[1] << 1);
+		T.r[1] = fl::asl(T.r[1]);
 		tick(0x8122, 12);                              // ASL R1
 		T.r[4] = (uint16_t)((T.r[4] << 1) | carry);
 		tick(0x8124, 12);                              // ROL R4
@@ -230,6 +247,7 @@ uint16_t mul32(const Args &a)
 			continue;
 		}
 		tick(0x8126, 12);
+		fl::tst(T.r[1]);
 		tick(0x8128, 12);                              // TST R1
 		if (T.r[1])
 		{
@@ -240,8 +258,10 @@ uint16_t mul32(const Args &a)
 		break;
 	}
 	poke(0x0204, T.r[2]);
+	fl::mov(T.r[2]);
 	tick(0x812E, 27);
 	poke(0x0206, T.r[3]);
+	fl::mov(T.r[3]);
 	tick(0x8132, 27);
 	c_restore(3);
 	return T.r[0];
@@ -252,8 +272,10 @@ uint16_t mul32(const Args &a)
 uint16_t queue_sound(const Args &a)
 {
 	push(T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0x8E7A, 24);
 	const bool off = peekb(0x018F) == 4;
+	fl::cmpb(peekb(0x018F), 0x04);
 	tick(0x8E80, 30);
 	if (off)
 		tick(0x8E9E, 12);                              // BEQ; R0 untouched
@@ -261,23 +283,28 @@ uint16_t queue_sound(const Args &a)
 	{
 		tick(0x8E82, 12);
 		T.r[0] = 0;
+		fl::clr();
 		tick(0x8E84, 12);
 		T.r[0] = peekb(0x01A1);
+		fl::logicb((uint8_t)T.r[0]);
 		tick(0x8E88, 24);
 		pokeb((uint16_t)(0x0198 + T.r[0]), a.b(0));
+		fl::movb(peekb((uint16_t)(T.r[6] + 4)));
 		tick(0x8E8E, 45);
-		T.r[0]++;
+		T.r[0] = fl::inc(T.r[0]);
 		tick(0x8E90, 12);
 		T.r[1] = T.r[0];
 		tick(0x8E92, 12);
-		T.r[1] &= 7;
+		T.r[1] = fl::logic((uint16_t)(T.r[1] & 7));
 		tick(0x8E96, 18);
 		pokeb(0x01A1, 0);
+		fl::clr();
 		tick(0x8E9A, 27);
-		pokeb(0x01A1, (uint8_t)(peekb(0x01A1) | T.r[1]));
+		pokeb(0x01A1, fl::logicb((uint8_t)(peekb(0x01A1) | T.r[1])));
 		tick(0x8E9E, 27);
 	}
 	T.r[1] = pop();
+	fl::mov(T.r[1]);
 	tick(0x8EA0, 18);
 	rts();
 	return T.r[0];
@@ -289,8 +316,10 @@ uint16_t queue_sound(const Args &a)
 uint16_t set_tile_bank(const Args &a)
 {
 	push(T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0xEEE8, 24);
 	poke(0x01CE, a.u(0));
+	fl::mov(peek(0x01CE));
 	tick(0xEEEE, 42);
 	for (uint16_t pc = 0xEEF2; pc <= 0xEEFA; pc += 4)
 	{
@@ -299,9 +328,10 @@ uint16_t set_tile_bank(const Args &a)
 	}
 	T.r[1] = peek(0x01CE);
 	tick(0xEEFE, 24);
-	T.r[1] = (uint16_t)(T.r[1] << 1);
+	T.r[1] = fl::asl(T.r[1]);
 	tick(0xEF00, 12);
 	const bool same = peek(0x01D8) == peek((uint16_t)(0xFED2 + T.r[1]));
+	fl::cmp(peek(0x01D8), peek((uint16_t)(T.r[1] + 0xFED2)));
 	tick(0xEF06, 39);
 	if (same)
 		tick(0xEF1E, 12);                              // BEQ; R0 untouched
@@ -309,17 +339,20 @@ uint16_t set_tile_bank(const Args &a)
 	{
 		tick(0xEF08, 12);
 		T.r[0] = peek(0x01CC);
+		fl::mov(T.r[0]);
 		tick(0xEF0C, 24);
-		T.r[0] = (uint16_t)(T.r[0] << 1);
+		T.r[0] = fl::asl(T.r[0]);
 		tick(0xEF0E, 12);
 		poke(0x01D6, peek((uint16_t)(0xFED2 + T.r[0])));
 		tick(0xEF14, 42);
 		poke(0x01D8, peek((uint16_t)(0xFED2 + T.r[1])));
+		fl::mov(peek(0x01D8));
 		tick(0xEF1A, 42);
 		poke(0x0236, (uint16_t)(peek(0x0236) + 1));
 		tick(0xEF1E, 27);
 	}
 	T.r[1] = pop();
+	fl::mov(T.r[1]);
 	tick(0xEF20, 18);
 	rts();
 	return T.r[0];

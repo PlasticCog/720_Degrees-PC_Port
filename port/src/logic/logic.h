@@ -132,6 +132,26 @@ inline uint16_t inc(uint16_t d) { const int r = d + 1; f_nzv(nzw(r) | (d == 0x7f
 inline uint16_t dec(uint16_t d) { const int r = d - 1; f_nzv(nzw(r) | (d == 0x8000 ? VF : 0)); return (uint16_t)r; }
 inline uint8_t incb(uint8_t d) { const int r = d + 1; f_nzv(nzb(r) | (d == 0x7f ? VF : 0)); return (uint8_t)r; }
 inline uint8_t decb(uint8_t d) { const int r = d - 1; f_nzv(nzb(r) | (d == 0x80 ? VF : 0)); return (uint8_t)r; }
+// BIS / BIC / BIT / XOR: N, Z from the result, V clear, C kept
+inline uint16_t logic(uint16_t r) { f_nzv(nzw(r)); return r; }
+inline uint8_t logicb(uint8_t r) { f_nzv(nzb(r)); return r; }
+// shifts and rotates: C the bit shifted out, V = N ^ C
+inline uint16_t asl(uint16_t v) { const uint16_t r = (uint16_t)(v << 1); f_nzvc(nzw(r) | (v >> 15)); f_shift(); return r; }
+inline uint16_t asr(uint16_t v) { const uint16_t r = (uint16_t)((int16_t)v >> 1); f_nzvc(nzw(r) | (v & 1)); f_shift(); return r; }
+inline uint16_t ror(uint16_t v) { const uint16_t r = (uint16_t)((C() << 15) | (v >> 1)); f_nzvc(nzw(r) | (v & 1)); f_shift(); return r; }
+inline uint16_t rol(uint16_t v) { const uint16_t r = (uint16_t)((v << 1) | C()); f_nzvc(nzw(r) | (v >> 15)); f_shift(); return r; }
+inline uint8_t aslb(uint8_t v) { const uint8_t r = (uint8_t)(v << 1); f_nzvc(nzb(r) | (v >> 7)); f_shift(); return r; }
+inline uint8_t asrb(uint8_t v) { const uint8_t r = (uint8_t)((int8_t)v >> 1); f_nzvc(nzb(r) | (v & 1)); f_shift(); return r; }
+inline uint8_t rorb(uint8_t v) { const uint8_t r = (uint8_t)((C() << 7) | (v >> 1)); f_nzvc(nzb(r) | (v & 1)); f_shift(); return r; }
+inline uint8_t rolb(uint8_t v) { const uint8_t r = (uint8_t)((v << 1) | C()); f_nzvc(nzb(r) | (v >> 7)); f_shift(); return r; }
+inline uint16_t neg(uint16_t v) { const uint16_t r = (uint16_t)-v; f_nzvc(nzw(r) | (r == 0x8000 ? VF : 0) | (r ? CF : 0)); return r; }
+inline uint8_t negb(uint8_t v) { const uint8_t r = (uint8_t)-v; f_nzvc(nzb(r) | (r == 0x80 ? VF : 0) | (r ? CF : 0)); return r; }
+inline uint16_t com(uint16_t v) { const uint16_t r = (uint16_t)~v; f_nzvc(nzw(r) | CF); return r; }
+inline uint8_t comb(uint8_t v) { const uint8_t r = (uint8_t)~v; f_nzvc(nzb(r) | CF); return r; }
+inline uint16_t swab(uint16_t v) { const uint16_t r = (uint16_t)((v << 8) | (v >> 8)); f_nzvc(nzb(r & 0xff)); return r; }
+inline uint8_t adcb(uint8_t d) { const int s = C(), r = d + s; f_nzvc(nzb(r) | vb(s, d, r) | cb(r)); return (uint8_t)r; }
+// SXT: all ones when N is set; Z = !N, V clear, N and C kept
+inline uint16_t sxt() { const uint16_t r = (T.psw & NF) ? 0xffff : 0; T.psw = (uint8_t)((T.psw & ~(ZF | VF)) | (r ? 0 : ZF)); return r; }
 }
 
 // settings and statistics

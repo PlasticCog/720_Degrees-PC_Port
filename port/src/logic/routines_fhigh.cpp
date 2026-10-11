@@ -3896,7 +3896,7 @@ void update_skater_phase()
 			tick(0xE442, 12);
 			T.r[0] = fl_asl(T.r[0]);
 			tick(0xE444, 12);
-			uint16_t at = (uint16_t)(0xE448 + peek((uint16_t)(0xFE54 + T.r[0])));   // ADD 0xFE54(R0),PC
+			uint16_t at = fl::add(0xE448, peek((uint16_t)(0xFE54 + T.r[0])));   // ADD 0xFE54(R0),PC
 			tick(at, 27);
 			auto e52a = [&]() {                        // E52A: the next phase
 				T.r[0] = T.r[3];
@@ -6130,7 +6130,7 @@ uint16_t slope_of_object_0ea0(const Args &)
 		tick(0xD730, 12);
 		T.r[1] = fl_asl(T.r[1]);
 		tick(0xD732, 12);
-		const uint16_t to = (uint16_t)(0xD736 + peek((uint16_t)(0xFDF8 + T.r[1])));
+		const uint16_t to = fl::add(0xD736, peek((uint16_t)(0xFDF8 + T.r[1])));
 		tick(to, 27);                                  // ADD 0xFDF8(R1),PC
 		if (to == 0xD736)
 		{

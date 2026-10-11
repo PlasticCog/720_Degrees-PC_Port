@@ -26,8 +26,10 @@ uint16_t sext8(uint8_t v) { return (uint16_t)(int16_t)(int8_t)v; }
 void send_queued_sound()
 {
 	T.r[0] = sext8(peekb(0x01A0));
+	fl::movb((uint8_t)T.r[0]);
 	tick(0x4318, 24);
 	T.r[1] = sext8(peekb(0x01A1));
+	fl::movb((uint8_t)T.r[1]);
 	tick(0x431C, 24);
 	fl::cmp(T.r[0], T.r[1]);
 	tick(0x431E, 12);
@@ -49,39 +51,45 @@ void send_queued_sound()
 	}
 	tick(0x4328, 12);
 	T.r[1] = 0;
+	fl::clr();
 	tick(0x432A, 12);
 	T.r[1] = peekb((uint16_t)(0x0198 + T.r[0]));
+	fl::logicb((uint8_t)T.r[1]);
 	tick(0x432E, 27);
+	fl::cmp(T.r[1], 0x0048);
 	tick(0x4332, 18);                                  // CMP R1,#0x48
 	if (T.r[1] == 0x48)
 	{
 		tick(0x4334, 12);
-		pokeb(0x02BB, (uint8_t)(peekb(0x02BB) + 1));
+		pokeb(0x02BB, fl::incb(peekb(0x02BB)));
 		tick(0x4338, 27);
 		tick(0x4344, 12);                              // BR
 	}
 	else
 	{
 		tick(0x433A, 12);                              // BNE
+		fl::cmp(T.r[1], 0x0049);
 		tick(0x433E, 18);                              // CMP R1,#0x49
 		if (T.r[1] == 0x49)
 		{
 			tick(0x4340, 12);
-			pokeb(0x02BB, (uint8_t)(peekb(0x02BB) - 1));
+			pokeb(0x02BB, fl::decb(peekb(0x02BB)));
 			tick(0x4344, 27);
 		}
 		else
 			tick(0x4344, 12);                          // BNE
 	}
 	pokeb(0x1680, (uint8_t)T.r[1]);
+	fl::movb((uint8_t)T.r[1]);
 	tick(0x4348, 27);                                  // MOVB R1,@#SOUND_CMD
-	T.r[0]++;
+	T.r[0] = fl::inc(T.r[0]);
 	tick(0x434A, 12);
 	T.r[1] = T.r[0];
 	tick(0x434C, 12);
-	T.r[1] &= 7;
+	T.r[1] = fl::logic((uint16_t)(T.r[1] & 7));
 	tick(0x4350, 18);
 	pokeb(0x01A0, 0);
+	fl::clr();
 	tick(0x4354, 27);
 	const uint8_t index = (uint8_t)(peekb(0x01A0) | T.r[1]);
 	pokeb(0x01A0, index);
@@ -96,8 +104,10 @@ void send_queued_sound()
 uint16_t queue_effect_sound(const Args &a)
 {
 	push(T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0x5CC2, 24);
 	T.r[0] = 0x0400;
+	fl::mov(T.r[0]);
 	tick(0x5CC6, 18);
 	poke(0x01D4, T.r[0]);
 	tick(0x5CCA, 27);
@@ -106,8 +116,10 @@ uint16_t queue_effect_sound(const Args &a)
 	T.r[0] = a.u(0);
 	tick(0x5CD2, 27);
 	T.r[1] = 0;
+	fl::clr();
 	tick(0x5CD4, 12);
 	T.r[1] = peekb((uint16_t)(0x6567 + T.r[0]));
+	fl::logicb((uint8_t)T.r[1]);
 	tick(0x5CD8, 27);
 	tick(0x5CDA, 12);                                  // TST R1
 	if (T.r[1] == 0)
@@ -117,15 +129,19 @@ uint16_t queue_effect_sound(const Args &a)
 		tick(0x5CDC, 12);
 		bool queue = true;
 		const bool busy_a = peekb(0x01A6) != 0;
+		fl::tstb(peekb(0x01A6));
 		tick(0x5CE0, 24);
 		if (!busy_a)
 		{
 			tick(0x5CE2, 12);
 			pokeb(0x01A6, (uint8_t)T.r[1]);
+			fl::movb((uint8_t)T.r[1]);
 			tick(0x5CE6, 27);
 			push(0);
+			fl::clr();
 			tick(0x5CE8, 24);
 			pokeb(T.r[6], peekb((uint16_t)(0x5B0B + T.r[1])));
+			fl::movb(peekb(T.r[6]));
 			tick(0x5CEC, 36);
 			tick(0x5CFE, 12);                          // BR
 		}
@@ -133,6 +149,7 @@ uint16_t queue_effect_sound(const Args &a)
 		{
 			tick(0x5CEE, 12);                          // BNE
 			const bool busy_b = peekb(0x01A7) != 0;
+			fl::tstb(peekb(0x01A7));
 			tick(0x5CF2, 24);
 			if (busy_b)
 			{
@@ -143,10 +160,13 @@ uint16_t queue_effect_sound(const Args &a)
 			{
 				tick(0x5CF4, 12);
 				pokeb(0x01A7, (uint8_t)T.r[1]);
+				fl::movb((uint8_t)T.r[1]);
 				tick(0x5CF8, 27);
 				push(0);
+				fl::clr();
 				tick(0x5CFA, 24);
 				pokeb(T.r[6], peekb((uint16_t)(0x5B11 + T.r[1])));
+				fl::movb(peekb(T.r[6]));
 				tick(0x5CFE, 36);
 			}
 		}
@@ -158,6 +178,7 @@ uint16_t queue_effect_sound(const Args &a)
 		}
 	}
 	T.r[1] = pop();
+	fl::mov(T.r[1]);
 	tick(0x5D06, 18);
 	rts();
 	return T.r[0];
@@ -186,8 +207,10 @@ void step_sound_level()
 	{
 		tick(0x5DBC, 12);                              // BNE
 		T.r[1] = 0;
+		fl::clr();
 		tick(0x5DBE, 12);
 		T.r[1] = peekb(0x01E9);
+		fl::logicb((uint8_t)T.r[1]);
 		tick(0x5DC2, 24);
 		fl::cmp(T.r[0], T.r[1]);
 		tick(0x5DC4, 12);
@@ -207,6 +230,7 @@ void step_sound_level()
 	T.r[1] = 0;
 	tick(0x5D96, 12);
 	T.r[1] = peekb(0x01E9);
+	fl::logicb((uint8_t)T.r[1]);
 	tick(0x5D9A, 24);
 	fl::cmp(T.r[0], T.r[1]);
 	tick(0x5D9C, 12);
@@ -224,12 +248,16 @@ void step_sound_level()
 		tick(0x5DA8, 27);
 	}
 	T.r[0] = 0;
+	fl::clr();
 	tick(0x5DAA, 12);
 	T.r[0] = peekb(0x01E9);
+	fl::logicb((uint8_t)T.r[0]);
 	tick(0x5DAE, 24);
 	push(0);
+	fl::clr();
 	tick(0x5DB0, 24);
 	pokeb(T.r[6], rb((uint16_t)(0x5D82 + T.r[0])));
+	fl::movb(peekb(T.r[6]));
 	tick(0x5DB4, 36);
 	jsr(0x5DB8, 0x8E78);                               // queue_sound
 	fl::tst(pop());
@@ -319,6 +347,7 @@ uint16_t install_interrupts_b(const Args &)
 void fade_playfield_palette()
 {
 	T.r[5] = peek(0x01D2);
+	fl::mov(T.r[5]);
 	tick(0xDB04, 24);
 	push(peek(0x01D4));
 	tick(0xDB08, 36);
@@ -335,8 +364,10 @@ void fade_playfield_palette()
 	poke(0x1402, T.r[0]);
 	tick(0xDB20, 27);
 	T.r[1] = sext8(peekb(0x0EA7));
+	fl::movb((uint8_t)T.r[1]);
 	tick(0xDB24, 24);
 	T.r[3] = 0x7E4C;
+	fl::mov(T.r[3]);
 	tick(0xDB28, 18);
 	T.r[2] = 0x11A0;
 	tick(0xDB2C, 18);
@@ -346,6 +377,7 @@ void fade_playfield_palette()
 	{
 		T.r[3] -= 2;
 		T.r[0] = peek(T.r[3]);
+		fl::mov(T.r[0]);
 		tick(0xDB32, 21);
 		T.r[0] = fl::sub(T.r[0], T.r[1]);
 		tick(0xDB34, 12);
@@ -375,6 +407,7 @@ void fade_playfield_palette()
 // Step by step (the play interrupt draws with the same text pointer).
 void put_small_char()
 {
+	fl::tst(T.r[0]);
 	tick(0x8C14, 12);                                  // TST R0
 	if (T.r[0] == 0)
 	{
@@ -386,8 +419,9 @@ void put_small_char()
 	}
 	tick(0x8C1E, 12);                                  // BNE
 	push(T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0x8C20, 24);
-	T.r[0] &= 0x007F;
+	T.r[0] = fl::logic((uint16_t)(T.r[0] & 0x007F));
 	tick(0x8C24, 18);
 	tick(0x8C28, 18);                                  // CMP R0,#0
 	bool carry = false;                                // C as the end leaves it
@@ -396,6 +430,7 @@ void put_small_char()
 	else
 	{
 		tick(0x8C2A, 12);
+		fl::cmp(T.r[0], 0x0040);
 		tick(0x8C2E, 18);                              // CMP R0,#0x40
 		if ((int16_t)T.r[0] > 0x40)
 		{
@@ -406,33 +441,38 @@ void put_small_char()
 		else
 		{
 			tick(0x8C30, 12);
-			T.r[0] = (uint16_t)(T.r[0] - 0x0020);
+			T.r[0] = fl::sub(T.r[0], 0x0020);
 			tick(0x8C34, 18);
 			carry = (T.r[0] & 0x8000) != 0;
 			T.r[0] = (uint16_t)(T.r[0] << 1);
 			tick(0x8C36, 12);                          // ASL R0
 			T.r[0] = peek((uint16_t)(0x8CA6 + T.r[0]));
+			fl::mov(T.r[0]);
 			tick(0x8C3A, 27);
 			if (T.r[0] & 0x8000)
 			{
 				tick(0x8C3C, 12);
 				T.r[0] = (uint16_t)-T.r[0];
 				carry = true;                          // NEG of a non-zero value
+				fl::neg((uint16_t)(-T.r[0]));
 				tick(0x8C3E, 12);
 				tick(0x8C44, 12);                      // BR
 			}
 			else
 				tick(0x8C44, 12);                      // BPL
 		}
-		T.r[0] |= peek(0x0188);
+		T.r[0] = fl::logic((uint16_t)(T.r[0] | peek(0x0188)));
 		tick(0x8C48, 24);
 	}
 	T.r[1] = peek(0x0186);
+	fl::mov(T.r[1]);
 	tick(0x8C4C, 24);
 	ww(T.r[1], T.r[0]);
 	T.r[1] += 2;
+	fl::mov(T.r[0]);
 	tick(0x8C4E, 21);
 	poke(0x0186, T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0x8C52, 27);
 	T.r[1] = pop();
 	f_nzvc(nzw(T.r[1]) | (carry ? CF : 0));             // MOV (SP)+,R1

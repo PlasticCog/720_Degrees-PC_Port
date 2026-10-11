@@ -235,12 +235,15 @@ void count_event()
 void reset_skater_state()
 {
 	pokeb(0x01EB, 0);
+	fl::clr();
 	tick(0xE23C, 27);
 	pokeb(0x0330, 0);
 	tick(0xE240, 27);
 	pokeb(0x0320, 1);
+	fl::movb(0x01);
 	tick(0xE246, 33);
 	pokeb(0x0771, 0);
+	fl::clr();
 	tick(0xE24A, 27);
 	pokeb(0x0791, 0);
 	tick(0xE24E, 27);

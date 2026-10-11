@@ -27,14 +27,17 @@ uint16_t print_time(const Args &a)
 	T.r[2] = a.u(0);
 	tick(0x68EA, 27);
 	push(peek(T.r[2]));
+	fl::mov(peek(T.r[6]));
 	tick(0x68EC, 30);
 	push(0);
 	tick(0x68EE, 24);
 	push(4);
+	fl::mov(0x0004);
 	tick(0x68F2, 30);
 	push(rw(T.r[6]));
 	tick(0x68F4, 30);                                  // MOV (SP),-(SP)
 	push(0);
+	fl::clr();
 	tick(0x68F6, 24);
 	jsr(0x68FA, 0xBA9A);
 	for (int part = 1; part <= 2; part++)
@@ -57,7 +60,7 @@ uint16_t print_time(const Args &a)
 		tick((uint16_t)(pc + 0x18), 24);
 		jsr((uint16_t)(pc + 0x1C), 0xBA9A);
 	}
-	T.r[6] += 0x1A;
+	T.r[6] = fl::add(T.r[6], 0x1A);
 	tick(0x6936, 18);                                  // ADD #0x1A,SP
 	c_restore(1);
 	return T.r[0];
@@ -166,36 +169,43 @@ uint16_t draw_bar_table(const Args &a)
 	tick(0x6FBA, 18);
 	jsr(0x6FBE, 0x8AB6);
 	T.r[0] = 0;
+	fl::mov(T.r[0]);
 	tick(0x6FC2, 18);
 	jsr(0x6FC6, 0x8B04);
 	T.r[0] = a.u(2);
 	tick(0x6FCA, 27);
 	jsr(0x6FCE, 0x8AB6);
 	T.r[2] = 0;
+	fl::clr();
 	tick(0x6FD0, 12);
 	tick(0x7036, 12);                                  // BR
 	for (;;)
 	{
-		T.r[2]++;
+		T.r[2] = fl::inc(T.r[2]);
 		tick(0x7038, 12);
 		const bool more = (int16_t)T.r[2] <= (int16_t)a.u(1);
+		fl::cmp(T.r[2], peek((uint16_t)(T.r[6] + 0x0A)));
 		tick(0x703C, 27);                              // CMP R2,0xA(SP)
 		if (!more) break;
 		tick(0x6FD2, 12);                              // BLE
 		T.r[0] = T.r[2];
+		fl::mov(T.r[0]);
 		tick(0x6FD4, 12);
-		T.r[0] = (uint16_t)(T.r[0] + a.u(2));
+		T.r[0] = fl::add(T.r[0], a.u(2));
 		tick(0x6FD8, 27);
 		jsr(0x6FDC, 0x8B04);
 		T.r[1] = peek(peek(0x020C));
+		fl::mov(T.r[1]);
 		tick(0x6FE0, 33);
-		poke(0x020C, (uint16_t)(peek(0x020C) + 2));
+		poke(0x020C, fl::add(peek(0x020C), 2));
 		tick(0x6FE6, 33);
 		push(T.r[1]);
+		fl::mov(T.r[1]);
 		tick(0x6FE8, 24);
 		push(0);
 		tick(0x6FEA, 24);
 		push(4);
+		fl::mov(0x0004);
 		tick(0x6FEE, 30);
 		push(1);
 		tick(0x6FF2, 30);
@@ -210,6 +220,7 @@ uint16_t draw_bar_table(const Args &a)
 		{
 			tick(0x6FFE, 12);
 			T.r[0] = peek(0x0186);
+			fl::mov(T.r[0]);
 			tick(0x7002, 24);
 			T.r[0] = (uint16_t)(T.r[0] + 0x0080);
 			tick(0x7006, 18);
@@ -220,6 +231,7 @@ uint16_t draw_bar_table(const Args &a)
 		}
 		for (;;)
 		{
+			fl::cmp(T.r[1], 0x0008);
 			tick(0x7014, 18);                          // CMP R1,#8
 			if ((int16_t)T.r[1] < 8) break;
 			tick(0x7016, 12);
@@ -233,8 +245,9 @@ uint16_t draw_bar_table(const Args &a)
 		}
 		tick(0x7028, 12);                              // BLT
 		poke(peek(0x0186), 0x009E);
+		fl::mov(0x009E);
 		tick(0x702E, 42);
-		poke(peek(0x0186), (uint16_t)(peek(peek(0x0186)) - T.r[1]));
+		poke(peek(0x0186), fl::sub(peek(peek(0x0186)), T.r[1]));
 		tick(0x7032, 36);
 		T.r[6] += 0x0A;
 		tick(0x7036, 18);                              // ADD #0x0A,SP
@@ -304,24 +317,31 @@ uint16_t colour_test_pattern(const Args &)
 {
 	c_save(4, 0x7308);
 	T.r[6] -= 4;
+	fl::cmp(peek(T.r[6]), peek(T.r[6]));
+	fl::cmp(peek(T.r[6]), peek(T.r[6]));
+	fl::cmp(peek(T.r[6]), peek(T.r[6]));
+	fl::cmp(peek(T.r[6]), peek(T.r[6]));
 	tick(0x730A, 30);                                  // CMP -(SP),-(SP)
 	jsr(0x730E, 0x8CE8);                               // clear_playfield
 	jsr(0x7312, 0x8D2C);                               // clear_text_ram
 	poke(0x0186, 0x2411);
 	tick(0x7318, 33);
 	T.r[1] = 0;
+	fl::clr();
 	tick(0x731A, 12);
 	for (;;)
 	{
 		T.r[0] = T.r[1];
+		fl::mov(T.r[0]);
 		tick(0x731C, 12);
-		T.r[0] = (uint16_t)(T.r[0] + 0x0030);
+		T.r[0] = fl::add(T.r[0], 0x0030);
 		tick(0x7320, 18);
 		jsr(0x7324, 0x8C56);                           // draw_big_char
-		poke(0x0186, (uint16_t)(peek(0x0186) + 0x0018));
+		poke(0x0186, fl::add(peek(0x0186), 0x0018));
 		tick(0x732A, 33);
 		T.r[1]++;
 		tick(0x732C, 12);
+		fl::cmp(T.r[1], 0x0003);
 		tick(0x7330, 18);                              // CMP R1,#3
 		if ((int16_t)T.r[1] > 3) break;
 		tick(0x731A, 12);                              // BLE
@@ -337,14 +357,16 @@ uint16_t colour_test_pattern(const Args &)
 	for (;;)                                           // rows
 	{
 		T.r[1] = 0;
+		fl::clr();
 		tick(0x7346, 12);
 		T.r[4] = 3;
+		fl::mov(T.r[4]);
 		tick(0x734A, 18);
 		for (;;)                                       // palettes
 		{
 			T.r[5] = T.r[4];
 			tick(0x734C, 12);
-			T.r[5] = (uint16_t)(T.r[5] + 8);
+			T.r[5] = fl::add(T.r[5], 8);
 			tick(0x7350, 18);
 			T.r[3] = 8;
 			tick(0x7354, 18);
@@ -360,35 +382,39 @@ uint16_t colour_test_pattern(const Args &)
 				tick(0x7360, 27);
 				const uint16_t addr = rw(T.r[6]);
 				poke(addr, T.r[1]);
+				fl::mov(T.r[1]);
 				tick(0x7364, 36);
-				poke(addr, (uint16_t)(peek(addr) | T.r[5]));
+				poke(addr, fl::logic((uint16_t)(peek(addr) | T.r[5])));
 				tick(0x7368, 36);
-				T.r[0] = (uint16_t)(T.r[0] + 2);
+				T.r[0] = fl::add(T.r[0], 2);
 				tick(0x736C, 18);
 				if (--T.r[3] == 0) break;
 				tick(0x7354, 18);                      // SOB
 			}
 			tick(0x736E, 18);
-			T.r[1] = (uint16_t)(T.r[1] + 0x4000);
+			T.r[1] = fl::add(T.r[1], 0x4000);
 			tick(0x7372, 18);
-			T.r[0] = (uint16_t)(T.r[0] + 0x000C);
+			T.r[0] = fl::add(T.r[0], 0x000C);
 			tick(0x7376, 18);
-			T.r[4]--;
+			T.r[4] = fl::dec(T.r[4]);
 			tick(0x7378, 12);
 			if ((int16_t)T.r[4] < 0) break;
 			tick(0x734A, 12);                          // BGE
 		}
 		tick(0x737A, 12);
-		T.r[0] = (uint16_t)(T.r[0] + 0x0090);
+		T.r[0] = fl::add(T.r[0], 0x0090);
 		tick(0x737E, 18);
 		const uint16_t rows = (uint16_t)(rw((uint16_t)(T.r[6] + 2)) - 1);
 		ww((uint16_t)(T.r[6] + 2), rows);
+		fl::dec((uint16_t)(peek((uint16_t)(T.r[6] + 2)) + 1));
 		tick(0x7382, 30);
 		if (rows == 0) break;
 		tick(0x7344, 12);                              // BNE
 	}
 	tick(0x7384, 12);
 	T.r[6] += 4;
+	fl::cmp(peek((uint16_t)(T.r[6] - 2)), peek((uint16_t)(T.r[6] - 2)));
+	fl::cmp(peek((uint16_t)(T.r[6] - 2)), peek((uint16_t)(T.r[6] - 2)));
 	tick(0x7386, 24);                                  // CMP (SP)+,(SP)+
 	c_restore(4);
 	return T.r[0];

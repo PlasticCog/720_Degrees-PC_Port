@@ -30,6 +30,7 @@ using namespace steps;
 // interrupts are let in after every instruction (tick).
 void draw_large_char()
 {
+	fl::tst(T.r[0]);
 	tick(0x8B54, 12);                                  // TST R0
 	if (T.r[0] == 0)
 	{
@@ -46,41 +47,51 @@ void draw_large_char()
 	T.r[1] = 0x8B62;
 	tick(0xF144, 30);
 	push(T.r[2]);
+	fl::mov(T.r[2]);
 	tick(0xF146, 24);
 	push(T.r[3]);
+	fl::mov(T.r[3]);
 	tick(0xF148, 24);
 	push(T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0xF14A, 24);
 	T.r[1] = saved_r1;
+	fl::mov(T.r[1]);
 	tick(0xF14E, 27);
 	ww(T.r[6], 0xF150);                                // JSR PC,@(SP)+
 	tick(0x8B62, 30);
 
 	const uint16_t c = T.r[0] & 0x007F;
 	T.r[0] = c;
+	fl::logic(T.r[0]);
 	tick(0x8B66, 18);                                  // BIC #0xFF80,R0
 	T.r[3] = peek(0x0188);
+	fl::mov(T.r[3]);
 	tick(0x8B6A, 24);                                  // MOV @#0x0188,R3
+	fl::cmp(T.r[0], 0x0030);
 	tick(0x8B6E, 18);                                  // CMP R0,#0x30
 	bool carry = false;                                // C as the epilogue leaves it
 	if (c >= 0x30)
 	{
 		tick(0x8B70, 12);                              // BLT
+		fl::cmp(T.r[0], 0x0039);
 		tick(0x8B74, 18);                              // CMP R0,#0x39
 		if (c <= 0x39)
 		{
 			tick(0x8C5A, 12);                          // BLE into the body of F:8C56
 			T.r[0] = (uint16_t)(c - 0x30);
+			fl::sub((uint16_t)(T.r[0] + 0x0030), 0x0030);
 			tick(0x8C5E, 18);
 			T.r[0] = (uint16_t)(T.r[0] << 1);
 			tick(0x8C60, 12);
 			T.r[0] = (uint16_t)(T.r[0] << 1);
 			tick(0x8C62, 12);
-			T.r[0] |= peek(0x0188);
+			T.r[0] = fl::logic((uint16_t)(T.r[0] | peek(0x0188)));
 			tick(0x8C66, 24);
 			T.r[1] = peek(0x0186);
+			fl::mov(T.r[1]);
 			tick(0x8C6A, 24);
-			T.r[0] = (uint16_t)(T.r[0] + peek(0x018A));
+			T.r[0] = fl::add(T.r[0], peek(0x018A));
 			tick(0x8C6E, 24);
 			ww(T.r[1], T.r[0]);
 			T.r[1] += 2;
@@ -91,11 +102,12 @@ void draw_large_char()
 			T.r[1] += 2;
 			tick(0x8C74, 21);
 			poke(0x0186, T.r[1]);
+			fl::mov(T.r[1]);
 			tick(0x8C78, 27);
 			carry = T.r[1] + 0x007C > 0xFFFF;
 			T.r[1] = (uint16_t)(T.r[1] + 0x007C);
 			tick(0x8C7C, 18);
-			T.r[0]++;
+			T.r[0] = fl::inc(T.r[0]);
 			tick(0x8C7E, 12);
 			ww(T.r[1], T.r[0]);
 			T.r[1] += 2;
@@ -108,33 +120,37 @@ void draw_large_char()
 		}
 	}
 	tick(0x8B76, 12);                                  // BLT / BLE
+	fl::cmp(T.r[0], 0x002C);
 	tick(0x8B7A, 18);                                  // CMP R0,#0x2C
 	if (c == 0x2C)
 	{
 		tick(0x8B7C, 12);                              // BNE
 		T.r[1] = peek(0x0186);
+		fl::mov(T.r[1]);
 		tick(0x8B80, 24);
 		T.r[2] = 0x0087;
 		tick(0x8B84, 18);
-		T.r[2] |= T.r[3];
+		T.r[2] = fl::logic((uint16_t)(T.r[2] | T.r[3]));
 		tick(0x8B86, 12);
 		ww(T.r[1], T.r[2]);
 		T.r[1] += 2;
 		tick(0x8B88, 21);
 		poke(0x0186, T.r[1]);
+		fl::mov(T.r[1]);
 		tick(0x8B8C, 27);
 		carry = T.r[1] + 0x007E > 0xFFFF;
 		T.r[1] = (uint16_t)(T.r[1] + 0x007E);
 		tick(0x8B90, 18);
 		T.r[2] = 0x007D;
 		tick(0x8B94, 18);
-		T.r[2] |= T.r[3];
+		T.r[2] = fl::logic((uint16_t)(T.r[2] | T.r[3]));
 		tick(0x8B96, 12);
 		ww(T.r[1], T.r[2]);
 		tick(0x8B98, 21);
 		goto epilogue;
 	}
 	tick(0x8B9A, 12);                                  // BNE
+	fl::cmp(T.r[0], 0x001F);
 	tick(0x8B9E, 18);                                  // CMP R0,#0x1F
 	if (c == 0x1F)
 	{
@@ -146,6 +162,7 @@ void draw_large_char()
 	else
 	{
 		tick(0x8BA6, 12);                              // BNE
+		fl::cmp(T.r[0], 0x002D);
 		tick(0x8BAA, 18);                              // CMP R0,#0x2D
 		if (c == 0x2D)
 		{
@@ -160,6 +177,7 @@ void draw_large_char()
 		else
 		{
 			tick(0x8BB2, 12);                          // BNE
+			fl::cmp(T.r[0], 0x003D);
 			tick(0x8BB6, 18);                          // CMP R0,#0x3D
 			if (c == 0x3D)
 			{
@@ -168,11 +186,13 @@ void draw_large_char()
 				tick(0x8BBC, 18);
 			}
 			tick(0x8BC4, 12);                          // BNE / BR
+			fl::cmp(T.r[0], 0x0040);
 			tick(0x8BC8, 18);                          // CMP R0,#0x40
 			if ((int16_t)c > 0x40)
 			{
 				tick(0x8BD8, 12);                      // BGT
 				T.r[0] = (uint16_t)(c - 0x41);
+				fl::sub((uint16_t)(T.r[0] + 0x0041), 0x0041);
 				tick(0x8BDC, 18);
 				T.r[0] = (uint16_t)(T.r[0] << 1);
 				tick(0x8BDE, 12);
@@ -183,56 +203,67 @@ void draw_large_char()
 			{
 				tick(0x8BCA, 12);                      // BGT
 				T.r[0] = (uint16_t)(c - 0x20);
+				fl::sub((uint16_t)(T.r[0] + 0x0020), 0x0020);
 				tick(0x8BCE, 18);
 				T.r[0] = (uint16_t)(int16_t)(int8_t)rb((uint16_t)(0x8C86 + T.r[0]));
+				fl::movb((uint8_t)T.r[0]);
 				tick(0x8BD2, 27);
-				T.r[0] &= 0x00FF;
+				T.r[0] = fl::logic((uint16_t)(T.r[0] & 0x00FF));
 				tick(0x8BD6, 18);
 				tick(0x8BE0, 12);                      // BR
 			}
 		}
 	}
 	// the tile group at 0x4000 + R0, written with the colour bits R3
-	T.r[0] = (uint16_t)(T.r[0] + 0x4000);
+	T.r[0] = fl::add(T.r[0], 0x4000);
 	tick(0x8BE4, 18);
 	T.r[1] = peek(0x0186);
 	tick(0x8BE8, 24);
 	T.r[2] = 0;
+	fl::clr();
 	tick(0x8BEA, 12);
 	T.r[2] |= rb(T.r[0]++);
+	fl::logicb((uint8_t)T.r[2]);
 	tick(0x8BEC, 18);
-	T.r[2] |= T.r[3];
+	T.r[2] = fl::logic((uint16_t)(T.r[2] | T.r[3]));
 	tick(0x8BEE, 12);
 	ww(T.r[1], T.r[2]);
 	T.r[1] += 2;
 	tick(0x8BF0, 21);
 	T.r[2] &= 0xFF00;
+	fl::clr();
 	tick(0x8BF2, 12);
 	T.r[2] |= rb(T.r[0]++);
+	fl::logicb((uint8_t)T.r[2]);
 	tick(0x8BF4, 18);
-	T.r[2] |= T.r[3];
+	T.r[2] = fl::logic((uint16_t)(T.r[2] | T.r[3]));
 	tick(0x8BF6, 12);
 	ww(T.r[1], T.r[2]);
 	T.r[1] += 2;
 	tick(0x8BF8, 21);
 	poke(0x0186, T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0x8BFC, 27);
 	T.r[1] = (uint16_t)(T.r[1] + 0x007C);
 	tick(0x8C00, 18);
 	T.r[2] &= 0xFF00;                                  // CLRB R2 (C clear from here on)
+	fl::clr();
 	tick(0x8C02, 12);
 	T.r[2] |= rb(T.r[0]++);
+	fl::logicb((uint8_t)T.r[2]);
 	tick(0x8C04, 18);
-	T.r[2] |= T.r[3];
+	T.r[2] = fl::logic((uint16_t)(T.r[2] | T.r[3]));
 	tick(0x8C06, 12);
 	ww(T.r[1], T.r[2]);
 	T.r[1] += 2;
 	tick(0x8C08, 21);
 	T.r[2] &= 0xFF00;
+	fl::clr();
 	tick(0x8C0A, 12);
 	T.r[2] |= rb(T.r[0]);
+	fl::logicb((uint8_t)T.r[2]);
 	tick(0x8C0C, 18);
-	T.r[2] |= T.r[3];
+	T.r[2] = fl::logic((uint16_t)(T.r[2] | T.r[3]));
 	tick(0x8C0E, 12);
 	ww(T.r[1], T.r[2]);
 	tick(0x8C10, 21);
@@ -243,8 +274,10 @@ epilogue:
 	tick(0xF150, 21);
 	tick(0xF176, 12);
 	T.r[3] = pop();
+	fl::mov(T.r[3]);
 	tick(0xF178, 18);
 	T.r[2] = pop();
+	fl::mov(T.r[2]);
 	tick(0xF17A, 18);
 	T.r[1] = pop();
 	f_nzvc(nzw(T.r[1]) | (carry ? CF : 0));
@@ -284,22 +317,30 @@ void clear_text_ram() { clear_video(0x8D3E, 0x3800, 0x3FFE); }
 void irq_32v_play()
 {
 	push(T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0xB9D6, 24);
 	push(T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0xB9D8, 24);
 	push(T.r[2]);
+	fl::mov(T.r[2]);
 	tick(0xB9DA, 24);
 	push(T.r[3]);
+	fl::mov(T.r[3]);
 	tick(0xB9DC, 24);
 	push(T.r[4]);
+	fl::mov(T.r[4]);
 	tick(0xB9DE, 24);
 	push(T.r[5]);
+	fl::mov(T.r[5]);
 	tick(0xB9E0, 24);
 	poke(0x15C0, 0);                                   // acknowledge
+	fl::clr();
 	tick(0xB9E4, 27);
-	pokeb(0x0191, (uint8_t)(peekb(0x0191) + 1));
+	pokeb(0x0191, fl::incb(peekb(0x0191)));
 	tick(0xB9E8, 27);
 	T.r[0] = 0;
+	fl::clr();
 	tick(0xB9EA, 12);
 	T.psw &= 0x10;                                     // MTPS #0: other interrupts may come in
 	T.check_irqs = true;
@@ -308,11 +349,13 @@ void irq_32v_play()
 	tick(0xB9F2, 36);
 	jsr(0xB9F6, 0x8068);                               // select_video_bank0
 	const bool first = peekb(0x0191) == 1;
+	fl::cmpb(peekb(0x0191), 0x01);
 	tick(0xB9FC, 30);                                  // CMPB @#0x0191,#1
 	if (first)
 	{
 		tick(0xB9FE, 12);
 		pokeb(0x0993, 1);
+		fl::movb(0x01);
 		tick(0xBA04, 33);
 		tick(0xBA12, 12);                              // BR
 		jsr(0xBA16, 0xB1C8);                           // sprite_link
@@ -321,6 +364,7 @@ void irq_32v_play()
 	{
 		tick(0xBA06, 12);                              // BNE
 		const bool fourth = peekb(0x0191) == 4;
+		fl::cmpb(peekb(0x0191), 0x04);
 		tick(0xBA0C, 30);                              // CMPB @#0x0191,#4
 		if (fourth)
 		{
@@ -333,21 +377,28 @@ void irq_32v_play()
 			tick(0xBA16, 12);                          // BNE
 	}
 	poke(0x01D0, rw(T.r[6]));
+	fl::mov(peek(0x01D0));
 	tick(0xBA1A, 33);
 	jsr(0xBA1E, 0x8096);                               // reselect_video_bank
 	T.r[6] += 2;
 	tick(0xBA20, 18);                                  // TST (SP)+
 	T.r[5] = pop();
+	fl::mov(T.r[5]);
 	tick(0xBA22, 18);
 	T.r[4] = pop();
+	fl::mov(T.r[4]);
 	tick(0xBA24, 18);
 	T.r[3] = pop();
+	fl::mov(T.r[3]);
 	tick(0xBA26, 18);
 	T.r[2] = pop();
+	fl::mov(T.r[2]);
 	tick(0xBA28, 18);
 	T.r[1] = pop();
+	fl::mov(T.r[1]);
 	tick(0xBA2A, 18);
 	T.r[0] = pop();
+	fl::mov(T.r[0]);
 	tick(0xBA2C, 18);                                  // RTI in the table
 }
 

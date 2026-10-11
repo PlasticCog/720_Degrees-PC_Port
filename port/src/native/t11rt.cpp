@@ -104,6 +104,8 @@ void check_irqs()
 bool g_atomic = false;
 uint16_t g_min_sp = 0xffff;
 uint32_t g_atomic_steps = 0, g_atomic_limit = ATOMIC_STEP_LIMIT;
+std::vector<uint64_t> *g_traces[MAX_TRACES];
+int g_trace_count = 0;
 
 bool sync_slow(uint16_t next)
 {
@@ -111,6 +113,11 @@ bool sync_slow(uint16_t next)
 	if (g_atomic)
 	{
 		if (T.r[6] < g_min_sp) g_min_sp = T.r[6];
+		if (g_trace_count)
+		{
+			const uint64_t step = (uint64_t)next << 32 | (uint64_t)T.r[6] << 16 | T.psw;
+			for (int i = 0; i < g_trace_count; i++) g_traces[i]->push_back(step);
+		}
 		if (++g_atomic_steps > g_atomic_limit) throw AtomicTimeout{};
 		return true;
 	}

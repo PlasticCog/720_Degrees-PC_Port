@@ -5,6 +5,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -49,6 +50,9 @@ struct Slot {
 	double off_abs = 0;                                    // sum of |native - original| over those
 	double orig_cycles = 0, native_cycles = 0;            // per tested call, callees included
 	std::string first_bad;
+	uint64_t step_bad = 0;                                 // tested calls whose steps differ (see difftest)
+	std::string first_step;
+	std::map<uint16_t, uint16_t> wrong;                    // instruction -> original / rewrite PSW after it
 };
 
 // the routine tables of the routines_*.cpp files
@@ -180,7 +184,7 @@ std::string fmt(const char *f, ...)
 // A rewritten routine called by another rewritten routine under test (on the replacement's
 // side) is tested as well, with its own snapshots; the outer test then continues with the
 // original's result of the inner call, as everywhere else.
-struct Snapshots { Board::Snapshot b0, b1, b2; };
+struct Snapshots { Board::Snapshot b0, b1, b2; std::vector<uint64_t> o, w; };
 std::vector<std::unique_ptr<Snapshots>> g_snapshots;   // one set per nesting depth
 
 void difftest(Slot &s)
@@ -195,6 +199,20 @@ void difftest(Slot &s)
 	const bool atomic0 = g_atomic;
 	const uint16_t min_outer = g_min_sp;
 	const uint32_t steps0 = outer ? 0 : g_atomic_steps;
+	// The steps of both runs (each instruction boundary: next PC, SP, PSW) are traced and
+	// compared: the rewrite has to step through the same addresses with the same stack and
+	// condition codes as the original, as an interrupt may come in at any of them and push
+	// them.  The original's steps here are also steps of the tests this one is nested in.
+	std::vector<uint64_t> *traces0[MAX_TRACES];
+	const int ntraces0 = g_trace_count;
+	std::copy(g_traces, g_traces + ntraces0, traces0);
+	const bool tracing = ntraces0 < MAX_TRACES;
+	auto restore_traces = [&]() {
+		std::copy(traces0, traces0 + ntraces0, g_traces);
+		g_trace_count = ntraces0;
+	};
+	sn.o.clear();
+	sn.w.clear();
 	B->save(b0);
 	const uint16_t args[4] = { rw(t0.r[6] + 2), rw(t0.r[6] + 4), rw(t0.r[6] + 6), rw(t0.r[6] + 8) };
 	g_atomic = true;
@@ -211,6 +229,7 @@ void difftest(Slot &s)
 		g_atomic = atomic0;
 		if (outer) g_atomic_limit = ATOMIC_STEP_LIMIT;
 		g_min_sp = min_outer;
+		restore_traces();
 		s.timeouts++;
 		// the routine now waits for real: what interrupts call meanwhile is tested as usual
 		g_testing--;
@@ -223,6 +242,7 @@ void difftest(Slot &s)
 	g_atomic_steps = steps0;
 	g_original_side = true;
 	T.r[7] = s.orig->addr;
+	if (tracing) g_traces[g_trace_count++] = &sn.o;
 	try { s.orig->fn(); }
 	catch (const AtomicTimeout &) { give_up(); return; }
 	g_original_side = false;
@@ -238,12 +258,50 @@ void difftest(Slot &s)
 	B->load(b0);
 	g_min_sp = 0xffff;
 	g_atomic_steps = steps0;
+	if (tracing)
+	{
+		g_traces[0] = &sn.w;
+		g_trace_count = 1;
+	}
 	try { run_native(*s.r); }
 	catch (const AtomicTimeout &) { give_up(); return; }
 	const Ctx t2 = T;
 	const int cycles2 = (t0.icount - t2.icount) - (t2.aborted - t0.aborted);
 	const uint16_t min2 = g_min_sp;
 	B->save(b2);
+	restore_traces();
+	if (tracing)
+	{
+		const std::vector<uint64_t> &o = sn.o, &w = sn.w;
+		size_t k = 0;
+		const size_t m = std::min(o.size(), w.size());
+		while (k < m && o[k] == w[k]) k++;
+		if (k < m || o.size() != w.size())
+		{
+			s.step_bad++;
+			if (s.first_step.empty())
+			{
+				auto step = [](const std::vector<uint64_t> &v, size_t i) {
+					return i < v.size() ? fmt("%04X sp %04X psw %02X", (unsigned)(v[i] >> 32) & 0xffff,
+						(unsigned)(v[i] >> 16) & 0xffff, (unsigned)v[i] & 0xff) : std::string("(none)");
+				};
+				s.first_step = fmt("args %04X %04X %04X %04X, step %zu of %zu/%zu", args[0], args[1], args[2], args[3],
+					k, o.size(), w.size()) + (k ? fmt(" after %04X", (unsigned)(o[k - 1] >> 32) & 0xffff) : std::string()) +
+					": original " + step(o, k) + ", rewrite " + step(w, k);
+			}
+			// where the same addresses are stepped through, the instructions after which the
+			// condition codes start to differ (the first instruction for step 0)
+			for (size_t i = k; i < m; i++)
+			{
+				if ((o[i] >> 16) != (w[i] >> 16)) break;
+				if (o[i] != w[i] && (i == 0 || o[i - 1] == w[i - 1]) && s.wrong.size() < 200)
+				{
+					const uint16_t at = i ? (uint16_t)(o[i - 1] >> 32) : s.orig->addr;
+					s.wrong.emplace(at, (uint16_t)((o[i] & 0xff) << 8 | (w[i] & 0xff)));
+				}
+			}
+		}
+	}
 
 	// compare; stack memory below the final stack pointer is dead and not compared
 	std::string d;
@@ -417,8 +475,16 @@ std::string report(bool all)
 		if (s.off_time) out += fmt("  timing off in %llu calls (avg %.0f cycles)", (unsigned long long)s.off_time, s.off_abs / s.off_time);
 		if (s.timeouts) out += fmt("  waits (not compared) %llu", (unsigned long long)s.timeouts);
 		if (s.unwound) out += fmt("  left by an interrupt %llu", (unsigned long long)s.unwound);
+		if (s.step_bad) out += fmt("  steps differ in %llu", (unsigned long long)s.step_bad);
 		out += "\n";
 		if (!s.first_bad.empty()) out += "      first mismatch: " + s.first_bad + "\n";
+		if (!s.first_step.empty()) out += "      first step difference: " + s.first_step + "\n";
+		if (!s.wrong.empty())
+		{
+			out += "      condition codes differ after:";
+			for (const auto &w : s.wrong) out += fmt(" %04X(%02X/%02X)", w.first, w.second >> 8, w.second & 0xff);
+			out += "\n";
+		}
 	}
 	return out;
 }

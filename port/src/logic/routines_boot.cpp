@@ -28,6 +28,7 @@ uint16_t install_selftest_interrupts(const Args &)
 	push(T.r[1]);
 	tick(0xF3AA, 24);
 	poke(0x1600, 0);
+	fl::clr();
 	tick(0xF3AE, 27);
 	poke(0x1580, 0);
 	tick(0xF3B2, 27);
@@ -71,14 +72,17 @@ void irq_32v_count()
 	push(T.r[0]);
 	tick(0x8926, 24);
 	T.r[0] = sext8(peekb(0x0191));
+	fl::movb((uint8_t)T.r[0]);
 	tick(0x892A, 24);
-	T.r[0]++;
+	T.r[0] = fl::inc(T.r[0]);
 	tick(0x892C, 12);
 	pokeb(0x0191, (uint8_t)T.r[0]);
 	tick(0x8930, 27);
 	poke(0x15C0, 0);                                   // acknowledge
+	fl::clr();
 	tick(0x8934, 27);
 	T.r[0] = pop();
+	fl::mov(T.r[0]);
 	tick(0x8936, 18);
 }
 
@@ -130,9 +134,11 @@ void init_display_b6()
 void print_ok()
 {
 	T.r[0] = 0x004F;
+	fl::mov(T.r[0]);
 	tick(0xF4C4, 18);
 	jsr(0xF4C8, 0x8B52);                               // draw_large_char
 	T.r[0] = 0x004B;
+	fl::mov(T.r[0]);
 	tick(0xF4CC, 18);
 	jsr(0xF4D0, 0x8B52);
 	rts();
@@ -144,6 +150,7 @@ uint16_t button_hold_timer(const Args &)
 {
 	c_save(4, 0xF8EE);
 	const bool held = (peekb(0x0193) & 0x40) != 0;
+	fl::logicb((uint8_t)(0x40 & peekb(0x0193)));
 	tick(0xF8F4, 30);
 	if (held)
 	{
@@ -164,6 +171,7 @@ uint16_t button_hold_timer(const Args &)
 	{
 		tick(0xF902, 12);                              // BEQ
 		pokeb(0x0FE7, 0x3C);
+		fl::movb(0x3C);
 		tick(0xF908, 33);
 	}
 	jsr(0xF90C, 0x8D86);
@@ -177,10 +185,12 @@ uint16_t button_hold_timer(const Args &)
 uint16_t rotary_step(const Args &)
 {
 	push(T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0x8E30, 24);
 	T.r[1] = peek(0x01C6);
+	fl::mov(T.r[1]);
 	tick(0x8E34, 24);
-	T.r[1] = (uint16_t)(T.r[1] - peek(0x02BC));
+	T.r[1] = fl::sub(T.r[1], peek(0x02BC));
 	tick(0x8E38, 24);
 	if ((int16_t)T.r[1] < 0)
 	{
@@ -188,6 +198,7 @@ uint16_t rotary_step(const Args &)
 		T.r[0] = 0xFFFF;
 		tick(0x8E3E, 18);
 		T.r[1] = (uint16_t)-T.r[1];
+		fl::neg((uint16_t)(-T.r[1]));
 		tick(0x8E40, 12);
 		tick(0x8E46, 12);                              // BR
 	}
@@ -195,26 +206,32 @@ uint16_t rotary_step(const Args &)
 	{
 		tick(0x8E42, 12);                              // BPL
 		T.r[0] = 1;
+		fl::mov(T.r[0]);
 		tick(0x8E46, 18);
 	}
+	fl::cmp(T.r[1], 0x0048);
 	tick(0x8E4A, 18);                                  // CMP R1,#0x48
 	if ((int16_t)T.r[1] > 0x48)
 	{
 		tick(0x8E4C, 12);
 		T.r[0] = (uint16_t)-T.r[0];
+		fl::neg((uint16_t)(-T.r[0]));
 		tick(0x8E4E, 12);
 		T.r[1] = (uint16_t)-T.r[1];
+		fl::neg((uint16_t)(-T.r[1]));
 		tick(0x8E50, 12);
-		T.r[1] = (uint16_t)(T.r[1] + 0x0090);
+		T.r[1] = fl::add(T.r[1], 0x0090);
 		tick(0x8E54, 18);
 	}
 	else
 		tick(0x8E54, 12);                              // BLE
+	fl::cmp(T.r[1], 0x0010);
 	tick(0x8E58, 18);                                  // CMP R1,#0x10
 	if ((int16_t)T.r[1] < 0x10)
 	{
 		tick(0x8E5A, 12);
 		T.r[0] = 0;
+		fl::clr();
 		tick(0x8E5C, 12);
 		tick(0x8E64, 12);                              // BR
 	}
@@ -222,9 +239,11 @@ uint16_t rotary_step(const Args &)
 	{
 		tick(0x8E5E, 12);                              // BGE
 		poke(0x02BC, peek(0x01C6));
+		fl::mov(peek(0x02BC));
 		tick(0x8E64, 39);
 	}
 	T.r[1] = pop();
+	fl::mov(T.r[1]);
 	tick(0x8E66, 18);
 	rts();
 	return T.r[0];
@@ -322,10 +341,13 @@ void selftest_colour_screen()
 uint16_t rotary_zone_step(const Args &a)
 {
 	push(T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0xF898, 24);
 	T.r[0] = 0;
+	fl::clr();
 	tick(0xF89A, 12);
 	const bool waiting = peekb(0x0FE7) != 0;
+	fl::tstb(peekb(0x0FE7));
 	tick(0xF89E, 24);
 	if (waiting)
 	{
@@ -422,25 +444,33 @@ done:
 void irq_vblank_selftest()
 {
 	push(T.r[0]);
+	fl::mov(T.r[0]);
 	tick(0x893A, 24);
 	push(T.r[1]);
+	fl::mov(T.r[1]);
 	tick(0x893C, 24);
 	push(T.r[2]);
+	fl::mov(T.r[2]);
 	tick(0x893E, 24);
 	push(T.r[3]);
+	fl::mov(T.r[3]);
 	tick(0x8940, 24);
 	push(T.r[4]);
+	fl::mov(T.r[4]);
 	tick(0x8942, 24);
 	push(T.r[5]);
+	fl::mov(T.r[5]);
 	tick(0x8944, 24);
 	poke(0x15E0, 0);                                   // acknowledge
+	fl::clr();
 	tick(0x8948, 27);
 	jsr(0x894C, 0x8036);                               // load_scroll_registers
-	poke(0x01C4, (uint16_t)(peek(0x01C4) + 1));
+	poke(0x01C4, fl::inc(peek(0x01C4)));
 	tick(0x8950, 27);
-	pokeb(0x0192, (uint8_t)(peekb(0x0192) + 1));
+	pokeb(0x0192, fl::incb(peekb(0x0192)));
 	tick(0x8954, 27);
 	const bool test_off = (peek(0x1800) & 0x8000) != 0;
+	fl::logic((uint16_t)(0x8000 & peek(0x1800)));
 	tick(0x895A, 30);
 	if (test_off)
 	{
@@ -453,11 +483,13 @@ void irq_vblank_selftest()
 	jsr(0x8964, 0x917C);                               // feed_watchdog
 	jsr(0x8968, 0x80A4);                               // read_input_edges
 	const bool pressed = (peekb(0x0193) & 0x80) != 0;
+	fl::tstb(peekb(0x0193));
 	tick(0x896C, 24);
 	if (pressed)
 	{
 		tick(0x896E, 12);
 		const bool held = peekb(0x0190) != 0;
+		fl::tstb(peekb(0x0190));
 		tick(0x8972, 24);
 		if (held)
 			tick(0x8986, 12);                          // BNE
@@ -465,6 +497,7 @@ void irq_vblank_selftest()
 		{
 			tick(0x8974, 12);
 			pokeb(0x0190, 1);
+			fl::movb(0x01);
 			tick(0x897A, 33);
 			pokeb(0x0FE6, 1);
 			tick(0x8980, 33);
@@ -475,22 +508,30 @@ void irq_vblank_selftest()
 	{
 		tick(0x8982, 12);                              // BPL
 		pokeb(0x0190, 0);
+		fl::clr();
 		tick(0x8986, 27);
 	}
 	poke(0x15C0, 0);                                   // acknowledge
+	fl::clr();
 	tick(0x898A, 27);
 	jsr(0x898E, 0x8096);                               // reselect_video_bank
 	T.r[5] = pop();
+	fl::mov(T.r[5]);
 	tick(0x8990, 18);
 	T.r[4] = pop();
+	fl::mov(T.r[4]);
 	tick(0x8992, 18);
 	T.r[3] = pop();
+	fl::mov(T.r[3]);
 	tick(0x8994, 18);
 	T.r[2] = pop();
+	fl::mov(T.r[2]);
 	tick(0x8996, 18);
 	T.r[1] = pop();
+	fl::mov(T.r[1]);
 	tick(0x8998, 18);
 	T.r[0] = pop();
+	fl::mov(T.r[0]);
 	tick(0x899A, 18);
 }
 
@@ -580,6 +621,7 @@ uint16_t selftest_items_screen(const Args &)
 	tick(0xF9A8, 18);
 	jsr(0xF9AC, 0x8AB6);
 	poke(0x0184, 0x5CD2);
+	fl::mov(0x5CD2);
 	tick(0xF9B2, 33);
 	T.r[2] = 0x000F;
 	tick(0xF9B6, 18);
@@ -592,7 +634,7 @@ uint16_t selftest_items_screen(const Args &)
 			T.r[0] = (uint16_t)(T.r[0] << 1);
 			tick(pc, 12);                              // ASL R0
 		}
-		T.r[0] = (uint16_t)(T.r[0] + 0x7798);
+		T.r[0] = fl::add(T.r[0], 0x7798);
 		tick(0xF9C2, 18);
 		T.r[1] = T.r[0];
 		tick(0xF9C4, 12);
@@ -611,6 +653,7 @@ uint16_t selftest_items_screen(const Args &)
 		push(T.r[1]);
 		tick(0xF9DE, 24);
 		push(0);
+		fl::clr();
 		tick(0xF9E0, 24);
 		jsr(0xF9E4, 0x4D30);
 		T.r[1] = peek(T.r[1]);
@@ -618,6 +661,7 @@ uint16_t selftest_items_screen(const Args &)
 		T.r[1] = (uint16_t)(T.r[1] + 0x2082);
 		tick(0xF9EA, 18);
 		poke((uint16_t)(T.r[1] + 0x82), 0);
+		fl::clr();
 		tick(0xF9EE, 30);
 		poke((uint16_t)(T.r[1] + 0x80), 0);
 		tick(0xF9F2, 30);
@@ -626,6 +670,9 @@ uint16_t selftest_items_screen(const Args &)
 		poke(T.r[1], 0);
 		tick(0xF9F8, 21);
 		T.r[6] += 4;
+		fl::cmp(peek((uint16_t)(T.r[6] - 2)), peek((uint16_t)(T.r[6] - 2)));
+		fl::cmp(peek((uint16_t)(T.r[6] - 2)), peek((uint16_t)(T.r[6] - 2)));
+		fl::cmp(peek((uint16_t)(T.r[6] - 2)), peek((uint16_t)(T.r[6] - 2)));
 		tick(0xF9FA, 24);                              // CMP (SP)+,(SP)+
 		T.r[2]--;
 		tick(0xF9FC, 12);
