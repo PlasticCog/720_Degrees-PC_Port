@@ -17,13 +17,12 @@ using namespace t11rt;
 
 // RTS: its cycles, then interrupts may come in at the return address as after the original's
 // RTS (with the return address off the stack, as there); the routines using it charge nothing
-// in their table entry.  The return address goes back on the stack afterwards for logic.cpp,
-// which pops it when the routine returns.
+// in their table entry.  The routine has returned (logic::returned).
 void rts()
 {
 	const uint16_t ret = pop();
 	tick(ret, 21);
-	push(ret);
+	returned(ret);
 }
 
 // JSR PC,@#addr at ret - 4: the return address goes on the stack, the JSR's cycles are

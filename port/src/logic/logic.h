@@ -107,6 +107,11 @@ uint16_t call_from(uint16_t ret, uint16_t addr, std::initializer_list<uint16_t> 
 // as it is and returns to this routine's caller.  The native routine must return right after.
 void tail_jump(uint16_t addr);
 
+// the running rewritten routine has returned to pc, its return address already off the stack
+// (the final RTS of a routine done step by step): the stack below keeps what the original
+// leaves there, such as the PSW of an interrupt taken at the return address
+void returned(uint16_t pc);
+
 // memory of the original program (same bus semantics as the translation)
 inline uint16_t peek(uint16_t a) { return t11rt::rw(a); }
 inline uint8_t peekb(uint16_t a) { return t11rt::rb(a); }

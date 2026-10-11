@@ -11938,8 +11938,7 @@ void game_over_states()
 	// The original jumps into the B3 code with its local word (and two argument words) still
 	// above the return address; the B3 code pops them and returns to our caller.  tail_jump()
 	// expects the return address on top of the stack, so the jump is made here the same way:
-	// the B3 code runs from addr and returns to the caller's address; the return address is
-	// then pushed back (the same word) for the return that ends this native routine.
+	// the B3 code runs from addr and returns to the caller's address, which ends this routine.
 	const uint16_t E = T.r[6];
 	const uint16_t L = (uint16_t)(E - 2);              // the local word
 	auto jump = [&](uint16_t addr) {
@@ -11949,7 +11948,7 @@ void game_over_states()
 		dispatch();
 		shadow_pop();
 		if (T.r[7] != ret) throw Unwound{};
-		push(ret);
+		returned(ret);
 	};
 	T.r[6] = L;
 	fl::tst(peek(T.r[6]));

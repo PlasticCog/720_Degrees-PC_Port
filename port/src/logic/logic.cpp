@@ -98,7 +98,7 @@ std::vector<Slot> g_slots;
 bool g_inited = false;
 int g_testing = 0;              // depth of difference tests in progress
 bool g_original_side = false;   // the original side of a test runs without replacements
-bool g_tail_jumped = false;     // the running native routine ended with tail_jump()
+bool g_returned = false;        // the running native routine has returned (T.r[7]): see returned()
 
 constexpr uint16_t RETURN_SENTINEL = 0xFFFE;
 
@@ -158,8 +158,8 @@ void run_native(const Routine &r)
 	}
 	else
 		r.asm_fn();
-	if (g_tail_jumped)
-		g_tail_jumped = false;                         // the jump target returned to our caller
+	if (g_returned)
+		g_returned = false;                            // the return address is already taken
 	else
 		T.r[7] = pop();
 	T.icount -= r.cycles;
@@ -389,7 +389,13 @@ void tail_jump(uint16_t addr)
 	dispatch();
 	shadow_pop();
 	if (T.r[7] != ret) throw Unwound{};
-	g_tail_jumped = true;
+	g_returned = true;                                 // the jump target returned to our caller
+}
+
+void returned(uint16_t pc)
+{
+	T.r[7] = pc;
+	g_returned = true;
 }
 
 uint16_t call_from(uint16_t ret, uint16_t addr, std::initializer_list<uint16_t> args)

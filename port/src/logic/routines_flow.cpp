@@ -25,45 +25,13 @@ void mtps(uint8_t v)
 	T.check_irqs = true;
 }
 
-// single-operand instructions with the condition codes the T-11 sets
-uint16_t asl(uint16_t d)
-{
-	const uint16_t r = (uint16_t)(d << 1);
-	f_nzvc(nzw(r) | ((d >> 15) & 1));
-	f_shift();
-	return r;
-}
-uint16_t asr(uint16_t d)
-{
-	const uint16_t r = (uint16_t)((d >> 1) | (d & 0x8000));
-	f_nzvc(nzw(r) | (d & 1));
-	f_shift();
-	return r;
-}
-uint16_t neg(uint16_t d)
-{
-	const uint16_t r = (uint16_t)-d;
-	f_nzvc(nzw(r) | (r == 0x8000 ? VF : 0) | (r ? CF : 0));
-	return r;
-}
-uint16_t ror(uint16_t d)
-{
-	const uint16_t r = (uint16_t)((d >> 1) | (C() << 15));
-	f_nzvc(nzw(r) | (d & 1));
-	f_shift();
-	return r;
-}
-
-// Cycles and interrupts.  Every routine charges what its original's instructions cost on the
-// path taken, instruction by instruction (Clock::add), and callees charge themselves.  The
-// original can be interrupted after any instruction: when its time slice ends there, the
-// board runs and a pending interrupt comes in before the next instruction.  The native code
-// syncs at the same instruction boundaries, so the board and the interrupts see the same
-// times; it also syncs (logic::tick) before each memory access, at each callee's entry (the
-// JSR included) and at the return address after the RTS, so an interrupt there sees memory
-// and the stack as in the original.
-void cyc(int n) { T.icount -= n; }
-
+// Cycles and interrupts.  Each instruction of the original is a step: its action, its
+// condition codes, then tick(next, cycles), which charges its cycles and syncs at the next
+// instruction's address.  The original can be interrupted after any instruction: when its
+// time slice ends there, the board runs and a pending interrupt comes in before the next
+// instruction.  The native code syncs at the same instruction boundaries with the same
+// registers, condition codes and stack, so the board and the interrupts see what they see
+// in the original.
 
 // The step helpers (as in the other routines files): an instruction's action, its condition
 // codes, then its cycles and the next instruction's address (tick).
@@ -244,260 +212,12 @@ void push_sp(int k, uint16_t next)
 	push(v);
 	tick(next, 39);
 }
-struct Clock {
-	int p = 0;                                         // cycles not charged yet
-	uint16_t pc = 0;                                   // address of the last sync
-	// one instruction of n cycles.  The original syncs after every instruction: when its time
-	// slice ends there (or an interrupt is to be looked at), the board runs and a pending
-	// interrupt is taken before the next instruction.  The native code syncs at the same
-	// instruction boundary, so interrupts start at the original's time (the PC pushed is the
-	// last sync address, registers may be ahead; memory is as in the original).
-	void add(int n)
-	{
-		p += n;
-		if (T.icount - p <= 0 || T.check_irqs) at(pc);
-	}
-	template <class... M> void add(int n, int m, M... more) { add(n); add(m, more...); }
-	// one instruction of n cycles, followed by the one at next
-	void step(int n, uint16_t next) { pc = next; add(n); }
-	void at(uint16_t a) { pc = a; tick(a, p); p = 0; }  // before the memory access at a
-	// JSR PC,@#callee returning to ret: the return address is pushed, the original syncs at
-	// the callee (an interrupt there lands below the return address), and syncs at ret after
-	// the callee's RTS (call_from)
-	uint16_t call(uint16_t callee, uint16_t ret)
-	{
-		push(ret);
-		tick(callee, p + 30);
-		p = 0;
-		T.r[6] = (uint16_t)(T.r[6] + 2);
-		pc = ret;
-		return call_from(ret, callee, {});
-	}
-	void flush() { cyc(p); p = 0; }
-	// JSR R1,@#helper at entry, the register-save helpers F138 / F144 / F152 / F162 (R1-R2 ..
-	// R1-R5): the JSR pushes R1, the helper pushes R2..Rn and the body address, gets R1 back
-	// and replaces the body address by its own return address (JSR PC,@(SP)+)
-	static uint16_t back(int last)
-	{
-		static const uint16_t b[6] = { 0, 0, 0xF142, 0xF150, 0xF160, 0xF172 };
-		return b[last];
-	}
-	void save(uint16_t entry, int last)
-	{
-		static const uint16_t helper[6] = { 0, 0, 0xF138, 0xF144, 0xF152, 0xF162 };
-		const uint16_t body = (uint16_t)(entry + 4);
-		uint16_t a = helper[last];
-		push(T.r[1]);
-		T.r[1] = body;
-		step(30, a);
-		for (int r = 2; r <= last; r++)
-		{
-			push(T.r[r]);
-			step(24, a += 2);
-		}
-		push(T.r[1]);
-		step(24, a += 2);
-		T.r[1] = rw((uint16_t)(T.r[6] + 2 * last));
-		step(27, a += 4);
-		ww(T.r[6], back(last));
-		step(30, body);
-	}
-	// the body's RTS into the helper, its BR to the restores and MOV (SP)+,Rn .. MOV (SP)+,R1
-	// (the helper's RTS is leave's)
-	void restore(int last)
-	{
-		uint16_t a = back(last);
-		T.r[6] = (uint16_t)(T.r[6] + 2);
-		step(21, a);
-		if (last < 5)
-		{
-			a = (uint16_t)(0xF172 + 2 * (5 - last));
-			step(12, a);
-		}
-		for (int r = last; r >= 2; r--)
-		{
-			T.r[r] = pop();
-			step(18, a += 2);
-		}
-		T.r[1] = pop();
-		step(18, a += 2);
-	}
-	// the final RTS: the original pops the return address and syncs there; the slot is put
-	// back for the caller of the native routine, which pops it
-	void leave()
-	{
-		const uint16_t sp = T.r[6], ret = rw(sp);
-		T.r[6] = (uint16_t)(sp + 2);
-		p += 21;
-		at(ret);
-		T.r[6] = sp;
-		ww(sp, ret);
-	}
-};
-
-// The routines below follow the original instruction by instruction (Clock): they charge
-// each instruction, sync before each memory access and keep the original's stack image
-// (register saves of the helpers F138-F162, arguments, return addresses through call_from).
-
-// MOV #v,R0 / MOV R0,@#shadow / MOV R0,@#bank register at pc, pc+4, pc+8
-void sel_a(Clock &k, uint16_t pc, uint16_t v)
-{
-	T.r[0] = v;
-	k.add(18);
-	k.at((uint16_t)(pc + 4)); poke(0x01D2, v); k.add(27);
-	k.at((uint16_t)(pc + 8)); poke(0x1400, v); k.add(27);
-}
-void sel_b(Clock &k, uint16_t pc, uint16_t v)
-{
-	T.r[0] = v;
-	k.add(18);
-	k.at((uint16_t)(pc + 4)); poke(0x01D4, v); k.add(27);
-	k.at((uint16_t)(pc + 8)); poke(0x1402, v); k.add(27);
-}
-void sel_ab(Clock &k, uint16_t pc, uint16_t a, uint16_t b)
-{
-	sel_a(k, pc, a);
-	sel_b(k, (uint16_t)(pc + 12), b);
-}
-
 
 // F:9034  divide_ext(int mode, -, int d, int n): n / d, truncated and signed, by shift and
 // subtract; with mode != 0 the remainder instead (sign of n).  0 when n or d is 0.
 // R1-R5 preserved (F162).
 // F:90A6  divide(int d, int n) = F:9034(0, ...);  F:90B0  modulo(int d, int n) = F:9034 with
 // a non-zero mode (the PC pushed by MOV PC,-(SP))
-// the body of F:9034 (after the register-save helper): R0 = d, R1 = n, R2 = the quotient,
-// R3 = the shift count, R4 / R5 = n / d negative
-uint16_t divide_body(Clock &k, uint16_t mode, uint16_t d, uint16_t n)
-{
-	// no memory accesses: each instruction with its flags and the address of the next one
-	T.r[1] = n; fl::mov(n); k.step(27, 0x903C);
-	if (!n)
-	{
-		k.step(12, 0x90A2);
-		T.r[0] = 0; fl::clr(); k.step(12, 0x90A4);
-		return 0;
-	}
-	k.step(12, 0x903E);
-	T.r[0] = d; fl::mov(d); k.step(27, 0x9042);
-	if (!d)
-	{
-		k.step(12, 0x90A2);
-		T.r[0] = 0; fl::clr(); k.step(12, 0x90A4);
-		return 0;
-	}
-	k.step(12, 0x9044);
-	T.r[5] = 0; fl::clr(); k.step(12, 0x9046);
-	T.r[4] = 0; fl::clr(); k.step(12, 0x9048);
-	fl::tst(T.r[1]); k.step(12, 0x904A);
-	if (T.r[1] & 0x8000)
-	{
-		k.step(12, 0x904C);
-		T.r[1] = neg(T.r[1]); k.step(12, 0x904E);
-		T.r[4] = fl::inc(T.r[4]); k.step(12, 0x9050);
-	}
-	else
-		k.step(12, 0x9050);
-	fl::tst(T.r[0]); k.step(12, 0x9052);
-	if (T.r[0] & 0x8000)
-	{
-		k.step(12, 0x9054);
-		T.r[0] = neg(T.r[0]); k.step(12, 0x9056);
-		T.r[5] = fl::inc(T.r[5]); k.step(12, 0x9058);
-	}
-	else
-		k.step(12, 0x9058);
-	T.r[3] = 0; fl::clr(); k.step(12, 0x905A);
-	// shift the divisor up to the dividend
-	for (;;)
-	{
-		fl::cmp(T.r[0], T.r[1]); k.step(12, 0x905C);
-		if ((int16_t)T.r[0] >= (int16_t)T.r[1])
-		{
-			k.step(12, 0x906A);
-			break;
-		}
-		k.step(12, 0x905E);
-		f_nzv(nzw(T.r[0] & 0x4000)); k.step(18, 0x9062);
-		if (T.r[0] & 0x4000)
-		{
-			k.step(12, 0x906A);
-			break;
-		}
-		k.step(12, 0x9064);
-		T.r[0] = asl(T.r[0]); k.step(12, 0x9066);
-		T.r[3] = fl::inc(T.r[3]); k.step(12, 0x9068);
-		k.step(12, 0x905A);
-	}
-	T.r[2] = 0; fl::clr(); k.step(12, 0x906C);
-	for (;;)
-	{
-		T.r[2] = asl(T.r[2]); k.step(12, 0x906E);
-		fl::cmp(T.r[0], T.r[1]); k.step(12, 0x9070);
-		if ((int16_t)T.r[0] <= (int16_t)T.r[1])
-		{
-			k.step(12, 0x9072);
-			T.r[2] = fl::inc(T.r[2]); k.step(12, 0x9074);
-			T.r[1] = fl::sub(T.r[1], T.r[0]); k.step(12, 0x9076);
-			if (!T.r[1])
-			{
-				k.step(12, 0x9080);
-				break;
-			}
-			k.step(12, 0x9078);
-		}
-		else
-			k.step(12, 0x9078);
-		T.r[3] = fl::dec(T.r[3]); k.step(12, 0x907A);
-		if (T.r[3] & 0x8000)
-		{
-			k.step(12, 0x9080);
-			break;
-		}
-		k.step(12, 0x907C);
-		T.r[0] = asr(T.r[0]); k.step(12, 0x907E);
-		k.step(12, 0x906C);
-	}
-	fl::tst(mode); k.step(27, 0x9084);                 // TST 0xE(SP): the mode
-	if (mode)
-	{
-		k.step(12, 0x9086);
-		fl::tst(T.r[4]); k.step(12, 0x9088);
-		if (T.r[4])
-		{
-			k.step(12, 0x908A);
-			T.r[1] = neg(T.r[1]); k.step(12, 0x908C);
-		}
-		else
-			k.step(12, 0x908C);
-		T.r[0] = T.r[1]; fl::mov(T.r[0]); k.step(12, 0x908E);
-		return T.r[0];
-	}
-	k.step(12, 0x9090);
-	fl::cmp(T.r[4], T.r[5]); k.step(12, 0x9092);
-	if (T.r[4] != T.r[5])
-	{
-		k.step(12, 0x9094);
-		T.r[2] = neg(T.r[2]); k.step(12, 0x9096);
-	}
-	else
-		k.step(12, 0x9096);
-	for (;;)
-	{
-		T.r[3] = fl::dec(T.r[3]); k.step(12, 0x9098);
-		if (T.r[3] & 0x8000)
-		{
-			k.step(12, 0x909E);
-			break;
-		}
-		k.step(12, 0x909A);
-		T.r[2] = asl(T.r[2]); k.step(12, 0x909C);
-		k.step(12, 0x9096);
-	}
-	T.r[0] = T.r[2]; fl::mov(T.r[0]); k.step(12, 0x90A0);
-	return T.r[0];
-}
-
 uint16_t divide_ext(const Args &)
 {
 	c_save(4, 0x9038);
@@ -7255,13 +6975,19 @@ void check_terrain()
 // F:8134 (assembly): a short busy delay of 20 loop passes, R0 = 0
 void short_delay()
 {
-	Clock k;
-	T.r[0] = 0x0014; fl::mov(T.r[0]); k.step(18, 0x8138);
-	do
+	T.r[0] = 0x0014;
+	fl::mov(T.r[0]);
+	tick(0x8138, 18);
+	for (;;)
 	{
-		T.r[0]--; k.step(18, T.r[0] ? 0x8138 : 0x813A);  // SOB R0
-	} while (T.r[0]);
-	k.leave();
+		if (--T.r[0] == 0)
+		{
+			tick(0x813A, 18);                          // SOB R0
+			break;
+		}
+		tick(0x8138, 18);
+	}
+	rts();
 }
 
 // F:8000 (reset): stack at 0x017E, vector 4 = vector 8; with the test switch on (IN0 bit 15
@@ -7398,174 +7124,6 @@ void attract_mode()
 	set_w(0x0EC2, 0xFFFF, 0x8322);
 	jsr(0x8326, 0x8714);                               // attract_loop: does not return
 	rts();
-}
-
-// one phase of the attract main loop (see F:8714)
-void attract_phase(Clock &k, uint8_t phase)
-{
-	switch (phase)
-	{
-	case 0:
-		sel_ab(k, 0x874E, 0x3800, 0x3C00);
-		k.call(0x5BB8, 0x876A);
-		sel_ab(k, 0x876A, 0x3800, 0x3C00);
-		k.call(0x5248, 0x8786);
-		k.add(12, 12);
-		break;
-	case 1:
-	{
-		k.at(0x8788);
-		bool show = peekb(0x0F26) == 6;
-		k.add(30, 12);
-		if (!show)
-		{
-			k.at(0x8790);
-			show = !(peek(0x01C2) & 0x000F);
-			k.add(30, 12);
-		}
-		if (show)
-		{
-			sel_ab(k, 0x8798, 0x3800, 0x3C00);
-			k.at(0x87B0); T.r[0] = sext8(peekb(0x018F)); k.add(24, 12);
-			bool title = T.r[0] == 0;
-			if (!title)
-			{
-				k.add(18, 12);
-				title = T.r[0] == 1;
-			}
-			if (title)
-			{
-				k.call(0x77B4, 0x87C0);
-			}
-			k.at(0x87C0);
-			const bool state0 = peekb(0x018F) == 0;
-			k.add(24, 12);
-			if (state0)
-			{
-				k.call(0x78BE, 0x87CA);
-			}
-		}
-		sel_ab(k, 0x87CA, 0x3800, 0x3C00);
-		k.call(0x79D4, 0x87E6);
-		k.add(12, 12);
-		break;
-	}
-	case 2:
-	{
-		k.at(0x87E8);
-		const bool park1 = peekb(0x0F59) == 1;
-		k.add(30, 12);
-		if (park1)
-		{
-			k.call(0xBBEC, 0x87F4);
-			k.add(12);
-		}
-		else
-		{
-			k.at(0x87F6);
-			const bool slots = peekb(0x0E99) != 0;
-			k.add(24, 12);
-			if (slots)
-			{
-				k.at(0x87FC);
-				const bool park0 = peekb(0x0F59) == 0;
-				k.add(24, 12);
-				if (park0)
-				{
-					sel_ab(k, 0x8802, 0x1800, 0x1C00);
-					k.call(0x48CC, 0x881E);
-				}
-			}
-		}
-		sel_a(k, 0x881E, 0x3800);
-		k.call(0x4C28, 0x882E);
-		k.at(0x882E);
-		const bool busy = peekb(0x018E) != 0;
-		k.add(24, 12);
-		if (busy) break;
-		k.at(0x8834);
-		const bool busy2 = peekb(0x0F36) != 0;
-		k.add(24, 12);
-		if (busy2) break;
-		sel_b(k, 0x883A, 0x2800);
-		k.call(0x7F16, 0x884A);
-		k.call(0x7CF6, 0x884E);
-		k.call(0x7C84, 0x8852);
-		k.add(12);
-		break;
-	}
-	case 3:
-	{
-		k.at(0x8854);
-		const bool on = peekb(0x0197) != 0;
-		k.add(24, 12);
-		if (!on) break;
-		k.at(0x885A);
-		const bool odd = (peek(0x01C2) & 1) != 0;
-		k.add(30, 12);
-		if (!odd)
-		{
-			k.call(0xD35E, 0x8866);
-		}
-		else
-		{
-			sel_ab(k, 0x8868, 0x1800, 0x1C00);
-			k.call(0x5B46, 0x8884);
-		}
-		k.add(12);
-		break;
-	}
-	case 4:
-		sel_a(k, 0x8886, 0x3800);
-		k.call(0x4B84, 0x8896);
-		k.add(12);
-		break;
-	case 5:
-	{
-		k.at(0x8898); T.r[0] = peek(0x01C2); k.add(24);
-		T.r[0] = (uint16_t)(T.r[0] + 2); k.add(18, 18, 12);
-		if (T.r[0] & 3) break;
-		k.at(0x88A6);
-		const bool on = peekb(0x0197) != 0;
-		k.add(24, 12);
-		if (!on) break;
-		k.call(0xC8AA, 0x88B0);
-		k.add(12);
-		break;
-	}
-	case 6:
-	{
-		k.at(0x88B2);
-		const bool now = !(peek(0x01C2) & 0x003F);
-		k.add(30, 12);
-		if (!now) break;
-		k.at(0x88BA);
-		const bool sw = (peek(0x1800) & 0x8000) != 0;
-		k.add(30, 12);
-		if (!sw)
-		{
-			sel_ab(k, 0x88C2, 0x3800, 0x3C00);
-			k.call(0xF372, 0x88DE);
-		}
-		sel_ab(k, 0x88DE, 0x3800, 0x3C00);
-		k.call(0x4B3E, 0x88FA);
-		k.at(0x88FA);
-		const bool state4 = peekb(0x018F) == 4;
-		k.add(30, 12);
-		if (state4)
-		{
-			k.call(0x435A, 0x8906);
-		}
-		k.at(0x8906);
-		const bool dead = peekb(0x01A2) != 0;
-		k.add(24, 12);
-		if (dead)
-		{
-			k.call(0x4B00, 0x8910);
-		}
-		break;
-	}
-	}
 }
 
 // F:8714 (assembly; waits, does not return): the main loop of the attract mode.  A new frame
@@ -8255,31 +7813,6 @@ uint16_t wait_frames(const Args &)
 	tick(0x8D84, 18);
 	rts();
 	return T.r[0];
-}
-
-// fill the playfield (video window 0, 0x2000-0x37FF) with 24 pairs of rows of the tiles R3 / R2
-void fill_rows(Clock &k, uint16_t row1, uint16_t row2)
-{
-	// MOV #0x18,R4; 1$: MOV #0x40,R0; 2$: MOV R3,(R1)+; SOB R0,2$; MOV #0x40,R0;
-	// 3$: MOV R2,(R1)+; SOB R0,3$; SOB R4,1$ (with flags and next addresses: the long loop is
-	// where the interrupts of a wipe come in)
-	T.r[4] = 0x0018; fl::mov(T.r[4]); k.step(18, (uint16_t)(row1 - 4));
-	do
-	{
-		T.r[0] = 0x0040; fl::mov(T.r[0]); k.step(18, row1);
-		do
-		{
-			k.at(row1); poke(T.r[1], T.r[3]); T.r[1] = (uint16_t)(T.r[1] + 2); fl::mov(T.r[3]); k.step(21, (uint16_t)(row1 + 2));
-			T.r[0]--; k.step(18, T.r[0] ? row1 : (uint16_t)(row1 + 4));
-		} while (T.r[0]);
-		T.r[0] = 0x0040; fl::mov(T.r[0]); k.step(18, row2);
-		do
-		{
-			k.at(row2); poke(T.r[1], T.r[2]); T.r[1] = (uint16_t)(T.r[1] + 2); fl::mov(T.r[2]); k.step(21, (uint16_t)(row2 + 2));
-			T.r[0]--; k.step(18, T.r[0] ? row2 : (uint16_t)(row2 + 4));
-		} while (T.r[0]);
-		T.r[4]--; k.step(18, T.r[4] ? (uint16_t)(row1 - 4) : (uint16_t)(row2 + 6));
-	} while (T.r[4]);
 }
 
 // F:8F74 (waits): wipe the playfield in 8 steps, 3 frames apart: palette entry 0x10B6 from

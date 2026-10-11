@@ -61,15 +61,15 @@ uint16_t jsr(uint16_t ret, uint16_t addr)
 }
 
 // The routine's final RTS PC with its interrupt point at the return address, as in the
-// original: the return address is taken, interrupts may come in there, and it is put back for
-// the caller's wrapper, which returns with it (the table charges 0 for such routines)
+// original: the return address is taken, interrupts may come in there, and the routine has
+// returned (logic::returned; the table charges 0 for such routines)
 void step_rts()
 {
 	const uint16_t ret = pop();
 	T.icount -= 21;
 	T.r[7] = ret;
 	if (!sync(ret)) throw Unwound{};
-	push(ret);
+	returned(ret);
 }
 
 // routines whose body ends at their final RTS (stepped up to it): the RTS with its interrupt
