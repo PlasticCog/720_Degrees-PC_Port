@@ -100,13 +100,16 @@ struct SteppedFrame {
 		for (int i = 2; i <= last; i++)                // MOV Ri,-(SP)
 		{
 			push(T.r[i]);
+			f_nzv(nzw(T.r[i]));
 			pc = (uint16_t)(pc + 2);
 			step(pc, 24);
 		}
 		push(T.r[1]);                                  // MOV R1,-(SP)
+		f_nzv(nzw(T.r[1]));
 		pc = (uint16_t)(pc + 2);
 		step(pc, 24);
 		T.r[1] = rw((uint16_t)(T.r[6] + 2 * last));    // MOV n(SP),R1: the caller's R1
+		f_nzv(nzw(T.r[1]));
 		pc = (uint16_t)(pc + 4);
 		step(pc, 27);
 		T.icount -= 30;                                // JSR PC,@(SP)+

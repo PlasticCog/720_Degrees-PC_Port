@@ -1239,7 +1239,7 @@ uint16_t rolling_sound(const Args &)
 		poke(0x01DC, fl::sub(peek(0x01DC), 0x001B));
 		tick(0x5BA8, 33);
 		const bool forward = (T.r[3] & 1) != 0;
-		T.r[3] = (uint16_t)(T.r[3] >> 1);              // ROR R3 (its old bit 0 into C)
+		T.r[3] = fl::ror(T.r[3]);                      // ROR R3 (its old bit 0 into C)
 		tick(0x5BAA, 12);
 		if (forward)
 			tick(0x5BAE, 12);                          // BCS
@@ -1832,10 +1832,9 @@ uint16_t project_speed(const Args &)
 	T.r[2] = peek(0x0206);
 	fl::mov(T.r[2]);
 	tick(0x4124, 24);
-	uint16_t c = (uint16_t)(T.r[1] >> 15);
 	T.r[1] = fl::asl(T.r[1]);
 	tick(0x4126, 12);                                  // ASL R1
-	T.r[2] = (uint16_t)((T.r[2] << 1) | c);
+	T.r[2] = fl::rol(T.r[2]);
 	tick(0x4128, 12);                                  // ROL R2
 	poke((uint16_t)(T.r[6] + 2), peek(0x02E2));
 	fl::mov(peek((uint16_t)(T.r[6] + 2)));
@@ -1844,11 +1843,9 @@ uint16_t project_speed(const Args &)
 	fl::mov(peek(T.r[6]));
 	tick(0x4132, 33);
 	jsr(0x4136, 0x80FA);
-	uint32_t s = (uint32_t)T.r[1] + peek(0x0204);
-	T.r[1] = (uint16_t)s;
-	fl::add((uint16_t)(T.r[1] - peek(0x0204)), peek(0x0204));
+	T.r[1] = fl::add(T.r[1], peek(0x0204));
 	tick(0x413A, 24);
-	T.r[2] = (uint16_t)(T.r[2] + (s >> 16));
+	T.r[2] = fl::adc(T.r[2]);
 	tick(0x413C, 12);                                  // ADC R2
 	T.r[2] = fl::add(T.r[2], peek(0x0206));
 	tick(0x4140, 24);
@@ -1858,25 +1855,21 @@ uint16_t project_speed(const Args &)
 	poke(0x0206, T.r[2]);
 	fl::mov(T.r[2]);
 	tick(0x4148, 27);
-	c = (uint16_t)(T.r[1] >> 15);
 	T.r[1] = fl::asl(T.r[1]);
 	tick(0x414A, 12);
-	T.r[2] = (uint16_t)((T.r[2] << 1) | c);
+	T.r[2] = fl::rol(T.r[2]);
 	tick(0x414C, 12);
-	s = (uint32_t)T.r[1] + peek(0x0204);
-	T.r[1] = (uint16_t)s;
-	fl::add((uint16_t)(T.r[1] - peek(0x0204)), peek(0x0204));
+	T.r[1] = fl::add(T.r[1], peek(0x0204));
 	tick(0x4150, 24);
-	T.r[2] = (uint16_t)(T.r[2] + (s >> 16));
+	T.r[2] = fl::adc(T.r[2]);
 	tick(0x4152, 12);
 	T.r[2] = fl::add(T.r[2], peek(0x0206));
 	tick(0x4156, 24);
 	for (uint16_t pc = 0x4156; pc < 0x415E; pc = (uint16_t)(pc + 4))
 	{
-		c = T.r[2] & 1;
-		T.r[2] = asr(T.r[2], 1);
+		T.r[2] = fl::asr(T.r[2]);
 		tick((uint16_t)(pc + 2), 12);                  // ASR R2
-		T.r[1] = (uint16_t)((T.r[1] >> 1) | (c << 15));
+		T.r[1] = fl::ror(T.r[1]);
 		tick((uint16_t)(pc + 4), 12);                  // ROR R1
 	}
 	poke((uint16_t)(T.r[6] + 2), peek(0x02E6));
@@ -1886,11 +1879,9 @@ uint16_t project_speed(const Args &)
 	fl::mov(peek(T.r[6]));
 	tick(0x4168, 33);
 	jsr(0x416C, 0x80FA);
-	s = (uint32_t)T.r[1] + peek(0x0204);
-	T.r[1] = (uint16_t)s;
-	fl::add((uint16_t)(T.r[1] - peek(0x0204)), peek(0x0204));
+	T.r[1] = fl::add(T.r[1], peek(0x0204));
 	tick(0x4170, 24);
-	T.r[2] = (uint16_t)(T.r[2] + (s >> 16));
+	T.r[2] = fl::adc(T.r[2]);
 	tick(0x4172, 12);
 	poke(0x0206, fl::add(peek(0x0206), T.r[2]));
 	tick(0x4176, 27);
@@ -1908,15 +1899,14 @@ uint16_t project_speed(const Args &)
 	T.r[1] |= peekb(0x0206);
 	fl::logicb((uint8_t)T.r[1]);
 	tick(0x4182, 24);
-	T.r[1] = (uint16_t)((T.r[1] >> 8) | (T.r[1] << 8));
+	T.r[1] = fl::swab(T.r[1]);
 	tick(0x4184, 12);                                  // SWAB R1
 	for (uint16_t pc = 0x4184; pc < 0x4194; pc = (uint16_t)(pc + 4))
 	{
-		c = T.r[2] & 1;
-		T.r[2] = asr(T.r[2], 1);
-		tick((uint16_t)(pc + 2), 12);
-		T.r[1] = (uint16_t)((T.r[1] >> 1) | (c << 15));
-		tick((uint16_t)(pc + 4), 12);
+		T.r[2] = fl::asr(T.r[2]);
+		tick((uint16_t)(pc + 2), 12);                  // ASR R2
+		T.r[1] = fl::ror(T.r[1]);
+		tick((uint16_t)(pc + 4), 12);                  // ROR R1
 	}
 	poke(0x01B4, T.r[1]);
 	fl::mov(T.r[1]);
@@ -2045,6 +2035,7 @@ uint16_t direction_from_object7(const Args &)
 			else
 				tick(0x5014, 12);                      // BGE
 			T.r[0] = T.r[2];
+			fl::mov(T.r[0]);
 			tick(0x5016, 12);
 			c_restore(2);
 			return T.r[0];
@@ -2067,6 +2058,7 @@ uint16_t direction_from_object7(const Args &)
 	else
 		tick(0x5014, 12);
 	T.r[0] = T.r[2];
+	fl::mov(T.r[0]);
 	tick(0x5016, 12);
 	c_restore(2);
 	return T.r[0];
@@ -2399,8 +2391,9 @@ uint16_t message_box(const Args &a)
 		// a tile at (R1)+: the colour first, then the tile number added (BIS)
 		auto corner = [&](uint16_t tile, uint16_t pc) {
 			poke(T.r[1], T.r[0]);
+			fl::mov(T.r[0]);
 			tick(pc, 21);
-			poke(T.r[1], peek(T.r[1]) | tile);
+			poke(T.r[1], fl::logic((uint16_t)(peek(T.r[1]) | tile)));
 			T.r[1] = (uint16_t)(T.r[1] + 2);
 			tick((uint16_t)(pc + 4), 27);
 		};
@@ -2706,6 +2699,7 @@ void expire_messages()
 						T.r[0] = fl::asl(T.r[0]);
 						tick(0x4BF4, 12);
 						poke((uint16_t)(0x0348 + T.r[1]), peek((uint16_t)(0x034A + T.r[0])));
+						fl::mov(peek((uint16_t)(0x0348 + T.r[1])));
 						tick(0x4BFA, 45);
 						poke((uint16_t)(0x0338 + T.r[1]), peek((uint16_t)(0x033A + T.r[0])));
 						tick(0x4C00, 45);
@@ -3641,7 +3635,10 @@ uint16_t insert_high_score(const Args &a)
 		tick(0x4410, 12);
 	}
 	if (!found)
+	{
+		fl::tst(T.r[5]);
 		tick(0x441A, 12);                              // TST R5
+	}
 	if (T.r[5] & 0x8000)
 		tick(0x446E, 12);                              // BLT
 	else
@@ -3996,6 +3993,7 @@ void fallen_skater()
 				poke(0x02FA, fl::dec(peek(0x02FA)));
 				tick(0x5120, 27);
 				end = !peek(0x02FA);
+				fl::tst(peek(0x02FA));
 				tick(0x5124, 24);                      // TST @#0x02FA
 				tick(end ? 0x5126 : 0x5140, 12);       // BNE
 			}
@@ -4004,6 +4002,7 @@ void fallen_skater()
 		{
 			tick(0x5120, 12);                          // BLT
 			end = !peek(0x02FA);
+			fl::tst(peek(0x02FA));
 			tick(0x5124, 24);                          // TST @#0x02FA
 			tick(end ? 0x5126 : 0x5140, 12);           // BNE
 		}
@@ -4087,6 +4086,7 @@ void fallen_skater()
 				poke(0x01B4, v);
 				fl::sub((uint16_t)(peek(0x01B4) + 0x0014), 0x0014);
 				tick(0x5154, 33);
+				T.psw = (uint8_t)(T.psw & ~(CF | VF));
 				tick(0x5156, 18);                      // CCC CV
 				if ((int16_t)v > 0)
 					tick(0x5192, 12);                  // BGT
@@ -5062,12 +5062,11 @@ uint16_t terrain_event(const Args &)
 	tick(0x5398, 12);
 	T.r[0] = fl::asl(T.r[0]);
 	tick(0x539A, 12);
-	static const uint16_t cases[25] = {
-		0x539E, 0x539E, 0x539E, 0x539E, 0x5460, 0x5460, 0x5460, 0x5460, 0x547E, 0x5486,
-		0x548E, 0x55A8, 0x54FA, 0x5502, 0x55A8, 0x550A, 0x5522, 0x548E, 0x555A, 0x5582,
-		0x5582, 0x5582, 0x5582, 0x55A8, 0x55A8,
-	};
-	tick(ev <= 25 ? cases[ev - 1] : 0x55A8, 27);       // ADD 0x55AC(R0),PC
+	// events 1-25 (jump table 0x55AC); the map data has no others
+	const uint16_t at = fl::add(0x539E, peek((uint16_t)(0x55AC + T.r[0])));
+	if (ev == 0 || ev > 25)
+		leave_to(at);
+	tick(at, 27);                                      // ADD 0x55AC(R0),PC
 	switch (ev)
 	{
 	case 1: case 2: case 3: case 4:                    // park entrances
@@ -5546,15 +5545,16 @@ void shapes_touch()
 	// CLRB a; SWAB a; BPL; COMB a+1 at p: the high byte of the word at a, sign-extended
 	auto hi_byte = [](uint16_t a, uint16_t p) {
 		pokeb(a, 0);
+		fl::clr();
 		tick((uint16_t)(p + 4), 27);
 		const uint16_t w = peek(a);
-		poke(a, (uint16_t)((w >> 8) | (w << 8)));
+		poke(a, fl::swab(w));
 		const bool neg = (w & 0x8000) != 0;
 		tick((uint16_t)(p + 8), 27);
 		if (neg)
 		{
 			tick((uint16_t)(p + 10), 12);              // BPL
-			pokeb((uint16_t)(a + 1), (uint8_t)~peekb((uint16_t)(a + 1)));
+			pokeb((uint16_t)(a + 1), fl::comb(peekb((uint16_t)(a + 1))));
 			tick((uint16_t)(p + 14), 27);
 		}
 		else
@@ -5782,6 +5782,7 @@ void shapes_touch()
 			tick(0x586A, 27);
 			hi_byte(0x0232, 0x586A);
 			T.r[5] = peek(0x0230);
+			fl::mov(T.r[5]);
 			tick(0x587C, 24);
 			if ((int16_t)T.r[5] <= 0)
 				tick(0x58C8, 12);                      // BLE
@@ -5885,6 +5886,7 @@ void shapes_touch()
 		tick(0x58D8, 27);
 		hi_byte(0x0232, 0x58D8);
 		T.r[0] = peek(0x0232);
+		fl::mov(T.r[0]);
 		tick(0x58EA, 24);
 		T.r[1] = T.r[4];
 		fl::mov(T.r[1]);
@@ -6302,6 +6304,7 @@ void shapes_touch()
 	else
 	{
 		T.r[0] = 0;
+		fl::clr();
 		tick(0x5A40, 12);
 	}
 	T.r[6] = fl::add(T.r[6], 0x000C);
@@ -7269,7 +7272,7 @@ void downhill_zone()
 			{
 				tick(0x5964, 12);                      // BLOS
 				five = (T.r[3] & 1) != 0;              // ROR R3 (the carry is clear after the CMP)
-				T.r[3] = (uint16_t)(T.r[3] >> 1);
+				T.r[3] = fl::ror(T.r[3]);
 				tick(0x5966, 12);
 				if (five)
 				{
@@ -7357,11 +7360,9 @@ void downhill_zone()
 	}
 	T.r[0] = fl::asl(T.r[0]);
 	tick(0x59B0, 12);
-	// the zone's action (jump table 0x5A3E; actions above 8 are not used by the game and do
-	// nothing here)
-	static const uint16_t to[9] = {0x59FA, 0x59B4, 0x59FA, 0x59C2, 0x59C8, 0x59C8, 0x59C8, 0x59C8, 0x59D4};
-	const uint16_t k = (uint16_t)(T.r[0] >> 1);
-	const uint16_t at = k < 9 ? to[k] : 0x59FA;
+	// the zone's action (jump table 0x5A3E: 0x59FA, 0x59B4, 0x59FA, 0x59C2, 0x59C8 x 4,
+	// 0x59D4; the game uses no others)
+	const uint16_t at = fl::add(0x59B4, peek((uint16_t)(0x5A3E + T.r[0])));
 	tick(at, 27);                                      // ADD 0x5A3E(R0),PC
 	switch (at)
 	{
@@ -7388,6 +7389,7 @@ void downhill_zone()
 		tick(0x59D2, 27);
 		tick(0x59F4, 12);                              // BR
 		jsr(0x59F8, 0x5844);                           // slope_event
+		fl::tst(peek(T.r[6]));
 		T.r[6] = (uint16_t)(T.r[6] + 2);
 		tick(0x59FA, 18);                              // TST (SP)+
 		break;
@@ -7422,8 +7424,10 @@ void downhill_zone()
 		}
 		break;
 	}
-	default:
+	case 0x59FA:                                       // nothing
 		break;
+	default:
+		leave_to(at);
 	}
 	T.r[0] = 0;
 	fl::clr();
@@ -8399,6 +8403,7 @@ uint16_t trick_moves(const Args &)
 		case 0:                                        // rising
 		{
 			const bool below = (int16_t)peek(0x06B2) < (int16_t)peek(0x0300);
+			fl::cmp(peek(0x06B2), peek(0x0300));
 			tick(0x5536, 36);                          // CMP @#0x06B2,@#0x0300
 			if (below)
 			{
@@ -9098,6 +9103,7 @@ uint16_t velocity_direction(const Args &)
 			{
 				tick(0x4AAC, 12);                      // BGT
 				T.r[1] = 0;
+				fl::clr();
 				tick(0x4AAE, 12);
 			}
 			else
@@ -9118,6 +9124,7 @@ uint16_t velocity_direction(const Args &)
 			int k = 0;
 			for (; k < 4; k++)
 			{
+				fl::cmp(T.r[0], limits[k]);
 				tick((uint16_t)(pc + 4), 18);          // CMP R0,#limit
 				if ((int16_t)T.r[0] <= (int16_t)limits[k]) break;
 				pc = (uint16_t)(pc + 10 + (k ? 2 : 0)); // BGT to the next CMP
@@ -9127,12 +9134,14 @@ uint16_t velocity_direction(const Args &)
 			{
 				tick(0x4AAC, 12);                      // BGT
 				T.r[1] = 0;
+				fl::clr();
 				tick(0x4AAE, 12);
 			}
 			else if (k < 4)
 			{
 				tick((uint16_t)(pc + 6), 12);          // BGT
 				T.r[1] = (uint16_t)k;
+				fl::mov(T.r[1]);
 				tick((uint16_t)(pc + 10), 18);
 			}
 			else
@@ -11653,7 +11662,6 @@ uint16_t enter_high_score(const Args &a)
 					}
 					tick(0x48DA, 12);
 					const uint8_t letter = peekb(LET);
-					const bool carry = letter < 0x3F;
 					fl::cmpb(peekb((uint16_t)(T.r[6] + 0x0A)), 0x3F);
 					tick(0x48E0, 33);                  // CMPB 0xA(SP),#0x3F
 					if (letter == 0x3F)
@@ -11720,7 +11728,7 @@ uint16_t enter_high_score(const Args &a)
 					{
 						tick(0x4930, 12);              // BNE
 						const bool space = (T.r[2] & 1) != 0;
-						T.r[2] = (uint16_t)(((carry ? 1u : 0u) << 15) | (T.r[2] >> 1));
+						T.r[2] = fl::ror(T.r[2]);      // the CMPB's carry in
 						tick(0x4932, 12);              // ROR R2
 						if (space)
 						{
