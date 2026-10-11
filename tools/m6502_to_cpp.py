@@ -4,6 +4,11 @@ Code discovery: runtime coverage (re/work/*/scov.txt[.edges]) + vectors + static
 + the two RTS-dispatch tables.  Each instruction is translated with the exact semantics of
 the reference interpreter (port/src/ref/m6502.cpp): same flags, bus accesses and cycles.
 Output: port/src/game/s65_code.cpp, s65_tables.cpp, s65_decls.h
+
+Rewritten routines: port/src/sound/routines.txt lists the routines that have a hand-written
+C++ replacement (port/src/sound).  For each, the translated function is renamed snd_..._orig
+and a small wrapper is generated that hands calls to the replacement (sound::enter); the
+translation stays for the difference test (s65_originals in s65_tables.cpp).
 """
 import os, sys, glob, collections
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -75,6 +80,15 @@ SIZE = {'imp': 1, 'acc': 1, 'imm': 2, 'zp': 2, 'zpx': 2, 'zpy': 2, 'abs': 3, 'ab
         'indx': 2, 'indy': 2, 'ind': 3, 'rel': 2}
 
 VECTORS = {rd16(0xfffc): 'reset', rd16(0xfffa): 'nmi', rd16(0xfffe): 'irq'}
+
+# routines with a hand-written replacement (port/src/sound/routines.txt): [(addr, name)]
+OVERRIDES = []
+_ovf = os.path.join(ROOT, 'port', 'src', 'sound', 'routines.txt')
+if os.path.exists(_ovf):
+    for _line in open(_ovf):
+        _parts = _line.split('#')[0].split()
+        if _parts:
+            OVERRIDES.append((int(_parts[0], 16), _parts[1] if len(_parts) > 1 else ''))
 RTS_TABLES = [(0x434B, 0x4638, 15), (0x4378, 0x5ECA, 24)]
 
 
@@ -336,10 +350,26 @@ def main():
         owner[a] = cur
         prev_end = insns[a].next
     fnmap = {f.entry: f.name for f in funcs}
-    lines = [HEADER, '#include "s65_decls.h"', '']
+    by_entry = {f.entry: f for f in funcs}
+    override_index = {}
+    for addr, oname in OVERRIDES:
+        if addr not in by_entry:
+            raise SystemExit('port/src/sound/routines.txt: %04X %s is not a routine entry' % (addr, oname))
+        override_index[addr] = len(override_index)
+    lines = [HEADER, '#include "s65_decls.h"', 'namespace sound { bool enter(int index); }', '']
     for f in funcs:
         lines.append('// ---- %04X%s' % (f.entry, ('  ' + VECTORS[f.entry]) if f.entry in VECTORS else ''))
-        lines.append('void %s()' % f.name)
+        if f.entry in override_index:
+            # hand-written replacement in port/src/sound; the translation stays as _orig
+            lines.append('void %s_orig();' % f.name)
+            lines.append('void %s()' % f.name)
+            lines.append('{')
+            lines.append('\tif (S.pc == 0x%04X && sound::enter(%d)) return;' % (f.entry, override_index[f.entry]))
+            lines.append('\t%s_orig();' % f.name)
+            lines.append('}')
+            lines.append('void %s_orig()' % f.name)
+        else:
+            lines.append('void %s()' % f.name)
         lines.append('{')
         lines.append('\tuint16_t ad = 0; uint8_t v = 0;')
         lines.append('dispatch_local:')
@@ -377,7 +407,18 @@ def main():
                 fh.write('\t' + ', '.join(row) + ',\n')
                 row = []
         fh.write('};\n')
-    print('sound program: %d instructions, %d functions' % (len(insns), len(funcs)))
+        rows = [(addr, by_entry[addr]) for addr, _ in OVERRIDES]
+        for addr, f in rows:
+            fh.write('void %s_orig();\n' % f.name)
+        fh.write('\nextern const s65rt::S65Original s65_originals[] = {\n')
+        for addr, f in rows:
+            fh.write('\t{ 0x%04X, %s_orig, %d },\n' % (addr, f.name, len(f.addrs)))
+        if not rows:
+            fh.write('\t{ 0, nullptr, 0 },\n')
+        fh.write('};\n')
+        fh.write('extern const int s65_original_count = %d;\n' % len(rows))
+        fh.write('extern const int s65_total_instructions = %d;\n' % len(insns))
+    print('sound program: %d instructions, %d functions, %d rewritten' % (len(insns), len(funcs), len(OVERRIDES)))
 
 
 if __name__ == '__main__':

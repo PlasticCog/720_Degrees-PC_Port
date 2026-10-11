@@ -16,7 +16,9 @@ translated original only (--no-rewrite), and compares
   - the sound commands (frame and value).  Their cycle stamps are not compared: the
     rewrites charge an instruction's cycles after its access and the translation before, so
     a stamp taken during the write differs by that instruction's cycles while the time slices
-    come out the same.
+    come out the same;
+  - the sound CPU: its RAM per frame, and every write to the chips and latches with its
+    time (render720 --sound-io-log), which is what the audio is made of.
 
 With --original-exe the two runs come from different programs: the rewrite from --exe (such
 as render720native, built without the translated main program) and the original from
@@ -82,6 +84,23 @@ def compare_sound(a, b):
     return len(la), first
 
 
+def compare_files(a, b):
+    """(lines, first differing line or None)"""
+    la = open(a).read().splitlines()
+    lb = open(b).read().splitlines()
+    if la == lb:
+        return len(la), None
+    return len(la), next((k for k in range(min(len(la), len(lb))) if la[k] != lb[k]), min(len(la), len(lb)))
+
+
+def first_frame_differing(a, b, size):
+    n = min(len(a), len(b)) // size
+    for f in range(n):
+        if a[f * size:(f + 1) * size] != b[f * size:(f + 1) * size]:
+            return f
+    return None if len(a) == len(b) else n
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--exe', default=os.path.join(HERE, '..', 'port', 'build', 'render720.exe'))
@@ -106,7 +125,8 @@ def main():
         os.makedirs(base)
         exe = args.exe if rewrite else (args.original_exe or args.exe)
         cmd = [exe, '--roms', args.roms, '--frames', str(args.frames or frames),
-               '--ram-dump', base + '.bin', '--sound-log', base + '.snd'] + extra
+               '--ram-dump', base + '.bin', '--sound-log', base + '.snd',
+               '--sound-ram-dump', base + '.sram', '--sound-io-log', base + '.sio'] + extra
         if args.images:
             cmd += ['--out', base, '--png-every', str(args.images)]
         if not rewrite:
@@ -129,6 +149,11 @@ def main():
                        sounds, 'same' if fs is None else 'differ from #%d' % fs)
             line += '  stack page %s' % ('same' if fs_ is None else 'differs from frame %d' % fs_)
             same &= fr is None and fv is None and frames[0] == frames[1] and fs is None and fs_ is None
+            fsr = first_frame_differing(open(a + '.sram', 'rb').read(), open(b + '.sram', 'rb').read(), 0x1000)
+            writes, fw = compare_files(a + '.sio', b + '.sio')
+            line += '  sound RAM %s  chip accesses %d %s' % ('same' if fsr is None else 'differs from frame %d' % fsr,
+                                                           writes, 'same' if fw is None else 'differ from #%d' % fw)
+            same &= fsr is None and fw is None
             if args.images:
                 count, bad, first = compare_images(a, b)
                 line += '  screens %4d, %d differ%s' % (count, bad, ' (first frame %d)' % first if bad else '')

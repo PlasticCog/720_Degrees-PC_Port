@@ -28,7 +28,8 @@ set(D720_TRANSLATOR_INPUTS
   ${REPO_ROOT}/tools/t11dis.py ${REPO_ROOT}/tools/romset.py ${REPO_ROOT}/tools/t11_cycles.txt
   ${REPO_ROOT}/re/coverage/main_cov.txt ${REPO_ROOT}/re/coverage/main_edges.txt
   ${REPO_ROOT}/re/coverage/sound_cov.txt ${REPO_ROOT}/re/coverage/sound_edges.txt
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/logic/routines.txt)
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/logic/routines.txt
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/sound/routines.txt)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${D720_TRANSLATOR_INPUTS})
 set(D720_TRANSLATOR_HASH "")
 foreach(f ${D720_TRANSLATOR_INPUTS})
@@ -157,7 +158,8 @@ target_link_libraries(refcpu PUBLIC board)
 # Native game core: translated programs + runtime
 if(D720_GAME)
 include(src/game/files.cmake)
-file(GLOB D720_LOGIC_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/logic/*.cpp)
+file(GLOB D720_LOGIC_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/logic/*.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/sound/*.cpp)
 add_library(gamecore STATIC
   src/native/t11rt.cpp
   src/native/t11dispatch.cpp
@@ -165,10 +167,11 @@ add_library(gamecore STATIC
   ${D720_LOGIC_SOURCES}
   src/native/nativemachine.cpp
   src/native/s65rt.cpp
+  src/native/s65dispatch.cpp
   src/game/s65_code.cpp
   src/game/s65_tables.cpp
   ${T11_GENERATED})
-target_include_directories(gamecore PUBLIC src/native src/game src/logic)
+target_include_directories(gamecore PUBLIC src/native src/game src/logic src/sound)
 target_link_libraries(gamecore PUBLIC board)
 if(NOT MSVC)
   set_source_files_properties(${T11_GENERATED} src/game/s65_code.cpp PROPERTIES COMPILE_OPTIONS "-O1;-fno-strict-aliasing")
@@ -183,9 +186,10 @@ add_library(gamecore_native STATIC
   ${D720_LOGIC_SOURCES}
   src/native/nativemachine.cpp
   src/native/s65rt.cpp
+  src/native/s65dispatch.cpp
   src/game/s65_code.cpp
   src/game/s65_tables.cpp)
-target_include_directories(gamecore_native PUBLIC src/native src/game src/logic)
+target_include_directories(gamecore_native PUBLIC src/native src/game src/logic src/sound)
 target_compile_definitions(gamecore_native PUBLIC D720_NO_TRANSLATION)
 target_link_libraries(gamecore_native PUBLIC board)
 endif()

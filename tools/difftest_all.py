@@ -201,11 +201,11 @@ def main():
     with ThreadPoolExecutor(max_workers=min(args.jobs, len(todo))) as ex:
         for name, rc, text in ex.map(run, todo):
             if not header:
-                header = next((l for l in text.splitlines() if l.startswith('rewritten routines')), '')
+                header = '\n'.join(l for l in text.splitlines() if l.startswith('rewritten '))
             if rc != 0 or 'done:' not in text:
                 problems.append('%s: render720 exited with %d' % (name, rc))
             for l in text.splitlines():
-                if l.startswith('logic:'):
+                if l.startswith('logic:') or l.startswith('sound:'):
                     problems.append('%s: %s' % (name, l))
             for key, r in parse(text).items():
                 m = merged.setdefault(key, {'name': r['name'], 'calls': 0, 'tested': 0, 'bad': 0, 'cyc': 0.0, 'ncyc': 0.0,
@@ -256,10 +256,11 @@ def main():
             lines.append('      condition codes differ after: ' + ' '.join(m['wrong'][a] for a in sorted(m['wrong'])))
         if m['regs']:
             lines.append('      registers differ after: ' + ' '.join(sorted(m['regs'])))
-    for line in open(os.path.join(ROOT, 'port', 'src', 'logic', 'routines.txt'), encoding='utf-8'):
-        f = line.split()
-        if f and not f[0].startswith('#') and f[0] not in merged:
-            untested.append('%s %s (never called)' % (f[0], f[1] if len(f) > 1 else ''))
+    for path, prefix in (('logic', ''), ('sound', 'S:')):
+        for line in open(os.path.join(ROOT, 'port', 'src', path, 'routines.txt'), encoding='utf-8'):
+            f = line.split()
+            if f and not f[0].startswith('#') and prefix + f[0] not in merged:
+                untested.append('%s%s %s (never called)' % (prefix, f[0], f[1] if len(f) > 1 else ''))
     bad = sum(m['bad'] for m in merged.values())
     lines.append('')
     lines.append('total mismatches: %d' % bad)

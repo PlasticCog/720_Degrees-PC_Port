@@ -16,23 +16,46 @@ int sshadow_top = 0;
 static void *g_sound_fiber = nullptr;
 static void *g_host = nullptr;
 
+int g_io_mode = 0;
+std::vector<IoEvent> g_io_events;
+const std::vector<IoEvent> *g_io_replay = nullptr;
+size_t g_io_replay_pos = 0;
+int32_t g_io_cyc0 = 0;
+bool g_atomic6 = false;
+std::vector<uint64_t> *g_trace6 = nullptr;
+uint32_t g_steps6 = 0, g_step_limit6 = 0;
+
+uint8_t io_read_slow(uint16_t a)
+{
+	uint8_t v = 0xff;
+	if (g_io_mode == 1)
+		v = SB->sound_read(a);
+	else
+	{
+		// the original's next read (a different address reads 0xFF; the comparison shows it)
+		const std::vector<IoEvent> &r = *g_io_replay;
+		while (g_io_replay_pos < r.size() && r[g_io_replay_pos].write) g_io_replay_pos++;
+		if (g_io_replay_pos < r.size())
+		{
+			if (r[g_io_replay_pos].addr == a) v = r[g_io_replay_pos].data;
+			g_io_replay_pos++;
+		}
+	}
+	g_io_events.push_back({a, v, false, S.cyc - g_io_cyc0});
+	return v;
+}
+
+void io_write_slow(uint16_t a, uint8_t v)
+{
+	if (g_io_mode == 1) SB->sound_write(a, v);
+	g_io_events.push_back({a, v, true, S.cyc - g_io_cyc0});
+}
+
 bool sin_shadow(uint16_t pc)
 {
 	for (int i = sshadow_top - 1; i >= 0; i--)
 		if (sshadow[i] == pc) return true;
 	return false;
-}
-
-void sdispatch()
-{
-	const uint16_t pc = S.pc;
-	if (pc < 0x4000 || !s65_table[pc - 0x4000])
-	{
-		fprintf(stderr, "FATAL: translated sound program reached untranslated code at PC=%04X\n", pc);
-		fflush(stderr);
-		abort();
-	}
-	s65_table[pc - 0x4000]();
 }
 
 static void take_int(uint16_t vector, bool brk)
@@ -53,6 +76,14 @@ static void take_int(uint16_t vector, bool brk)
 bool sync6_slow(uint16_t next)
 {
 	S.pc = next;
+	if (g_atomic6)
+	{
+		if (g_trace6)
+			g_trace6->push_back((uint64_t)next << 48 | (uint64_t)S.s << 40 | (uint64_t)S.p << 32 |
+				(uint64_t)((S.cyc - g_io_cyc0) & 0xff) << 24 | (uint64_t)S.a << 16 | (uint64_t)S.x << 8 | S.y);
+		if (++g_steps6 > g_step_limit6) throw Timeout6{};
+		return true;
+	}
 	for (;;)
 	{
 		if (S.cyc >= S.end) { coro::switch_to(g_host); continue; }

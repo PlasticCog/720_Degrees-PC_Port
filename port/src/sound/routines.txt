@@ -1,0 +1,12 @@
+# Routines of the original sound program (6502) that have a hand-written replacement in this
+# folder (see sound.h).  One per line: ADDRESS name.  The translator turns each into a call of
+# the replacement; the original translation is kept for comparison.
+#
+# Check a change with:  render720 --frames N --random SEED --difftest
+4183  ack_irq
+4FF5  wait_ym
+F47B  count_8c
+F488  times10
+F490  ptr_1000
+FE1D  store_and_delay
+FE28  delay

@@ -8,6 +8,7 @@
 #include <map>
 #include "modloader.h"
 #include "logic.h"
+#include "sound.h"
 #include "extras.h"
 #include <cstdio>
 #include <cstdlib>
@@ -31,7 +32,8 @@ static void write_wav(const std::string &path, const std::vector<int16_t> &s, in
 
 int main(int argc, char **argv)
 {
-	std::string roms = "Game", out = ".", script, wav, mod, sound_log, ram_dump, palette_log, in0_log, sio_log, pal_dump;
+	std::string roms = "Game", out = ".", script, wav, mod, sound_log, ram_dump, palette_log, in0_log, sio_log, pal_dump,
+		sound_ram_dump;
 	bool hide_pf = false, hide_alpha = false;
 	int frames = 600, png_every = 0, seed = 0, stats_every = 0;
 	struct Poke { int frame; uint16_t addr, value; };
@@ -56,6 +58,7 @@ int main(int argc, char **argv)
 		else if (a == "--in0-log") in0_log = next();
 		else if (a == "--sound-io-log") sio_log = next();   // sound CPU I/O writes with the time in seconds       // changes of the sound status bits as the main CPU reads them
 		else if (a == "--ram-dump") ram_dump = next();     // per frame: main RAM, MO RAM, x/y scroll
+		else if (a == "--sound-ram-dump") sound_ram_dump = next();   // per frame: the sound CPU's RAM
 		else if (a == "--pal-dump") pal_dump = next();     // per frame: the 256 palette RAM words
 		else if (a == "--hide-pf") hide_pf = true;         // screenshots without the playfield
 		else if (a == "--hide-alpha") hide_alpha = true;   // screenshots without the text layer
@@ -108,6 +111,7 @@ int main(int argc, char **argv)
 	FILE *slog = sound_log.empty() ? nullptr : fopen(sound_log.c_str(), "w");
 	int cur_frame = 0;
 	FILE *rdump = ram_dump.empty() ? nullptr : fopen(ram_dump.c_str(), "wb");
+	FILE *sdump = sound_ram_dump.empty() ? nullptr : fopen(sound_ram_dump.c_str(), "wb");
 	FILE *pdump = pal_dump.empty() ? nullptr : fopen(pal_dump.c_str(), "wb");
 	m.board.debug.hide_pf = hide_pf;
 	m.board.debug.hide_alpha = hide_alpha;
@@ -179,6 +183,7 @@ int main(int argc, char **argv)
 			fwrite(sc, 2, 2, rdump);
 		}
 		if (pdump) fwrite(m.board.palette_ram(), 2, 0x100, pdump);
+		if (sdump) fwrite(m.board.sound_ram(), 1, 0x1000, sdump);
 		if (!snap.empty() || (png_every && (f % png_every) == png_every - 1))
 		{
 			m.board.frame_rgb(rgb.data());
@@ -212,8 +217,13 @@ int main(int argc, char **argv)
 	}
 	if (slog) fclose(slog);
 	if (rdump) fclose(rdump);
+	if (sdump) fclose(sdump);
 	if (pdump) fclose(pdump);
-	if (logic::g_difftest || logic::g_enabled) printf("%s", logic::report().c_str());
+	if (logic::g_difftest || logic::g_enabled)
+	{
+		printf("%s", logic::report().c_str());
+		printf("%s", sound::report().c_str());
+	}
 	printf("done: %d frames\n", frames);
 	return 0;
 }

@@ -3,6 +3,7 @@
 // reference interpreter exactly (flags, decimal mode, cycles, interrupt timing).
 #pragma once
 #include <cstdint>
+#include <vector>
 #include "board.h"
 
 namespace s65rt {
@@ -22,20 +23,45 @@ extern Board *SB;
 extern uint8_t *SR;              // sound RAM (4K, mirrored)
 extern const uint8_t *SROM;      // 64K sound region (ROM from 0x4000)
 
-inline uint8_t sio_rd(uint16_t a) { return SB->sound_read(a); }
-inline void sio_wr(uint16_t a, uint8_t v) { SB->sound_write(a, v); }
+// The difference test of the rewritten sound routines (port/src/sound) runs a call twice: the
+// original records its accesses to the chips and latches (io_mode 1, done for real), the
+// rewrite gets the same values for its reads and only records its writes (io_mode 2).
+struct IoEvent { uint16_t addr; uint8_t data; bool write; int32_t cyc; };
+extern int g_io_mode;                              // 0: normal, 1: record, 2: replay
+extern std::vector<IoEvent> g_io_events;           // the accesses of the run under test
+extern const std::vector<IoEvent> *g_io_replay;    // replay: the original's accesses
+extern size_t g_io_replay_pos;
+extern int32_t g_io_cyc0;                          // S.cyc when the run under test started
+uint8_t io_read_slow(uint16_t a);
+void io_write_slow(uint16_t a, uint8_t v);
+
+inline uint8_t sio_rd(uint16_t a) { return g_io_mode ? io_read_slow(a) : SB->sound_read(a); }
+inline void sio_wr(uint16_t a, uint8_t v)
+{
+	if (g_io_mode)
+		io_write_slow(a, v);
+	else
+		SB->sound_write(a, v);
+}
 inline uint8_t srd(uint16_t a)
 {
 	if ((a & 0xdfff) < 0x1000) return SR[a & 0xfff];
 	if (a >= 0x4000) return SROM[a];
-	return SB->sound_read(a);
+	return sio_rd(a);
 }
 inline void swr(uint16_t a, uint8_t v)
 {
 	if ((a & 0xdfff) < 0x1000) { SR[a & 0xfff] = v; return; }
 	if (a >= 0x4000) return;
-	SB->sound_write(a, v);
+	sio_wr(a, v);
 }
+
+// the difference test runs a call without time slices and interrupts and traces its steps:
+// each instruction boundary as next PC, S, P, A, X, Y and the cycles since the start
+extern bool g_atomic6;
+extern std::vector<uint64_t> *g_trace6;
+extern uint32_t g_steps6, g_step_limit6;
+struct Timeout6 {};                                // the step limit was reached (a wait)
 inline void spush(uint8_t v) { SR[0x100 | S.s] = v; S.s--; }
 inline uint8_t spull() { S.s++; return SR[0x100 | S.s]; }
 
@@ -110,6 +136,10 @@ inline bool sync6(uint16_t next)
 	return sync6_slow(next);
 }
 inline void sync6_dyn() { if (S.cyc >= S.end || S.nmi_pending || (S.irq && !(S.p & FI))) sync6_slow(S.pc); }
+
+// generated with the translation (s65_tables.cpp): the translated routines that have a
+// hand-written replacement (port/src/sound/routines.txt)
+struct S65Original { uint16_t addr; void (*fn)(); int size; };
 
 void sdispatch();
 extern uint16_t sshadow[256];
