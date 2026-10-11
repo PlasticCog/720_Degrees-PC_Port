@@ -89,6 +89,59 @@ void select_bank(uint16_t pc, uint16_t shadow, uint16_t reg, uint16_t v)
 void bank_a(uint16_t pc, uint16_t v) { select_bank(pc, 0x01D2, 0x1400, v); }
 void bank_b(uint16_t pc, uint16_t v) { select_bank(pc, 0x01D4, 0x1402, v); }
 
+// TST (SP)+ at pc
+void drop(uint16_t pc)
+{
+	fl::tst(peek(T.r[6]));
+	T.r[6] = (uint16_t)(T.r[6] + 2);
+	tick((uint16_t)(pc + 2), 18);
+}
+// CMP (SP)+,(SP)+ at pc
+void drop2(uint16_t pc)
+{
+	const uint16_t s = pop();
+	const uint16_t d = pop();
+	fl::cmp(s, d);
+	tick((uint16_t)(pc + 2), 24);
+}
+// the 24 rows of the wipe at pc (MOV #0x18,R4): 64 words of R3, then 64 of R2, from R1 on
+void wipe_rows(uint16_t pc)
+{
+	T.r[4] = 0x0018;
+	fl::mov(T.r[4]);
+	tick((uint16_t)(pc + 4), 18);
+	for (;;)
+	{
+		for (int half = 0; half < 2; half++)
+		{
+			const uint16_t loop = (uint16_t)(pc + (half ? 0x10 : 8));
+			T.r[0] = 0x0040;
+			fl::mov(T.r[0]);
+			tick(loop, 18);
+			const uint16_t w = half ? T.r[2] : T.r[3];
+			for (;;)
+			{
+				poke(T.r[1], w);
+				fl::mov(w);
+				T.r[1] = (uint16_t)(T.r[1] + 2);
+				tick((uint16_t)(loop + 2), 21);
+				if (--T.r[0] == 0)
+				{
+					tick((uint16_t)(loop + 4), 18);    // SOB
+					break;
+				}
+				tick(loop, 18);
+			}
+		}
+		if (--T.r[4] == 0)
+		{
+			tick((uint16_t)(pc + 0x16), 18);           // SOB R4
+			break;
+		}
+		tick((uint16_t)(pc + 4), 18);
+	}
+}
+
 // MOV @#from,@#to (39 cycles) / MOV k(SP),@#to (42; 33 for (SP)) and the step to next
 void copy_w(uint16_t from, uint16_t to, uint16_t next)
 {
@@ -4963,16 +5016,17 @@ void attract_loop()
 // 0x55, otherwise the sound CPU is marked dead (0x01A2 = 3 / 4)
 void expect_answer(uint16_t here, uint8_t want, uint8_t dead)
 {
-	Clock k;
-	k.call(0x8ED2, (uint16_t)(here + 4));       // read_sound_response
+	jsr((uint16_t)(here + 4), 0x8ED2);                 // read_sound_response
 	fl::cmp(T.r[0], want);
-	k.add(18, 12);
-	if (T.r[0] != want)
+	tick((uint16_t)(here + 8), 18);
+	if (T.r[0] == want)
+		tick((uint16_t)(here + 0x10), 12);             // BEQ
+	else
 	{
-		k.at((uint16_t)(here + 0x0A)); pokeb(0x01A2, dead); k.add(33);
-		fl::movb(dead);
+		tick((uint16_t)(here + 0x0A), 12);
+		set_b(0x01A2, dead, (uint16_t)(here + 0x10));  // the sound CPU marked dead
 	}
-	k.leave();
+	rts();
 }
 void expect_answer_aa() { expect_answer(0x8F50, 0xAA, 3); }
 void expect_answer_55() { expect_answer(0x8F62, 0x55, 4); }
@@ -4983,49 +5037,75 @@ void expect_answer_55() { expect_answer(0x8F62, 0x55, 4); }
 // dead (0x01A2 = 2); nothing happens while it is.  n on the stack counts down.
 uint16_t read_sound_bytes(const Args &)
 {
-	Clock k;
-	k.save(0x8F0C, 3);
-	T.r[1] = rw((uint16_t)(T.r[6] + 0x0A)); k.add(27);
-	T.r[2] = 0; k.add(12);
-	T.r[3] = 3; k.add(18);
-	k.at(0x8F1A);
-	const bool dead = peekb(0x01A2) != 0;
-	k.add(24, 12);
-	if (!dead)
-		for (;;)
+	c_save(2, 0x8F10);
+	T.r[1] = peek((uint16_t)(T.r[6] + 0x0A));          // where to
+	fl::mov(T.r[1]);
+	tick(0x8F14, 27);
+	T.r[2] = 0;
+	fl::clr();
+	tick(0x8F16, 12);
+	T.r[3] = 0x0003;
+	fl::mov(T.r[3]);
+	tick(0x8F1A, 18);
+	const uint8_t dead = peekb(0x01A2);
+	fl::tstb(dead);
+	tick(0x8F1E, 24);
+	if (dead)
+	{
+		tick(0x8F4E, 12);                              // BNE
+		c_restore(2);
+		return T.r[0];
+	}
+	tick(0x8F20, 12);
+	for (;;)                                           // up to 3 x 65536 tries for each byte
+	{
+		const bool ready = fl::logic((uint16_t)(peek(0x1800) & 0x0010)) != 0;
+		tick(0x8F26, 30);
+		if (ready)
 		{
-			k.at(0x8F20);
-			const bool ready = (peek(0x1800) & 0x0010) != 0;
-			k.add(30, 12);
-			if (ready)
+			tick(0x8F28, 12);
+			jsr(0x8F2C, 0x8ED2);                       // read_sound_response
+			pokeb(T.r[1], (uint8_t)T.r[0]);
+			fl::movb((uint8_t)T.r[0]);
+			T.r[1]++;
+			tick(0x8F2E, 21);
+			const uint16_t left = fl::dec(peek((uint16_t)(T.r[6] + 0x0C)));
+			poke((uint16_t)(T.r[6] + 0x0C), left);
+			tick(0x8F32, 30);
+			if (!left)
 			{
-				k.call(0x8ED2, 0x8F2C);         // read_sound_response
-				pokeb(T.r[1], (uint8_t)T.r[0]);
-				T.r[1]++;
-				k.add(21);
-				const uint16_t left = (uint16_t)(rw((uint16_t)(T.r[6] + 0x0C)) - 1);
-				ww((uint16_t)(T.r[6] + 0x0C), left);
-				k.add(30, 12);
-				if (!left)
-				{
-					k.call(0x8F62, 0x8F38);     // expect_answer_55
-					break;
-				}
-				T.r[3] = 3;
-				T.r[2] = 0;
-				k.add(18, 12);
+				tick(0x8F34, 12);                      // all there
+				jsr(0x8F38, 0x8F62);                   // expect_answer_55
+				c_restore(2);
+				return T.r[0];
 			}
-			k.call(0x917C, 0x8F44);             // feed_watchdog
-			k.add(18);
-			if (--T.r[2]) continue;
-			k.add(18);
-			if (--T.r[3]) continue;
-			k.at(0x8F48); pokeb(0x01A2, 2); k.add(33);
-			break;
+			tick(0x8F3A, 12);                          // BNE
+			T.r[3] = 0x0003;
+			fl::mov(T.r[3]);
+			tick(0x8F3E, 18);
+			T.r[2] = 0;
+			fl::clr();
+			tick(0x8F40, 12);
 		}
-	k.restore(3);
-	k.leave();
-	return T.r[0];
+		else
+			tick(0x8F40, 12);                          // BEQ
+		jsr(0x8F44, 0x917C);                           // feed_watchdog
+		if (--T.r[2] != 0)
+		{
+			tick(0x8F20, 18);                          // SOB R2
+			continue;
+		}
+		tick(0x8F46, 18);
+		if (--T.r[3] != 0)
+		{
+			tick(0x8F20, 18);                          // SOB R3
+			continue;
+		}
+		tick(0x8F48, 18);
+		set_b(0x01A2, 0x02, 0x8F4E);                   // no answer: the sound CPU is dead
+		c_restore(2);
+		return T.r[0];
+	}
 }
 
 // F:8D86 (assembly; waits for the sound CPU): the controller angle.  With interrupts masked
@@ -5036,77 +5116,152 @@ uint16_t read_sound_bytes(const Args &)
 // 0..0x8F, becomes the new 0x01C6.
 void read_controller()
 {
-	Clock k;
-	T.r[1] = 0x00E0; k.add(18);
-	mtps(0xE0); k.add(24);
-	push(0x0017); k.add(30);
-	k.call(0x8EA2, 0x8D94);                     // send_sound_command
-	poke(T.r[6], 4); k.add(27);
-	push(0x0224); k.add(30);
-	k.call(0x8F0C, 0x8DA0);                     // read_sound_bytes
-	mtps(0); k.step(30, 0x8DA4);
-	k.at(0x8DA4); poke(0x0224, (uint16_t)-peek(0x0224)); k.add(27);
-	k.at(0x8DA8); T.r[1] = peek(0x0224); k.add(24, 12);
-	T.r[0] = (int16_t)T.r[1] < 0 ? (uint16_t)-T.r[1] : T.r[1];
-	k.add(12, 12);
-	k.at(0x8DB6); poke(0x01C8, T.r[0]); k.add(27);
-	k.at(0x8DBA); poke(0x01CA, T.r[1]); k.add(27);
-	k.at(0x8DBE);
-	const bool centring = peekb(0x0226) != 0;
-	k.add(24, 12);
-	if (centring)
+	T.r[1] = 0x00E0;
+	fl::mov(T.r[1]);
+	tick(0x8D8A, 18);
+	mtps((uint8_t)T.r[1]);                             // interrupts off
+	tick(0x8D8C, 24);
+	push(0x0017);
+	fl::mov(0x0017);
+	tick(0x8D90, 30);
+	jsr(0x8D94, 0x8EA2);                               // send_sound_command(0x17)
+	poke(T.r[6], 0x0004);
+	fl::mov(0x0004);
+	tick(0x8D98, 27);
+	push(0x0224);
+	fl::mov(0x0224);
+	tick(0x8D9C, 30);
+	jsr(0x8DA0, 0x8F0C);                               // read_sound_bytes(0x0224, 4)
+	mtps(0);
+	tick(0x8DA4, 30);
+	poke(0x0224, fl::neg(peek(0x0224)));               // the rotation since the last time
+	tick(0x8DA8, 27);
+	T.r[1] = peek(0x0224);
+	fl::mov(T.r[1]);
+	tick(0x8DAC, 24);
+	if ((int16_t)T.r[1] < 0)
 	{
-		k.add(18, 12);
-		if ((int16_t)T.r[0] <= 6)
+		tick(0x8DB2, 12);                              // BLT
+		T.r[0] = T.r[1];
+		fl::mov(T.r[0]);
+		tick(0x8DB4, 12);
+		T.r[0] = fl::neg(T.r[0]);
+		tick(0x8DB6, 12);
+	}
+	else
+	{
+		tick(0x8DAE, 12);
+		T.r[0] = T.r[1];
+		fl::mov(T.r[0]);
+		tick(0x8DB0, 12);
+		tick(0x8DB6, 12);                              // BR
+	}
+	poke(0x01C8, T.r[0]);                              // its size and the rotation
+	fl::mov(T.r[0]);
+	tick(0x8DBA, 27);
+	poke(0x01CA, T.r[1]);
+	fl::mov(T.r[1]);
+	tick(0x8DBE, 27);
+	{
+		const uint8_t centre = peekb(0x0226);          // the centre sensor seen
+		fl::tstb(centre);
+		tick(0x8DC2, 24);
+		if (!centre)
+			tick(0x8E04, 12);                          // BEQ
+		else
 		{
-			k.at(0x8DCA);
-			const bool started = peekb(0x02BE) != 0;
-			k.add(24, 12);
-			if (!started)
-			{
-				k.at(0x8DD0); pokeb(0x02BE, (uint8_t)(peekb(0x02BE) + 1)); k.add(27);
-				k.at(0x8DD4); poke(0x01C6, 0x0024); k.add(33, 12);
-			}
+			tick(0x8DC4, 12);
+			fl::cmp(T.r[0], 0x0006);
+			tick(0x8DC8, 18);
+			if ((int16_t)T.r[0] > 6)
+				tick(0x8E04, 12);                      // BGT: too fast to tell
 			else
 			{
-				k.at(0x8DDC); T.r[0] = sext8(peekb(0x0227)); k.add(24);
-				k.at(0x8DE0); T.r[0] = (uint16_t)(T.r[0] + peek(0x01C6)); k.add(24, 18, 12);
-				if ((int16_t)T.r[0] > 0x0024)
+				tick(0x8DCA, 12);
+				const uint8_t passed = peekb(0x02BE);
+				fl::tstb(passed);
+				tick(0x8DCE, 24);
+				if (!passed)
 				{
-					k.at(0x8DEA); poke(0x01C6, (uint16_t)(peek(0x01C6) - 1)); k.add(27, 12);
+					tick(0x8DD0, 12);                  // the first time: the centre is 0x24
+					pokeb(0x02BE, fl::incb(peekb(0x02BE)));
+					tick(0x8DD4, 27);
+					set_w(0x01C6, 0x0024, 0x8DDA);
+					tick(0x8E04, 12);                  // BR
 				}
 				else
 				{
-					k.at(0x8DF0); T.r[0] = peek(0x01C6); k.add(24);
-					k.at(0x8DF4); T.r[1] = sext8(peekb(0x0227)); k.add(24);
-					T.r[0] = (uint16_t)(T.r[0] - T.r[1]); k.add(12, 18, 12);
-					if ((int16_t)T.r[0] < 0x0024)
+					// the position moves one step towards the centre
+					tick(0x8DDC, 12);                  // BNE
+					T.r[0] = sext8(peekb(0x0227));
+					fl::movb((uint8_t)T.r[0]);
+					tick(0x8DE0, 24);
+					T.r[0] = fl::add(T.r[0], peek(0x01C6));
+					tick(0x8DE4, 24);
+					fl::cmp(T.r[0], 0x0024);
+					tick(0x8DE8, 18);
+					if ((int16_t)T.r[0] > 0x24)
 					{
-						k.at(0x8E00); poke(0x01C6, (uint16_t)(peek(0x01C6) + 1)); k.add(27);
+						tick(0x8DEA, 12);
+						poke(0x01C6, fl::dec(peek(0x01C6)));
+						tick(0x8DEE, 27);
+						tick(0x8E04, 12);              // BR
+					}
+					else
+					{
+						tick(0x8DF0, 12);              // BLE
+						T.r[0] = peek(0x01C6);
+						fl::mov(T.r[0]);
+						tick(0x8DF4, 24);
+						T.r[1] = sext8(peekb(0x0227));
+						fl::movb((uint8_t)T.r[1]);
+						tick(0x8DF8, 24);
+						T.r[0] = fl::sub(T.r[0], T.r[1]);
+						tick(0x8DFA, 12);
+						fl::cmp(T.r[0], 0x0024);
+						tick(0x8DFE, 18);
+						if ((int16_t)T.r[0] >= 0x24)
+							tick(0x8E04, 12);          // BGE
+						else
+						{
+							tick(0x8E00, 12);
+							poke(0x01C6, fl::inc(peek(0x01C6)));
+							tick(0x8E04, 27);
+						}
 					}
 				}
 			}
 		}
 	}
-	k.at(0x8E04); poke(0x0224, (uint16_t)(peek(0x0224) + peek(0x01C6))); k.add(39);
-	k.at(0x8E0A); T.r[0] = peek(0x0224); k.add(24, 12);
+	poke(0x0224, fl::add(peek(0x0224), peek(0x01C6))); // the position, 0..0x8F
+	tick(0x8E0A, 39);
+	T.r[0] = peek(0x0224);
+	fl::mov(T.r[0]);
+	tick(0x8E0E, 24);
 	if ((int16_t)T.r[0] < 0)
 	{
-		k.at(0x8E10); poke(0x0224, (uint16_t)(peek(0x0224) + 0x0090)); k.add(33, 12);
+		tick(0x8E10, 12);
+		poke(0x0224, fl::add(peek(0x0224), 0x0090));
+		tick(0x8E16, 33);
+		tick(0x8E24, 12);                              // BR
 	}
 	else
 	{
-		k.add(18, 12);
-		if ((int16_t)T.r[0] >= 0x0090)
+		tick(0x8E18, 12);                              // BGE
+		fl::cmp(T.r[0], 0x0090);
+		tick(0x8E1C, 18);
+		if ((int16_t)T.r[0] < 0x90)
+			tick(0x8E24, 12);                          // BLT
+		else
 		{
-			k.at(0x8E1E); poke(0x0224, (uint16_t)(peek(0x0224) - 0x0090)); k.add(33);
+			tick(0x8E1E, 12);
+			poke(0x0224, fl::sub(peek(0x0224), 0x0090));
+			tick(0x8E24, 33);
 		}
 	}
-	k.at(0x8E24); poke(0x01C6, peek(0x0224)); k.add(39);
-	fl::cmp(rw(T.r[6]), rw((uint16_t)(T.r[6] + 2)));
-	T.r[6] = (uint16_t)(T.r[6] + 4);
-	k.add(24);
-	k.leave();
+	copy_w(0x0224, 0x01C6, 0x8E2A);
+	drop2(0x8E2A);
+	rts();
 }
 
 // F:910C (assembly; waits for the sound CPU): with interrupts masked, command 0x18 (F:8EA2)
@@ -5147,17 +5302,32 @@ void read_sound_status()
 // F:8D74  wait_frames(int n) (waits): n vertical blanks (F:8D50)
 uint16_t wait_frames(const Args &)
 {
-	Clock k;
-	push(T.r[1]); k.add(24);
-	T.r[1] = rw((uint16_t)(T.r[6] + 4)); k.add(27, 12);
-	if ((int16_t)T.r[1] > 0)
-		do
+	push(T.r[1]);
+	fl::mov(T.r[1]);
+	tick(0x8D76, 24);
+	T.r[1] = peek((uint16_t)(T.r[6] + 4));             // n
+	fl::mov(T.r[1]);
+	tick(0x8D7A, 27);
+	if ((int16_t)T.r[1] <= 0)
+		tick(0x8D82, 12);                              // BLE
+	else
+	{
+		tick(0x8D7C, 12);
+		for (;;)
 		{
-			k.call(0x8D50, 0x8D80);             // wait_vblank
-			k.add(18);
-		} while (--T.r[1]);
-	T.r[1] = pop(); k.add(18);
-	k.leave();
+			jsr(0x8D80, 0x8D50);                       // wait_vblank
+			if (--T.r[1] == 0)
+			{
+				tick(0x8D82, 18);                      // SOB
+				break;
+			}
+			tick(0x8D7C, 18);
+		}
+	}
+	T.r[1] = pop();
+	fl::mov(T.r[1]);
+	tick(0x8D84, 18);
+	rts();
 	return T.r[0];
 }
 
@@ -5191,42 +5361,71 @@ void fill_rows(Clock &k, uint16_t row1, uint16_t row2)
 // (the last step blank); 0x02BF = 0.  R1-R5 preserved (F162).
 uint16_t wipe_screen_out(const Args &)
 {
-	Clock k;
-	k.save(0x8F74, 5);
-	k.call(0x8068, 0x8F7C);                     // select_video_bank0
-	T.r[3] = 0xC102;
+	c_save(4, 0x8F78);
+	jsr(0x8F7C, 0x8068);                               // select_video_bank0
+	T.r[3] = 0xC102;                                   // the tiles of the two halves of a row
+	fl::mov(T.r[3]);
+	tick(0x8F80, 18);
 	T.r[2] = 0xC109;
-	T.r[5] = 7;
-	k.add(18, 18, 18);
-	for (;;)
+	fl::mov(T.r[2]);
+	tick(0x8F84, 18);
+	T.r[5] = 0x0007;
+	fl::mov(T.r[5]);
+	tick(0x8F88, 18);
+	for (;;)                                           // 8 steps, three frames each
 	{
-		T.r[1] = 0x2000; k.add(18);
-		push(3); k.add(30);
-		k.call(0x8D74, 0x8F94);                 // wait_frames(3)
-		T.r[0] = (uint16_t)(T.r[5] << 1); k.add(12, 12);
-		k.at(0x8F98); poke(0x10B6, peek((uint16_t)(0xFC9C + T.r[0]))); k.add(42);
-		fill_rows(k, 0x8FA6, 0x8FAE);
-		k.add(18, 12);
+		T.r[1] = 0x2000;
+		fl::mov(T.r[1]);
+		tick(0x8F8C, 18);
+		push(0x0003);
+		fl::mov(0x0003);
+		tick(0x8F90, 30);
+		jsr(0x8F94, 0x8D74);                           // wait_frames(3)
+		T.r[0] = T.r[5];
+		fl::mov(T.r[0]);
+		tick(0x8F96, 12);
+		T.r[0] = fl::asl(T.r[0]);
+		tick(0x8F98, 12);
+		{
+			const uint16_t v = peek((uint16_t)(0xFC9C + T.r[0]));   // the step's colour
+			fl::mov(v);
+			poke(0x10B6, v);
+		}
+		tick(0x8F9E, 42);
+		wipe_rows(0x8F9E);
+		fl::cmp(T.r[5], 0x0001);
+		tick(0x8FB8, 18);
 		if (T.r[5] == 1)
 		{
+			tick(0x8FC0, 12);                          // BEQ: the last step clears
 			T.r[3] = 0;
+			fl::clr();
+			tick(0x8FC2, 12);
 			T.r[2] = 0;
-			k.add(12, 12);
+			fl::clr();
+			tick(0x8FC4, 12);
 		}
 		else
 		{
-			T.r[3]++;
-			T.r[2]++;
-			k.add(12, 12, 12);
+			tick(0x8FBA, 12);
+			T.r[3] = fl::inc(T.r[3]);
+			tick(0x8FBC, 12);
+			T.r[2] = fl::inc(T.r[2]);
+			tick(0x8FBE, 12);
+			tick(0x8FC4, 12);                          // BR
 		}
-		T.r[6] = (uint16_t)(T.r[6] + 2);
-		k.add(18, 12, 12);
-		T.r[5]--;
-		if ((int16_t)T.r[5] < 0) break;
+		drop(0x8FC4);
+		T.r[5] = fl::dec(T.r[5]);
+		tick(0x8FC8, 12);
+		if ((int16_t)T.r[5] < 0)
+		{
+			tick(0x8FCA, 12);                          // BGE not taken
+			break;
+		}
+		tick(0x8F88, 12);
 	}
-	k.at(0x8FCA); pokeb(0x02BF, 0); k.add(27);
-	k.restore(5);
-	k.leave();
+	clr_b(0x02BF, 0x8FCE);
+	c_restore(4);
 	return T.r[0];
 }
 
@@ -5235,43 +5434,75 @@ uint16_t wipe_screen_out(const Args &)
 // down (the last step 0xC087); 0x02BF counts up.  R1-R5 preserved (F162).
 uint16_t wipe_screen_in(const Args &)
 {
-	Clock k;
-	k.save(0x8FD0, 5);
-	k.call(0xA8FE, 0x8FD8);                     // flush_text_list
-	k.call(0x8068, 0x8FDC);                     // select_video_bank0
+	c_save(4, 0x8FD4);
+	jsr(0x8FD8, 0xA8FE);                               // flush_text_list
+	jsr(0x8FDC, 0x8068);                               // select_video_bank0
 	T.r[3] = 0xC108;
+	fl::mov(T.r[3]);
+	tick(0x8FE0, 18);
 	T.r[2] = 0xC10F;
+	fl::mov(T.r[2]);
+	tick(0x8FE4, 18);
 	T.r[5] = 0;
-	k.add(18, 18, 12);
-	for (;;)
+	fl::clr();
+	tick(0x8FE6, 12);
+	for (;;)                                           // 8 steps, three frames each
 	{
-		T.r[1] = 0x2000; k.add(18);
-		push(3); k.add(30);
-		k.call(0x8D74, 0x8FF2);                 // wait_frames(3)
-		T.r[0] = (uint16_t)(T.r[5] << 1); k.add(12, 12);
-		k.at(0x8FF6); poke(0x10B6, peek((uint16_t)(0xFC9C + T.r[0]))); k.add(42);
-		fill_rows(k, 0x9004, 0x900C);
-		k.add(18, 12);
+		T.r[1] = 0x2000;
+		fl::mov(T.r[1]);
+		tick(0x8FEA, 18);
+		push(0x0003);
+		fl::mov(0x0003);
+		tick(0x8FEE, 30);
+		jsr(0x8FF2, 0x8D74);                           // wait_frames(3)
+		T.r[0] = T.r[5];
+		fl::mov(T.r[0]);
+		tick(0x8FF4, 12);
+		T.r[0] = fl::asl(T.r[0]);
+		tick(0x8FF6, 12);
+		{
+			const uint16_t v = peek((uint16_t)(0xFC9C + T.r[0]));   // the step's colour
+			fl::mov(v);
+			poke(0x10B6, v);
+		}
+		tick(0x8FFC, 42);
+		wipe_rows(0x8FFC);
+		fl::cmp(T.r[5], 0x0006);
+		tick(0x9016, 18);
 		if (T.r[5] == 6)
 		{
+			tick(0x901E, 12);                          // BEQ: the last step's tiles
 			T.r[3] = 0xC087;
+			fl::mov(T.r[3]);
+			tick(0x9022, 18);
 			T.r[2] = T.r[3];
-			k.add(18, 12);
+			fl::mov(T.r[2]);
+			tick(0x9024, 12);
 		}
 		else
 		{
-			T.r[2]--;
-			T.r[3]--;
-			k.add(12, 12, 12);
+			tick(0x9018, 12);
+			T.r[2] = fl::dec(T.r[2]);
+			tick(0x901A, 12);
+			T.r[3] = fl::dec(T.r[3]);
+			tick(0x901C, 12);
+			tick(0x9024, 12);                          // BR
 		}
-		T.r[6] = (uint16_t)(T.r[6] + 2);
-		T.r[5]++;
-		k.add(18, 12, 18, 12);
-		if ((int16_t)T.r[5] > 7) break;
+		drop(0x9024);
+		T.r[5] = fl::inc(T.r[5]);
+		tick(0x9028, 12);
+		fl::cmp(T.r[5], 0x0007);
+		tick(0x902C, 18);
+		if ((int16_t)T.r[5] > 7)
+		{
+			tick(0x902E, 12);                          // BLE not taken
+			break;
+		}
+		tick(0x8FE6, 12);
 	}
-	k.at(0x902E); pokeb(0x02BF, (uint8_t)(peekb(0x02BF) + 1)); k.add(27);
-	k.restore(5);
-	k.leave();
+	pokeb(0x02BF, fl::incb(peekb(0x02BF)));
+	tick(0x9032, 27);
+	c_restore(4);
 	return T.r[0];
 }
 
