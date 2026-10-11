@@ -269,7 +269,7 @@ endif()
 file(WRITE ${D720_GEN_DIR}/tricks_doc.inc.tmp "${D720_TRICKS_BYTES}\n")
 configure_file(${D720_GEN_DIR}/tricks_doc.inc.tmp ${D720_GEN_DIR}/tricks_doc.inc COPYONLY)
 
-add_executable(720degrees WIN32 src/app/main.cpp src/app/input_config.cpp src/app/debugui.cpp src/app/docview.cpp
+add_executable(720degrees WIN32 src/app/main.cpp src/app/input_config.cpp src/app/debugui.cpp src/app/docview.cpp src/app/uiscale.cpp
   src/app/extras.cpp ${D720_ICON_RC})
 target_include_directories(720degrees PRIVATE ${D720_GEN_DIR})
 target_link_libraries(720degrees PRIVATE gamecore_native leveldata imgui SDL3::SDL3)

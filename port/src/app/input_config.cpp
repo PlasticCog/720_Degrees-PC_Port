@@ -1,6 +1,7 @@
 // Remappable controls, see input_config.h
 #include "input_config.h"
 #include "imgui.h"
+#include "uiscale.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -364,7 +365,7 @@ std::string Input::pad_name(const PadInput &p)
 
 void Input::draw_window(bool *open)
 {
-	ImGui::SetNextWindowSize({620, 520}, ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize({ui_px(620), ui_px(520)}, ImGuiCond_FirstUseEver);
 	if (!ImGui::Begin("Controls", open)) { ImGui::End(); return; }
 	bool changed = false;
 	if (m_capture_action >= 0)
@@ -375,7 +376,7 @@ void Input::draw_window(bool *open)
 
 	if (ImGui::BeginTable("bindings", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchProp))
 	{
-		ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthFixed, 110);
+		ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthFixed, ui_px(110));
 		ImGui::TableSetupColumn("Key");
 		ImGui::TableSetupColumn("Key 2");
 		ImGui::TableSetupColumn("Gamepad");
@@ -403,16 +404,16 @@ void Input::draw_window(bool *open)
 	ImGui::Separator();
 	const char *sticks[] = { "Off", "Left stick", "Right stick" };
 	int aim = cfg.aim_stick + 1, rot = cfg.rotate_stick + 1;
-	ImGui::SetNextItemWidth(140);
+	ImGui::SetNextItemWidth(ui_px(140));
 	if (ImGui::Combo("Stick that points the skater", &aim, sticks, 3)) { cfg.aim_stick = aim - 1; changed = true; }
-	ImGui::SetNextItemWidth(140);
+	ImGui::SetNextItemWidth(ui_px(140));
 	if (ImGui::Combo("Stick that rotates (X axis)", &rot, sticks, 3)) { cfg.rotate_stick = rot - 1; changed = true; }
-	ImGui::SetNextItemWidth(220);
+	ImGui::SetNextItemWidth(ui_px(220));
 	changed |= ImGui::SliderFloat("Stick deadzone", &cfg.deadzone, 0.1f, 0.9f, "%.2f");
-	ImGui::SetNextItemWidth(220);
+	ImGui::SetNextItemWidth(ui_px(220));
 	changed |= ImGui::SliderFloat("Rotate speed (degrees/frame)", &cfg.rotate_speed, 0.5f, 10.0f, "%.1f");
 	changed |= ImGui::Checkbox("Mouse: click the game to capture it; moving rotates, left = jump, right = kick", &cfg.mouse_enabled);
-	ImGui::SetNextItemWidth(220);
+	ImGui::SetNextItemWidth(ui_px(220));
 	changed |= ImGui::SliderFloat("Mouse sensitivity", &cfg.mouse_sensitivity, 0.05f, 1.5f, "%.2f");
 	changed |= ImGui::Checkbox("Invert rotation", &cfg.invert_rotation);
 	if (ImGui::Button("Reset to defaults")) { cfg.set_defaults(); changed = true; }

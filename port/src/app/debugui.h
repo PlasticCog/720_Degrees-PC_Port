@@ -45,6 +45,17 @@ public:
 	// extras: load (and apply) the saved settings; set the inputs the extras drive before a frame
 	void load_extras(const std::string &path);
 	void apply_inputs(Inputs &in);
+	// the menu size (1.0 - 2.5, uiscale.h), saved in ui.cfg; a change is taken by main, which
+	// rebuilds the fonts outside the ImGui frame
+	void load_ui(const std::string &path);
+	float ui_scale() const { return m_ui_scale; }
+	bool take_ui_scale_change(float &ratio)
+	{
+		if (!m_ui_scale_changed) return false;
+		m_ui_scale_changed = false;
+		ratio = m_ui_scale / m_ui_scale_old;
+		return true;
+	}
 	// overlays drawn with SDL onto the game image (before ImGui renders)
 	void draw_sdl_overlays(NativeMachine &m, SDL_Renderer *ren, const SDL_FRect &game);
 	// ImGui windows and ImGui-drawn overlays; call between ImGui::NewFrame and ImGui::Render
@@ -53,6 +64,10 @@ public:
 private:
 	RomSet &m_roms;
 	uint64_t m_frame = 0;
+	float m_ui_scale = 1.0f, m_ui_scale_old = 1.0f;
+	bool m_ui_scale_changed = false, m_fit_window = true;
+	std::string m_ui_path;
+	void save_ui();
 
 	// overlays
 	bool m_show_sprites = false, m_sprite_labels = true, m_show_height = false, m_height_secondary = false;

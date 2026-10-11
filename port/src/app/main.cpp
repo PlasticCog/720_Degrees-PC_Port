@@ -23,6 +23,7 @@
 #include "audioout.h"
 #include "input_config.h"
 #include "debugui.h"
+#include "uiscale.h"
 #include "romzip.h"
 #include "window_icon.h"
 #include "imgui.h"
@@ -226,6 +227,8 @@ int main(int argc, char **argv)
 	auto machine = std::make_unique<NativeMachine>(roms);
 	DebugUI dbg(roms);
 	dbg.load_extras(pref_file("extras.cfg"));
+	dbg.load_ui(pref_file("ui.cfg"));
+	apply_ui_scale(dbg.ui_scale());
 	auto start_machine = [&]() {
 		machine->reset();
 		load_eeprom(machine->board);
@@ -377,6 +380,7 @@ int main(int argc, char **argv)
 		SDL_RenderTexture(renderer, tex, nullptr, &gr);
 		dbg.draw_sdl_overlays(*machine, renderer, gr);
 
+		if (float ratio; dbg.take_ui_scale_change(ratio)) apply_ui_scale(dbg.ui_scale(), ratio);
 		ImGui_ImplSDLRenderer3_NewFrame();
 		ImGui_ImplSDL3_NewFrame();
 		ImGui::NewFrame();

@@ -1,5 +1,6 @@
 // Markdown viewer, see docview.h.
 #include "docview.h"
+#include "uiscale.h"
 #include "imgui.h"
 #include <algorithm>
 #include <cctype>
@@ -280,7 +281,7 @@ void DocView::draw(const char *id)
 		ImGui::TextWrapped("%s", m_title.c_str());
 		ImGui::PopStyleColor();
 	}
-	ImGui::SetNextItemWidth(std::max(120.0f, ImGui::GetContentRegionAvail().x - 190));
+	ImGui::SetNextItemWidth(std::max(ui_px(120), ImGui::GetContentRegionAvail().x - ui_px(190)));
 	ImGui::InputTextWithHint("##filter", "search...", m_filter, sizeof(m_filter));
 	ImGui::SameLine();
 	if (ImGui::SmallButton("Expand all")) m_expand = 1;

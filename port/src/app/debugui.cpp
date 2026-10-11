@@ -14,6 +14,7 @@
 // Physics tables (bank 0x2C00, window B, indexed by equipment level): 0x7C70 jump launch
 //   speed (bytes), 0x7C80 kick power, 0x7C88 top speed (words).
 #include "debugui.h"
+#include "uiscale.h"
 #include "audioout.h"
 #include "board.h"
 #include "leveldata.h"
@@ -97,6 +98,31 @@ void DebugUI::load_extras(const std::string &path)
 		m_extras.s.load(text);
 	}
 	m_extras.apply(m_roms);
+}
+
+void DebugUI::load_ui(const std::string &path)
+{
+	m_ui_path = path;
+	if (SDL_IOStream *f = SDL_IOFromFile(path.c_str(), "rb"))
+	{
+		std::string text(256, 0);
+		text.resize(SDL_ReadIO(f, text.data(), text.size()));
+		SDL_CloseIO(f);
+		int pct = 100;
+		if (sscanf(text.c_str(), "menu_size=%d", &pct) == 1) m_ui_scale = std::clamp(pct, 100, 250) / 100.0f;
+	}
+}
+
+void DebugUI::save_ui()
+{
+	if (m_ui_path.empty()) return;
+	char text[64];
+	snprintf(text, sizeof(text), "menu_size=%d\n", (int)std::lround(m_ui_scale * 100));
+	if (SDL_IOStream *f = SDL_IOFromFile(m_ui_path.c_str(), "wb"))
+	{
+		SDL_WriteIO(f, text, strlen(text));
+		SDL_CloseIO(f);
+	}
 }
 
 void DebugUI::save_extras()
@@ -311,11 +337,28 @@ void DebugUI::draw(NativeMachine &m, const SDL_FRect &game, RunControl &run, con
 {
 	if (m_show_sprites) draw_sprite_overlay(m, game);
 	if (m_show_height) draw_height_probe(m, game);
-	if (!visible) return;
+	if (!visible)
+	{
+		m_fit_window = true;
+		return;
+	}
 	ImGui::SetNextWindowPos({10, 10}, ImGuiCond_FirstUseEver);
-	ImGui::SetNextWindowSize({470, 560}, ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize({ui_px(470), ui_px(560)}, ImGuiCond_FirstUseEver);
 	if (!ImGui::Begin("Debug (Tab)", &visible)) { ImGui::End(); return; }
-	if (ImGui::BeginTabBar("tabs"))
+	if (m_fit_window)
+	{
+		// when it opens and after a menu size change: no larger than the game window, inside it
+		m_fit_window = false;
+		const ImVec2 ds = ImGui::GetIO().DisplaySize;
+		ImVec2 size = ImGui::GetWindowSize(), pos = ImGui::GetWindowPos();
+		size.x = std::min(size.x, ds.x - 20);
+		size.y = std::min(size.y, ds.y - 20);
+		pos.x = std::clamp(pos.x, 10.0f, std::max(10.0f, ds.x - size.x - 10));
+		pos.y = std::clamp(pos.y, 10.0f, std::max(10.0f, ds.y - size.y - 10));
+		ImGui::SetWindowSize(size);
+		ImGui::SetWindowPos(pos);
+	}
+	if (ImGui::BeginTabBar("tabs", ImGuiTabBarFlags_FittingPolicyScroll))
 	{
 		auto tab = [&](int i, const char *name) {
 			const bool open = ImGui::BeginTabItem(name, nullptr, select_tab == i ? ImGuiTabItemFlags_SetSelected : 0);
@@ -340,7 +383,7 @@ void DebugUI::draw(NativeMachine &m, const SDL_FRect &game, RunControl &run, con
 		const ImVec2 ds = ImGui::GetIO().DisplaySize;
 		const float x = ds.x >= 900 ? 490.0f : 10.0f;
 		ImGui::SetNextWindowPos({x, 10}, ImGuiCond_FirstUseEver);
-		ImGui::SetNextWindowSize({std::min(780.0f, ds.x - x - 10), std::min(860.0f, ds.y - 20)}, ImGuiCond_FirstUseEver);
+		ImGui::SetNextWindowSize({std::min(ui_px(780), ds.x - x - 10), std::min(ui_px(860), ds.y - 20)}, ImGuiCond_FirstUseEver);
 		if (ImGui::Begin("Programming tricks of 720 Degrees", &m_tricks_window)) m_tricks.draw("window");
 		ImGui::End();
 	}
@@ -445,13 +488,36 @@ void DebugUI::tab_game(NativeMachine &m, RunControl &run, const AudioOut &audio,
 	ImGui::SameLine();
 	if (ImGui::Button("Step 10")) run.step = 10;
 	ImGui::EndDisabled();
-	ImGui::SetNextItemWidth(200);
+	ImGui::SetNextItemWidth(ui_px(200));
 	ImGui::SliderFloat("Game speed", &run.speed, 0.1f, 4.0f, "%.2fx", ImGuiSliderFlags_Logarithmic);
 	ImGui::SameLine();
 	if (ImGui::SmallButton("1x")) run.speed = 1.0f;
 	if (ImGui::Button("Reset machine (F3)")) run.reset = true;
 	ImGui::SameLine();
 	if (ImGui::Button("Controls... (F4)")) run.show_controls = true;
+	{
+		static const float SIZES[] = {1.0f, 1.25f, 1.5f, 1.75f, 2.0f, 2.25f, 2.5f};
+		char cur[16];
+		snprintf(cur, sizeof(cur), "%d%%", (int)std::lround(m_ui_scale * 100));
+		ImGui::SetNextItemWidth(ui_px(90));
+		if (ImGui::BeginCombo("Menu size", cur))
+		{
+			for (float v : SIZES)
+			{
+				char t[16];
+				snprintf(t, sizeof(t), "%d%%", (int)std::lround(v * 100));
+				if (ImGui::Selectable(t, std::fabs(v - m_ui_scale) < 0.01f) && std::fabs(v - m_ui_scale) >= 0.01f)
+				{
+					m_ui_scale_old = m_ui_scale;
+					m_ui_scale = v;
+					m_ui_scale_changed = true;
+					m_fit_window = true;
+					save_ui();
+				}
+			}
+			ImGui::EndCombo();
+		}
+	}
 	ImGui::SeparatorText("Layers");
 	ImGui::Checkbox("Hide playfield", &m.board.debug.hide_pf);
 	ImGui::SameLine();
@@ -476,7 +542,7 @@ void DebugUI::tab_overlays(NativeMachine &m)
 	ImGui::TextDisabled("Boxes show each hardware sprite: list index (screen x, y).");
 	ImGui::Separator();
 	ImGui::Checkbox("Terrain height map", &m_show_height);
-	ImGui::SetNextItemWidth(200);
+	ImGui::SetNextItemWidth(ui_px(200));
 	ImGui::SliderFloat("opacity", &m_height_alpha, 0.1f, 1.0f, "%.2f");
 	ImGui::Checkbox("Show the secondary terrain table instead", &m_height_secondary);
 	ImGui::TextWrapped("Every playfield tile has a terrain byte: a height level and a slope type. "
@@ -538,18 +604,18 @@ void DebugUI::tab_physics()
 {
 	bool ch = false;
 	ImGui::TextWrapped("These change the game's own physics values while it runs. They reset when the game is restarted.");
-	ImGui::SetNextItemWidth(220);
+	ImGui::SetNextItemWidth(ui_px(220));
 	ch |= ImGui::SliderFloat("Jump power", &m_jump_pct, 25.0f, 150.0f, "%.0f%%");
 	ImGui::TextDisabled("  launch speed %d / %d / %d / %d by equipment level (max 255)",
 		m_roms.main[m_tab], m_roms.main[m_tab + 1], m_roms.main[m_tab + 2], m_roms.main[m_tab + 3]);
-	ImGui::SetNextItemWidth(220);
+	ImGui::SetNextItemWidth(ui_px(220));
 	ch |= ImGui::SliderInt("Gravity", &m_gravity, 1, 40);
 	ImGui::TextDisabled("  height speed lost per frame in the air (game: 12); lower = higher, longer jumps");
-	ImGui::SetNextItemWidth(220);
+	ImGui::SetNextItemWidth(ui_px(220));
 	ch |= ImGui::SliderFloat("Kick power", &m_kick_pct, 25.0f, 300.0f, "%.0f%%");
-	ImGui::SetNextItemWidth(220);
+	ImGui::SetNextItemWidth(ui_px(220));
 	ch |= ImGui::SliderFloat("Top speed", &m_top_pct, 25.0f, 300.0f, "%.0f%%");
-	ImGui::SetNextItemWidth(220);
+	ImGui::SetNextItemWidth(ui_px(220));
 	ch |= ImGui::SliderInt("Kick start speed", &m_kick_start, 0x40, 0x600);
 	ImGui::TextDisabled("  speed after a kick from standstill (game: 384)");
 	if (ImGui::Button("Restore the game's values"))
@@ -575,16 +641,16 @@ void DebugUI::tab_cheats(NativeMachine &m)
 	ImGui::SameLine();
 	ImGui::TextDisabled("(%d held)", rb(m, G_TICKETS));
 	static int cash = 500, score = 10000;
-	ImGui::SetNextItemWidth(120);
+	ImGui::SetNextItemWidth(ui_px(120));
 	ImGui::InputInt("##cash", &cash);
 	ImGui::SameLine();
 	if (ImGui::Button("Set cash")) ww(m, G_CASH, (uint16_t)std::clamp(cash, 0, 9999));
-	ImGui::SetNextItemWidth(120);
+	ImGui::SetNextItemWidth(ui_px(120));
 	ImGui::InputInt("##score", &score);
 	ImGui::SameLine();
 	if (ImGui::Button("Set score")) ww(m, G_SCORE, (uint16_t)std::clamp(score, 0, 65535));
 	int equip = rb(m, SK_EQUIP);
-	ImGui::SetNextItemWidth(120);
+	ImGui::SetNextItemWidth(ui_px(120));
 	if (ImGui::SliderInt("Equipment level", &equip, 0, 3)) m.board.main_ram()[SK_EQUIP] = (uint8_t)equip;
 	ImGui::TextDisabled("Equipment (bought in the shops) selects the jump and speed table entries.");
 	ImGui::Checkbox("No water", &logic::g_cheat_no_water);
@@ -599,7 +665,7 @@ void DebugUI::tab_sound(NativeMachine &m)
 	{
 		uint8_t c = (uint8_t)m_sound_cmd;
 		const uint8_t one = 1;
-		ImGui::SetNextItemWidth(110);
+		ImGui::SetNextItemWidth(ui_px(110));
 		if (ImGui::InputScalar("Command (hex)", ImGuiDataType_U8, &c, &one, nullptr, "%02X", ImGuiInputTextFlags_CharsHexadecimal))
 			m_sound_cmd = c;
 	}
@@ -648,11 +714,11 @@ void DebugUI::tab_memory(NativeMachine &m)
 {
 	uint8_t *ram = m.board.main_ram();
 	ImGui::SeparatorText("Watches");
-	ImGui::SetNextItemWidth(80);
+	ImGui::SetNextItemWidth(ui_px(80));
 	ImGui::InputInt("##addr", &m_watch_addr, 1, 16, ImGuiInputTextFlags_CharsHexadecimal);
 	m_watch_addr = std::clamp(m_watch_addr, 0, 0xffe);
 	ImGui::SameLine();
-	ImGui::SetNextItemWidth(120);
+	ImGui::SetNextItemWidth(ui_px(120));
 	ImGui::InputText("name", m_watch_name, sizeof(m_watch_name));
 	ImGui::SameLine();
 	if (ImGui::Button("Add word")) m_watches.push_back({(uint16_t)m_watch_addr, true, false, 0, m_watch_name});
@@ -665,7 +731,7 @@ void DebugUI::tab_memory(NativeMachine &m)
 		int v = w.word ? (int)(int16_t)(ram[w.addr] | (ram[w.addr + 1] << 8)) : ram[w.addr];
 		ImGui::Text("%04X %-10s", w.addr, w.name.c_str());
 		ImGui::SameLine();
-		ImGui::SetNextItemWidth(110);
+		ImGui::SetNextItemWidth(ui_px(110));
 		if (ImGui::InputInt("##v", &v, 0, 0, ImGuiInputTextFlags_EnterReturnsTrue))
 		{
 			if (w.word) { ram[w.addr] = (uint8_t)v; ram[w.addr + 1] = (uint8_t)(v >> 8); }
@@ -680,7 +746,7 @@ void DebugUI::tab_memory(NativeMachine &m)
 	}
 
 	ImGui::SeparatorText("Search");
-	ImGui::SetNextItemWidth(110);
+	ImGui::SetNextItemWidth(ui_px(110));
 	ImGui::InputInt("value", &m_search_value);
 	ImGui::SameLine();
 	ImGui::Checkbox("word", &m_search_word);
@@ -738,7 +804,7 @@ void DebugUI::tab_memory(NativeMachine &m)
 					const int a = row * 16 + c;
 					ImGui::SameLine(0, c == 8 ? 10 : 4);
 					ImGui::PushID(a);
-					ImGui::SetNextItemWidth(20);
+					ImGui::SetNextItemWidth(ui_px(20));
 					ImGui::InputScalar("##b", ImGuiDataType_U8, &ram[a], nullptr, nullptr, "%02X",
 						ImGuiInputTextFlags_CharsHexadecimal | ImGuiInputTextFlags_AutoSelectAll);
 					ImGui::PopID();
