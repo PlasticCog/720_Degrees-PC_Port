@@ -159,11 +159,11 @@ port/src/editor   level editor (SDL3 + Dear ImGui)
 | Tool | Purpose |
 |---|---|
 | `verify720` | Lockstep check: translated game against the reference model |
-| `render720` | Run the game headless; write screenshots, a WAV of the audio (`--wav`), per-chip audio levels (`--audio-stats N`), the sound command log (`--sound-log FILE`) and per-frame RAM dumps (`--ram-dump FILE`); poke RAM with `--poke FRAME:ADDR:VALUE` |
+| `render720` | Run the game headless; write screenshots, a WAV of the audio (`--wav`), per-chip audio levels (`--audio-stats N`), the sound command log (`--sound-log FILE`) and per-frame RAM dumps (`--ram-dump FILE`) and palette dumps (`--pal-dump FILE`); `--hide-pf` / `--hide-alpha` leave layers out of the screenshots; poke RAM with `--poke FRAME:ADDR:VALUE` |
 | `ref720` | Reference model with coverage, breakpoints (`--break ADDR`) and RAM write watches (`--watch A-B --watch-frames F-G`) for reverse engineering |
 | `coro_test` | Self-test of the coroutine (context switch) backend, run in CI |
 | `editor720` | Level editor; `--capture-test` and `--screenshot FILE` for automated checks |
-| `leveltool` | `stats`, `png DIR` (render all maps), `zones` (zone bytes per map), `roundtrip [LEVEL]` (patch, re-decode and compare), `identity FILE` / `demo-mod FILE` (test mods) |
+| `leveltool` | `stats`, `png DIR` (render all maps), `zones` (zone bytes per map), `roundtrip [LEVEL]` (patch, re-decode and compare), `identity FILE` / `demo-mod FILE` (test mods); sprites and map objects (`port/src/level/sprites.h`): `sprites DIR` (sheets of all frames, types, listing), `objects LEVEL OUT.png [STAGE] [PALDUMP FRAME]` (map with its objects), `objcheck RAMDUMP` / `objshot RAMDUMP PALDUMP FRAME OUT.png` (compare with the running game), `objedit-test FILE` (object list encoder) |
 | `tools/listing.py` | Annotated disassembly of the main program (`re/main_t11.lst`) |
 | `tools/gen_pdp11_sleigh.py` | Ghidra processor module for the DEC T-11 (`re/ghidra/PDP11`) |
 | `re/ghidra/scripts/*.java` | Ghidra headless scripts: decompile the main and sound programs |
