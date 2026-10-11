@@ -93,7 +93,10 @@ def main():
             add_file(z, os.path.join(src, p), name + '/' + p, executable=not p.endswith('.dll'))
         add_file(z, os.path.join(ROOT, 'README.md'), name + '/README.md')
         add_file(z, os.path.join(ROOT, 'Game', 'README.txt'), name + '/Game/README.txt')
-        z.writestr(name + '/THIRD_PARTY_NOTICES.txt', ''.join(notices))
+        info = zipfile.ZipInfo(name + '/THIRD_PARTY_NOTICES.txt', datetime.datetime.now().timetuple()[:6])
+        info.compress_type = zipfile.ZIP_DEFLATED
+        info.external_attr = (stat.S_IFREG | 0o644) << 16
+        z.writestr(info, ''.join(notices))
     print('wrote %s (%.1f MB)' % (zpath, os.path.getsize(zpath) / 1e6))
 
 
