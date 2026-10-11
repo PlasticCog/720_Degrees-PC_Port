@@ -245,3 +245,8 @@ B3:7140 choose_park_level
 B3:7E98 score_landing_screen3
 B3:72CA add_tickets
 B3:6D40 next_turn
+B3:654C start_game_town
+B3:71DA park_start_screen
+B6:74E4 selftest_sprite_screen
+B6:7388 selftest_colour_bars_screen
+B6:713E selftest_playfield_screen

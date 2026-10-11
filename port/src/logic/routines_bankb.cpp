@@ -6550,6 +6550,873 @@ uint16_t next_turn(const Args &)
 	return r0;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Game and park start screens (B3) and self test screens (B6).  These wait (for vertical
+// blanks, the fade, the sound CPU, button presses) in their callees or themselves; like all
+// routines here they run with the original's interrupt points, so waiting loops are polled
+// instruction by instruction.
+
+// B3:654C: the start of a game in Skate City: A?:419A, the palette fade set up (0x0EAC = 13,
+// 0x0EAE = 2, end routine F:DC3C), a vertical blank, the view (F:8328 at 0x5000 / 0x3800, by
+// 6, 3, 7), scroll 0x01AE = 0xE000, interrupts (F:81AA), F:8F74, sound 0x43, the texts 0x78AC
+// (and 0x75EA with two players), A?:4D30(0, 0x76FC), and the countdown (8 seconds) shown
+uint16_t start_game_town(const Args &)
+{
+	uint16_t *R = T.r;
+	SteppedFrame frame(5, 0x6550);
+	jsr(0x6554, 0x419A);
+	poke(0x0EAC, lw(0x000D));
+	step(0x655A, 33);
+	poke(0x0EAE, lw(0x0002));
+	step(0x6560, 33);
+	poke(0x0EB0, lw(0xDC3C));
+	step(0x6566, 33);
+	jsr(0x656A, 0x8D50);                               // wait_vblank
+	static const uint16_t args[6] = { 0x3800, 0x5000, 0, 7, 3, 6 };
+	static const uint16_t next[6] = { 0x656E, 0x6572, 0x6574, 0x6578, 0x657C, 0x6580 };
+	for (int i = 0; i < 6; i++)
+	{
+		push(args[i]);
+		fl::mov(args[i]);
+		step(next[i], args[i] ? 30 : 24);
+	}
+	jsr(0x6584, 0x8328);
+	poke(0x01AE, lw(0xE000));
+	step(0x658A, 33);
+	jsr(0x658E, 0x81AA);                               // install_interrupts_a
+	jsr(0x6592, 0x8F74);
+	ww(R[6], 0x0043);
+	fl::mov(0x0043);
+	step(0x6596, 27);
+	jsr(0x659A, 0x8E78);                               // queue_sound
+	ww(R[6], 0x78AC);
+	fl::mov(0x78AC);
+	step(0x659E, 27);
+	jsr(0x65A2, 0xA9FC);
+	fl::tstb(peekb(0x01F6));
+	step(0x65A6, 24);
+	if (peekb(0x01F6))
+	{
+		step(0x65A8, 12);
+		ww(R[6], 0x75EA);
+		fl::mov(0x75EA);
+		step(0x65AC, 27);
+		jsr(0x65B0, 0xA9FC);
+	}
+	else
+		step(0x65B0, 12);
+	ww(R[6], 0x76FC);
+	fl::mov(0x76FC);
+	step(0x65B4, 27);
+	push(0);
+	fl::clr();
+	step(0x65B6, 24);
+	jsr(0x65BA, 0x4D30);
+	poke(0x0F1C, lw(0x0008));
+	step(0x65C0, 33);
+	pokeb(0x0FA2, lb((uint8_t)(peekb(0x0FA2) | 0x10)));
+	step(0x65C6, 33);
+	jsr(0x65CA, 0x79D4);                               // draw_countdown
+	pokeb(0x0F1E, lb(0x3C));
+	step(0x65D0, 33);
+	R[6] = fl::add(R[6], 0x000E);
+	step(0x65D4, 18);
+	const uint16_t r0 = R[0];
+	frame.leave();
+	return r0;
+}
+
+// B3:71DA: start of a park: interrupts set up (F:820C), sound level 3, fade to level 12
+// (F:DC24, waits), the title and difficulty texts (A7:52FC picks 0x5E06 + 8n), the countdown
+// 0x0F1C = 12 - 0x0F2E (halved, at least 2, when 0x0F2A is not the park's bit), the open parks
+// (F:E6FE, texts 0x5E36 + 8n), the time or time-up text, A5:4D30 and the countdown display
+uint16_t park_start_screen(const Args &)
+{
+	uint16_t *R = T.r;
+	SteppedFrame frame(2, 0x71DE);
+	poke(0x01DC, 0);
+	fl::clr();
+	step(0x71E2, 27);
+	jsr(0x71E6, 0x820C);                               // install_interrupts_b
+	jsr(0x71EA, 0xA8FE);
+	pokeb(0x01E8, lb(3));
+	step(0x71F0, 33);
+	push(0x000C);
+	fl::mov(0x000C);
+	step(0x71F4, 30);
+	jsr(0x71F8, 0xDC24);                               // wait_fade
+	poke(0x0188, lw(0xE000));
+	step(0x71FE, 33);
+	ww(R[6], 0x75D6);
+	fl::mov(0x75D6);
+	step(0x7202, 27);
+	jsr(0x7206, 0xA9FC);
+	R[0] = jsr(0x720A, 0x52FC);                        // difficulty_step
+	R[2] = lw(R[0]);
+	step(0x720C, 12);
+	R[0] = asl_w(R[0]);
+	step(0x720E, 12);
+	R[0] = asl_w(R[0]);
+	step(0x7210, 12);
+	R[0] = asl_w(R[0]);
+	step(0x7212, 12);
+	R[0] = fl::add(R[0], 0x5E06);
+	step(0x7216, 18);
+	ww(R[6], lw(R[0]));
+	step(0x7218, 21);
+	push(0);
+	fl::clr();
+	step(0x721A, 24);
+	jsr(0x721E, 0xEAD4);
+	pokeb(0x0F2A, lb((uint8_t)(peekb(0x0F2A) & ~0x80)));
+	step(0x7224, 33);
+	poke(0x0F1C, lw(0x000C));
+	step(0x722A, 33);
+	R[0] = 0;
+	fl::clr();
+	step(0x722C, 12);
+	R[0] = lb(peekb(0x0F2E));
+	step(0x7230, 24);
+	poke(0x0F1C, fl::sub(peek(0x0F1C), R[0]));
+	step(0x7234, 27);
+	R[1] = 0;
+	fl::clr();
+	step(0x7236, 12);
+	R[1] = lb(peekb((uint16_t)(0xFC74 + R[2])));
+	step(0x723A, 27);
+	const uint8_t kind = peekb(0x0F2A);
+	R[0] = sext8(kind);
+	fl::movb(kind);
+	step(0x723E, 24);
+	fl::cmp(R[0], R[1]);
+	step(0x7240, 12);
+	if (R[0] != R[1])
+	{
+		step(0x7242, 12);
+		R[0] = lw(peek(0x0F1C));
+		step(0x7246, 24);
+		R[0] = asr_w(R[0]);
+		step(0x7248, 12);
+		fl::cmp(R[0], 2);
+		step(0x724C, 18);
+		if ((int16_t)R[0] < 2)
+		{
+			step(0x724E, 12);
+			R[0] = lw(2);
+			step(0x7252, 18);
+		}
+		else
+			step(0x7252, 12);
+		poke(0x0F1C, lw(R[0]));
+		step(0x7256, 27);
+	}
+	else
+		step(0x7256, 12);
+	R[0] = jsr(0x725A, 0xE6FE);                        // open_parks
+	R[2] = lw(R[0]);
+	step(0x725C, 12);
+	R[1] = lw(3);
+	step(0x7260, 18);
+	for (;;)
+	{
+		const uint8_t open = lb(peekb((uint16_t)(0xFC74 + R[1])) & (uint8_t)R[2]);
+		step(0x7264, 27);
+		if (open)
+		{
+			step(0x7266, 12);
+			R[0] = lw(R[1]);
+			step(0x7268, 12);
+			R[0] = asl_w(R[0]);
+			step(0x726A, 12);
+			R[0] = asl_w(R[0]);
+			step(0x726C, 12);
+			R[0] = asl_w(R[0]);
+			step(0x726E, 12);
+			R[0] = fl::add(R[0], 0x5E36);
+			step(0x7272, 18);
+			ww(R[6], lw(R[0]));
+			step(0x7274, 21);
+			push(0);
+			fl::clr();
+			step(0x7276, 24);
+			jsr(0x727A, 0xEAD4);
+			fl::tst(pop());
+			step(0x727C, 18);
+		}
+		else
+			step(0x727C, 12);
+		R[1] = fl::dec(R[1]);
+		step(0x727E, 12);
+		if ((int16_t)R[1] < 0) break;
+		step(0x7260, 12);
+	}
+	step(0x7280, 12);
+	fl::tst(peek(0x0254));
+	step(0x7284, 24);
+	if (!peek(0x0254))
+	{
+		step(0x7286, 12);
+		ww(R[6], 0x5F06);
+		fl::mov(0x5F06);
+		step(0x728A, 27);
+		push(1);
+		fl::mov(1);
+		step(0x728E, 30);
+		jsr(0x7292, 0xEAD4);
+		step(0x72A8, 12);
+	}
+	else
+	{
+		step(0x7294, 12);
+		ww(R[6], 0x5DEE);
+		fl::mov(0x5DEE);
+		step(0x7298, 27);
+		push(1);
+		fl::mov(1);
+		step(0x729C, 30);
+		jsr(0x72A0, 0xEAD4);
+		R[0] = lw(0x00E4);
+		step(0x72A4, 18);
+		jsr(0x72A8, 0x8AB6);
+	}
+	ww(R[6], 0x76FC);
+	fl::mov(0x76FC);
+	step(0x72AC, 27);
+	push(0);
+	fl::clr();
+	step(0x72AE, 24);
+	jsr(0x72B2, 0x4D30);
+	pokeb(0x0FA2, lb((uint8_t)(peekb(0x0FA2) | 0x10)));
+	step(0x72B8, 33);
+	jsr(0x72BC, 0x79D4);                               // draw_countdown
+	pokeb(0x0F1E, lb(0x3C));
+	step(0x72C2, 33);
+	R[6] = fl::add(R[6], 8);
+	step(0x72C6, 18);
+	const uint16_t r0 = R[0];
+	frame.leave();
+	return r0;
+}
+
+// B6:74E4 (assembly, self test): the sprite test: a column of 8 sprites (motion object list at
+// 0x3800, picture 0x3000 + steps) moved with the controller (F:F896) until a button press;
+// holding the button turns the pictures over (+8 every frame).  Locals: (SP) scratch,
+// 2(SP) picture, 4(SP) list pointer, 6(SP) first picture, 8(SP) x, 0xA(SP) y.
+void selftest_sprite_screen()
+{
+	uint16_t *R = T.r;
+	auto L = [&](int off) { return (uint16_t)(R[6] + off); };
+	R[6] = fl::sub(R[6], 0x000C);
+	step(0x74E8, 18);
+	jsr(0x74EC, 0x8D2C);                               // clear_playfield_ram
+	jsr(0x74F0, 0x8CE8);                               // clear_playfield
+	jsr(0x74F4, 0x8D3E);                               // clear_text_ram
+	jsr(0x74F8, 0xDB4E);
+	poke(0x0184, lw(0x5BBC));
+	step(0x74FE, 33);
+	R[0] = lw(0x0023);
+	step(0x7502, 18);
+	jsr(0x7506, 0x8AB6);
+	poke(0x0184, lw(0x5C04));
+	step(0x750C, 33);
+	R[0] = lw(0x001F);
+	step(0x7510, 18);
+	jsr(0x7514, 0x8AB6);
+	R[0] = lw(0x0020);
+	step(0x7518, 18);
+	jsr(0x751C, 0x8AB6);
+	ww(L(0x0A), lw(0x3000));
+	step(0x7522, 36);
+	ww(L(0x08), lw(0x4000));
+	step(0x7528, 36);
+	ww(L(0x06), lw(0x00C0));
+	step(0x752E, 36);
+	for (;;)
+	{
+		jsr(0x7532, 0x8D50);                           // wait_vblank
+		ww(L(2), lw(rw(L(6))));
+		step(0x7538, 45);
+		ww(L(4), lw(0x3800));
+		step(0x753E, 36);
+		poke(0x3804, lw(rw(L(0x0A))));
+		step(0x7544, 42);
+		R[0] = lw(8);
+		step(0x7548, 18);
+		for (;;)
+		{
+			poke(rw(L(4)), lw(rw(L(8))));
+			step(0x754E, 51);
+			ww(L(4), fl::add(rw(L(4)), 2));
+			step(0x7554, 36);
+			poke(rw(L(4)), lw(rw(L(2))));
+			step(0x755A, 51);
+			ww(L(4), fl::add(rw(L(4)), 4));
+			step(0x7560, 36);
+			R[1] = lw(2);
+			step(0x7564, 18);
+			R[1] = fl::add(R[1], rw(L(4)));
+			step(0x7568, 27);
+			ww(L(0), lw(R[1]));
+			step(0x756A, 21);
+			poke(rw(L(4)), lw(R[1]));
+			step(0x756E, 36);
+			ww(L(4), fl::add(rw(L(4)), 2));
+			step(0x7574, 36);
+			ww(L(2), fl::add(rw(L(2)), 0x0800));
+			step(0x757A, 36);
+			ww(L(2), lw(rw(L(2)) | 0x8000));
+			step(0x7580, 36);
+			R[0] = (uint16_t)(R[0] - 1);               // SOB
+			if (!R[0]) break;
+			step(0x7548, 18);
+		}
+		step(0x7582, 18);
+		const uint8_t held = lb(peekb(0x0193) & 0x40);
+		step(0x7588, 30);
+		bool turn = !held;
+		if (turn)
+		{
+			step(0x758A, 12);
+			fl::cmpb(peekb(0x0FE7), 0x3C);
+			step(0x7590, 30);
+			turn = peekb(0x0FE7) != 0x3C;
+		}
+		if (turn)
+		{
+			step(0x7592, 12);
+			fl::tstb(peekb(0x0FE7));
+			step(0x7596, 24);
+			turn = peekb(0x0FE7) != 0;
+		}
+		if (turn)
+		{
+			step(0x7598, 12);
+			ww(L(6), fl::add(rw(L(6)), 8));
+			step(0x759E, 36);
+		}
+		else
+			step(0x759E, 12);
+		jsr(0x75A2, 0xF8EA);                           // button_hold_timer
+		push(0);
+		fl::clr();
+		step(0x75A4, 24);
+		R[0] = jsr(0x75A8, 0xF896);                    // rotary_zone_step
+		R[0] = fl::add(R[0], rw(L(0x0A)));
+		step(0x75AC, 27);
+		ww(L(0x0A), lw(R[0]));
+		step(0x75B0, 30);
+		ww(L(0), 1);
+		fl::mov(1);
+		step(0x75B4, 27);
+		R[0] = jsr(0x75B8, 0xF896);
+		R[0] = fl::add(R[0], rw(L(0x0C)));
+		step(0x75BC, 27);
+		ww(L(0x0C), lw(R[0]));
+		step(0x75C0, 30);
+		fl::tst(pop());
+		step(0x75C2, 18);
+		fl::tstb(peekb(0x0FE6));
+		step(0x75C6, 24);
+		if (peekb(0x0FE6)) break;
+		step(0x752E, 12);
+	}
+	step(0x75C8, 12);
+	jsr(0x75CC, 0x8D3E);                               // clear_text_ram
+	pokeb(0x0FE6, 0);
+	fl::clr();
+	step(0x75D0, 27);
+	R[6] = fl::add(R[6], 0x000C);
+	step(0x75D4, 18);
+}
+
+// B6:7388 (assembly, self test): the colour bars: the colour test pattern (B6:7304), titles,
+// 39 motion objects in rows of 8 at 0x3800 (colours from 0x7048), test colours in the palette;
+// then until a button press the object at the cursor 0x3800 + 8n is moved with the controller
+// and the cursor steps on while the button is held (n shown, F:BA9A).  Locals: (SP) the
+// cursor, 2(SP) n.
+void selftest_colour_bars_screen()
+{
+	uint16_t *R = T.r;
+	fl::cmp(rw((uint16_t)(R[6] - 2)), rw((uint16_t)(R[6] - 4)));
+	R[6] = (uint16_t)(R[6] - 4);                       // CMP -(SP),-(SP)
+	step(0x738A, 30);
+	jsr(0x738E, 0x7304);                               // colour_test_pattern
+	poke(0x0188, lw(0xE000));
+	step(0x7394, 33);
+	poke(0x0184, lw(0x5BBC));
+	step(0x739A, 33);
+	R[0] = lw(0x0021);
+	step(0x739E, 18);
+	jsr(0x73A2, 0x8AB6);
+	poke(0x0184, lw(0x5C04));
+	step(0x73A8, 33);
+	R[0] = lw(0x001F);
+	step(0x73AC, 18);
+	jsr(0x73B0, 0x8AB6);
+	R[0] = lw(0x0020);
+	step(0x73B4, 18);
+	jsr(0x73B8, 0x8AB6);
+	R[0] = lw(0x0007);
+	step(0x73BC, 18);
+	R[3] = lw(0x7000);
+	step(0x73C0, 18);
+	ww(R[6], lw(0x3800));
+	step(0x73C4, 27);
+	for (;;)
+	{
+		R[0] = fl::inc(R[0]);
+		step(0x73C6, 12);
+		const uint16_t b = lw(R[0] & 0x0007);
+		step(0x73CA, 18);
+		if (!b)
+		{
+			step(0x73CC, 12);
+			R[2] = lw(0x1000);
+			step(0x73D0, 18);
+			R[3] = fl::sub(R[3], 0x0C00);
+			step(0x73D4, 18);
+		}
+		else
+			step(0x73D4, 12);
+		poke(rw(R[6]), lw(R[3]));
+		step(0x73D8, 36);
+		ww(R[6], fl::add(rw(R[6]), 2));
+		step(0x73DC, 27);
+		poke(rw(R[6]), lw(1));
+		step(0x73E2, 42);
+		ww(R[6], fl::add(rw(R[6]), 2));
+		step(0x73E6, 27);
+		poke(rw(R[6]), lw(R[2]));
+		step(0x73EA, 36);
+		ww(R[6], fl::add(rw(R[6]), 2));
+		step(0x73EE, 27);
+		R[1] = lw(2);
+		step(0x73F2, 18);
+		R[1] = fl::add(R[1], rw(R[6]));
+		step(0x73F4, 18);
+		R[4] = lw(R[1]);
+		step(0x73F6, 12);
+		R[1] = lw(R[0]);
+		step(0x73F8, 12);
+		R[1] = lw(R[1] & 0x0003);
+		step(0x73FC, 18);
+		R[1] = asl_w(R[1]);
+		step(0x73FE, 12);
+		R[4] = lw(R[4] & 0x0FFF);
+		step(0x7402, 18);
+		R[4] = lw(R[4] | peek((uint16_t)(0x7048 + R[1])));
+		step(0x7406, 27);
+		poke(rw(R[6]), lw(R[4]));
+		step(0x740A, 36);
+		ww(R[6], fl::add(rw(R[6]), 2));
+		step(0x740E, 27);
+		R[2] = fl::add(R[2], 0x0C00);
+		step(0x7412, 18);
+		fl::cmp(rw(R[6]), 0x3938);
+		step(0x7416, 24);
+		if (rw(R[6]) >= 0x3938) break;
+		step(0x73C4, 12);
+	}
+	step(0x7418, 12);
+	ww((uint16_t)(R[6] + 2), 0);
+	fl::clr();
+	step(0x741C, 30);
+	ww(R[6], lw(0x3800));
+	step(0x7420, 27);
+	jsr(0x7424, 0x8D50);                               // wait_vblank
+	static const uint16_t colour_addr[8] = { 0x101C, 0x103C, 0x105C, 0x107C, 0x1110, 0x1112, 0x1114, 0x1116 };
+	static const uint16_t colour[8] = { 0x00BB, 0x0CCB, 0xC0CB, 0xAAAB, 0x0A0A, 0x0A0A, 0xA00A, 0xA00A };
+	for (int i = 0; i < 8; i++)
+	{
+		poke(colour_addr[i], lw(colour[i]));
+		step((uint16_t)(0x742A + 6 * i), 33);
+	}
+	for (;;)
+	{
+		fl::tstb(peekb(0x0FE6));
+		step(0x7458, 24);
+		if (peekb(0x0FE6)) break;
+		step(0x745A, 12);
+		jsr(0x745E, 0xF8EA);                           // button_hold_timer
+		jsr(0x7462, 0x8D50);                           // wait_vblank
+		poke(0x0184, lw(0x5BBC));
+		step(0x7468, 33);
+		R[0] = lw(0x0022);
+		step(0x746C, 18);
+		jsr(0x7470, 0x8AB6);
+		push(lw(rw((uint16_t)(R[6] + 2))));
+		step(0x7474, 39);
+		push(0);
+		fl::clr();
+		step(0x7476, 24);
+		push(2);
+		fl::mov(2);
+		step(0x747A, 30);
+		push(rw(R[6]));
+		fl::mov(2);
+		step(0x747C, 30);
+		push(0);
+		fl::clr();
+		step(0x747E, 24);
+		jsr(0x7482, 0xBA9A);
+		ww(R[6], 0);
+		fl::clr();
+		step(0x7484, 21);
+		R[0] = jsr(0x7488, 0xF896);                    // rotary_zone_step
+		const uint16_t cursor = rw((uint16_t)(R[6] + 0x0A));
+		R[0] = fl::add(R[0], peek(cursor));
+		step(0x748C, 33);
+		poke(cursor, lw(R[0]));
+		step(0x7490, 36);
+		ww(R[6], 1);
+		fl::mov(1);
+		step(0x7494, 27);
+		R[0] = jsr(0x7498, 0xF896);
+		R[1] = lw(rw((uint16_t)(R[6] + 0x0A)));
+		step(0x749C, 27);
+		R[0] = fl::add(R[0], peek((uint16_t)(R[1] + 4)));
+		step(0x74A0, 27);
+		poke((uint16_t)(R[1] + 4), lw(R[0]));
+		step(0x74A4, 30);
+		const uint8_t held = lb(peekb(0x0193) & 0x40);
+		step(0x74AA, 30);
+		bool next = !held;
+		if (next)
+		{
+			step(0x74AC, 12);
+			fl::cmpb(peekb(0x0FE7), 0x3C);
+			step(0x74B2, 30);
+			next = peekb(0x0FE7) != 0x3C;
+		}
+		if (next)
+		{
+			step(0x74B4, 12);
+			fl::tstb(peekb(0x0FE7));
+			step(0x74B8, 24);
+			next = peekb(0x0FE7) != 0;
+		}
+		if (next)
+		{
+			step(0x74BA, 12);
+			ww((uint16_t)(R[6] + 0x0A), fl::add(rw((uint16_t)(R[6] + 0x0A)), 8));
+			step(0x74C0, 36);
+			ww((uint16_t)(R[6] + 0x0C), fl::inc(rw((uint16_t)(R[6] + 0x0C))));
+			step(0x74C4, 30);
+			fl::cmp(rw((uint16_t)(R[6] + 0x0C)), 0x0027);
+			step(0x74CA, 33);
+			if (rw((uint16_t)(R[6] + 0x0C)) == 0x0027)
+			{
+				step(0x74CC, 12);
+				ww((uint16_t)(R[6] + 0x0A), lw(0x3800));
+				step(0x74D2, 36);
+				ww((uint16_t)(R[6] + 0x0C), 0);
+				fl::clr();
+				step(0x74D6, 30);
+			}
+			else
+				step(0x74D6, 12);
+		}
+		else
+			step(0x74D6, 12);
+		R[6] = fl::add(R[6], 0x000A);
+		step(0x74DA, 18);
+		step(0x7454, 12);
+	}
+	step(0x74DC, 12);
+	pokeb(0x0FE6, 0);
+	fl::clr();
+	step(0x74E0, 27);
+	fl::cmp(rw(R[6]), rw((uint16_t)(R[6] + 2)));
+	R[6] = (uint16_t)(R[6] + 4);
+	step(0x74E2, 24);
+}
+
+// B6:713E (assembly, self test): the playfield test: a pattern of tiles over the whole
+// playfield (both video windows through F:8078) and the playfield colours; after a button
+// press (F:8D60) a frame of corner tiles, and the colour 0x1100 cycles through 5 entries
+// (texts from 0x7060) with each button press until a press of the other button (0x0FE6).
+// Locals: (SP) rows, 2(SP) bands, 4(SP) halves, 6(SP) tile step.
+void selftest_playfield_screen()
+{
+	uint16_t *R = T.r;
+	auto L = [&](int off) { return (uint16_t)(R[6] + off); };
+	R[6] = fl::sub(R[6], 8);
+	step(0x7142, 18);
+	jsr(0x7146, 0x8D3E);                               // clear_text_ram
+	jsr(0x714A, 0x8D2C);                               // clear_playfield_ram
+	jsr(0x714E, 0x8CE8);                               // clear_playfield
+	poke(0x0184, lw(0x5BBC));
+	step(0x7154, 33);
+	R[0] = lw(0x0019);
+	step(0x7158, 18);
+	jsr(0x715C, 0x8AB6);
+	poke(0x01AE, 0);
+	fl::clr();
+	step(0x7160, 27);
+	poke(0x01AC, lw(0x0011));
+	step(0x7166, 33);
+	R[2] = lw(0x0800);
+	step(0x716A, 18);
+	R[1] = lw(0x4000);
+	step(0x716E, 18);
+	ww(L(6), 0);
+	fl::clr();
+	step(0x7172, 30);
+	ww(L(4), lw(2));
+	step(0x7178, 36);
+	for (;;)                                           // halves
+	{
+		ww(L(2), lw(6));
+		step(0x717E, 36);
+		for (;;)                                       // bands
+		{
+			R[2] = fl::add(R[2], rw(L(6)));
+			step(0x7182, 27);
+			ww(L(0), lw(8));
+			step(0x7186, 27);
+			for (;;)                                   // rows
+			{
+				R[3] = 0;
+				fl::clr();
+				step(0x7188, 12);
+				for (;;)                               // 16 tiles
+				{
+					R[4] = lw(2);
+					step(0x718C, 18);
+					for (;;)                           // 2 cells
+					{
+						R[0] = lw(R[1]);
+						step(0x718E, 12);
+						R[0] = lw(R[0] & 0x2000);
+						step(0x7192, 18);
+						R[0] = lw(R[0] | 0x4000);
+						step(0x7196, 18);
+						jsr(0x719A, 0x8078);           // select_video_bank
+						R[0] = lw(R[1]);
+						step(0x719C, 12);
+						R[0] = lw(R[0] & 0x1FFE);
+						step(0x71A0, 18);
+						R[5] = lw(R[0]);
+						step(0x71A2, 12);
+						R[5] = lw(R[5] | 0x2000);
+						step(0x71A6, 18);
+						poke(R[5], lw(R[2]));
+						step(0x71A8, 21);
+						poke(R[5], lw((uint16_t)(peek(R[5]) | R[3])));
+						step(0x71AA, 21);
+						R[1] = fl::add(R[1], 2);
+						step(0x71AE, 18);
+						R[4] = (uint16_t)(R[4] - 1);   // SOB
+						if (!R[4]) break;
+						step(0x718C, 18);
+					}
+					step(0x71B0, 18);
+					R[3] = fl::inc(R[3]);
+					step(0x71B2, 12);
+					fl::cmp(R[3], 0x000F);
+					step(0x71B6, 18);
+					if ((int16_t)R[3] > 15) break;
+					step(0x7188, 12);
+				}
+				step(0x71B8, 12);
+				R[1] = fl::add(R[1], 0x00C0);
+				step(0x71BC, 18);
+				ww(L(0), fl::dec(rw(L(0))));
+				step(0x71BE, 21);
+				if (!rw(L(0))) break;
+				step(0x7186, 12);
+			}
+			step(0x71C0, 12);
+			ww(L(2), fl::dec(rw(L(2))));
+			step(0x71C4, 30);
+			if (!rw(L(2))) break;
+			step(0x717E, 12);
+		}
+		step(0x71C6, 12);
+		ww(L(6), lw(0x0800));
+		step(0x71CC, 36);
+		R[1] = lw(0x4040);
+		step(0x71D0, 18);
+		ww(L(4), fl::dec(rw(L(4))));
+		step(0x71D4, 30);
+		if (!rw(L(4))) break;
+		step(0x7178, 12);
+	}
+	step(0x71D6, 12);
+	jsr(0x71DA, 0x8D50);                               // wait_vblank
+	R[2] = lw(0xFFEF);
+	step(0x71DE, 18);
+	R[4] = lw(4);
+	step(0x71E2, 18);
+	for (;;)
+	{
+		R[0] = lw(R[4]);
+		step(0x71E4, 12);
+		R[0] = asl_w(R[0]);
+		step(0x71E6, 12);
+		R[1] = lw(peek((uint16_t)(0x703E + R[0])));
+		step(0x71EA, 27);
+		R[2] = fl::add(R[2], 0x0020);
+		step(0x71EE, 18);
+		R[3] = lw(0x0010);
+		step(0x71F2, 18);
+		for (;;)
+		{
+			R[0] = lw(R[3]);
+			step(0x71F4, 12);
+			R[0] = fl::add(R[0], R[2]);
+			step(0x71F6, 12);
+			R[0] = asl_w(R[0]);
+			step(0x71F8, 12);
+			poke((uint16_t)(0x1100 + R[0]), lw(R[1]));
+			step(0x71FC, 30);
+			R[1] = fl::inc(R[1]);
+			step(0x71FE, 12);
+			R[3] = (uint16_t)(R[3] - 1);               // SOB
+			if (!R[3]) break;
+			step(0x71F2, 18);
+		}
+		step(0x7200, 18);
+		R[4] = (uint16_t)(R[4] - 1);                   // SOB
+		if (!R[4]) break;
+		step(0x71E2, 18);
+	}
+	step(0x7202, 18);
+	R[2] = lw(0xFFFF);
+	step(0x7206, 18);
+	R[0] = lw(0x1000);
+	step(0x720A, 18);
+	R[5] = lw(3);
+	step(0x720E, 18);
+	for (;;)
+	{
+		R[1] = lw(0x000F);
+		step(0x7212, 18);
+		R[2] = fl::add(R[2], 0x0020);
+		step(0x7216, 18);
+		R[4] = lw(0x0010);
+		step(0x721A, 18);
+		for (;;)
+		{
+			R[3] = lw(R[4]);
+			step(0x721C, 12);
+			R[3] = fl::add(R[3], R[2]);
+			step(0x721E, 12);
+			R[3] = asl_w(R[3]);
+			step(0x7220, 12);
+			poke((uint16_t)(0x1100 + R[3]), lw(R[1]));
+			step(0x7224, 30);
+			R[1] = fl::add(R[1], R[0]);
+			step(0x7226, 12);
+			R[4] = (uint16_t)(R[4] - 1);               // SOB
+			if (!R[4]) break;
+			step(0x721A, 18);
+		}
+		step(0x7228, 18);
+		R[3] = lw(R[0]);
+		step(0x722A, 12);
+		R[3] = asr_w(R[3]);
+		step(0x722C, 12);
+		R[3] = asr_w(R[3]);
+		step(0x722E, 12);
+		R[0] = lw(R[3]);
+		step(0x7230, 12);
+		R[0] = asr_w(R[0]);
+		step(0x7232, 12);
+		R[0] = asr_w(R[0]);
+		step(0x7234, 12);
+		R[5] = (uint16_t)(R[5] - 1);                   // SOB
+		if (!R[5]) break;
+		step(0x720E, 18);
+	}
+	step(0x7236, 18);
+	jsr(0x723A, 0x8D60);                               // wait_button_press
+	jsr(0x723E, 0x8CE8);                               // clear_playfield
+	jsr(0x7242, 0x8068);                               // select_video_bank0
+	poke(0x1086, 0);
+	fl::clr();
+	step(0x7246, 27);
+	poke(0x2000, lw(0x0130));
+	step(0x724C, 33);
+	poke(0x207E, lw(0x0131));
+	step(0x7252, 33);
+	poke(0x3780, lw(0x0132));
+	step(0x7258, 33);
+	poke(0x37FE, lw(0x0133));
+	step(0x725E, 33);
+	R[2] = lw(0xFFFF);
+	step(0x7262, 18);
+	for (;;)
+	{
+		R[2] = fl::inc(R[2]);
+		step(0x7264, 12);
+		fl::cmp(R[2], 4);
+		step(0x7268, 18);
+		if ((int16_t)R[2] > 4)
+		{
+			step(0x726A, 12);
+			R[2] = 0;
+			fl::clr();
+			step(0x726C, 12);
+		}
+		else
+			step(0x726C, 12);
+		R[1] = lw(R[2]);
+		step(0x726E, 12);
+		R[1] = asl_w(R[1]);
+		step(0x7270, 12);
+		R[0] = lw(peek((uint16_t)(0x7060 + R[1])));
+		step(0x7274, 27);
+		jsr(0x7278, 0x8AB6);
+		poke(0x1100, lw(peek((uint16_t)(0x7056 + R[1]))));
+		step(0x727E, 42);
+		bool done = false;
+		for (;;)
+		{
+			const uint8_t held = lb(peekb(0x0193) & 0x40);
+			step(0x7284, 30);
+			if (held)
+			{
+				step(0x7292, 12);
+				break;
+			}
+			step(0x7286, 12);
+			fl::tstb(peekb(0x0FE6));
+			step(0x728A, 24);
+			if (peekb(0x0FE6))
+			{
+				step(0x728C, 12);
+				pokeb(0x0FE6, 0);
+				fl::clr();
+				step(0x7290, 27);
+				step(0x72AA, 12);
+				done = true;
+				break;
+			}
+			step(0x727E, 12);
+		}
+		if (done) break;
+		for (;;)
+		{
+			const uint8_t held = lb(peekb(0x0193) & 0x40);
+			step(0x7298, 30);
+			if (!held) break;
+			step(0x7292, 12);
+		}
+		step(0x729A, 12);
+		R[1] = lw(peek((uint16_t)(0x7060 + R[1])));
+		step(0x729E, 27);
+		R[1] = lw(R[1] | 0x0080);
+		step(0x72A2, 18);
+		R[0] = lw(R[1]);
+		step(0x72A4, 12);
+		jsr(0x72A8, 0x8AB6);
+		step(0x7262, 12);
+	}
+	R[6] = fl::add(R[6], 8);
+	step(0x72AE, 18);
+}
+
 }
 
 LOGIC_TABLE(bankb,
@@ -6582,6 +7449,11 @@ LOGIC_TABLE(bankb,
 	c_routine("B3", 0x7E98, "score_landing_screen3", c_with_rts<score_landing_screen3>, 0, 0),
 	c_routine("B3", 0x72CA, "add_tickets", c_with_rts<add_tickets>, 0, 0),
 	wait_c_routine("B3", 0x6D40, "next_turn", c_with_rts<next_turn>, 0),
+	wait_c_routine("B3", 0x654C, "start_game_town", c_with_rts<start_game_town>, 0),
+	wait_c_routine("B3", 0x71DA, "park_start_screen", c_with_rts<park_start_screen>, 0),
+	wait_routine("B6", 0x74E4, "selftest_sprite_screen", with_rts<selftest_sprite_screen>, 0),
+	wait_routine("B6", 0x7388, "selftest_colour_bars_screen", with_rts<selftest_colour_bars_screen>, 0),
+	wait_routine("B6", 0x713E, "selftest_playfield_screen", with_rts<selftest_playfield_screen>, 0),
 )
 
 }
