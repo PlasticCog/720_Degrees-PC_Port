@@ -1077,9 +1077,10 @@ uint16_t frame_delta_bonus(const Args &)
 	push(R[1]);
 	fl::mov(R[1]);
 	step(0x7E46, 24);
-	fl::cmpb(peekb(0x0F59), 4);
+	const uint8_t v7E4C = peekb(0x0F59);
+	fl::cmpb(v7E4C, 4);
 	step(0x7E4C, 30);
-	if (peekb(0x0F59) != 4)
+	if (v7E4C != 4)
 	{
 		step(0x7E4E, 12);
 		R[0] = lw(peek(0x01C4));
@@ -1113,9 +1114,10 @@ uint16_t frame_delta_bonus(const Args &)
 			step(0x7E72, 12);
 			R[1] = asl_w(R[1]);
 			step(0x7E74, 12);
-			fl::cmpb(peekb(0x0F59), 3);
+			const uint8_t v7E7A = peekb(0x0F59);
+			fl::cmpb(v7E7A, 3);
 			step(0x7E7A, 30);
-			if (peekb(0x0F59) < 3)
+			if (v7E7A < 3)
 			{
 				step(0x7E7C, 12);
 				push(lw(peek((uint16_t)(0xFCFC + R[1]))));
@@ -1241,9 +1243,10 @@ uint16_t draw_cash_meter(const Args &a)
 		step(0x73DE, 12);
 		R[2] = asl_w(R[2]);
 		step(0x73E0, 12);
-		fl::cmp(R[1], peek((uint16_t)(0x523E + R[2])));
+		const uint16_t v73E4 = peek((uint16_t)(0x523E + R[2]));
+		fl::cmp(R[1], v73E4);
 		step(0x73E4, 27);
-		if ((int16_t)R[1] >= (int16_t)peek((uint16_t)(0x523E + R[2])))
+		if ((int16_t)R[1] >= (int16_t)v73E4)
 		{
 			step(0x7406, 12);
 			break;
@@ -1630,9 +1633,10 @@ void update_time_bar()
 			step(0x78F4, 12);
 			T.r[0] = asr_w(T.r[0]);
 			step(0x78F6, 12);
-			fl::cmpb(peekb(0x027A), 2);
+			const uint8_t v78FC = peekb(0x027A);
+			fl::cmpb(v78FC, 2);
 			step(0x78FC, 30);
-			if (peekb(0x027A) == 2)
+			if (v78FC == 2)
 			{
 				step(0x78FE, 12);
 				T.r[0] = asr_w(T.r[0]);
@@ -1771,9 +1775,10 @@ void track_scroll_blocks()
 	step(0x7B8A, 27);
 	poke(0x09A4, fl::sub(peek(0x09A4), peek(0x09A0)));
 	step(0x7B90, 39);
-	fl::cmp(peek(0x09A4), 0x4000);
+	const uint16_t v7B96 = peek(0x09A4);
+	fl::cmp(v7B96, 0x4000);
 	step(0x7B96, 30);
-	if (peek(0x09A4) >= 0x4000)
+	if (v7B96 >= 0x4000)
 	{
 		step(0x7B98, 12);
 		const uint16_t d = peek(0x09A4);
@@ -1830,9 +1835,10 @@ void track_scroll_blocks()
 	step(0x7BE4, 27);
 	poke(0x09A6, fl::add(peek(0x09A6), 0x3FFF));
 	step(0x7BEA, 33);
-	fl::cmp(peek(0x09A6), 0x4000);
+	const uint16_t v7BF0 = peek(0x09A6);
+	fl::cmp(v7BF0, 0x4000);
 	step(0x7BF0, 30);
-	if (peek(0x09A6) < 0x4000)
+	if (v7BF0 < 0x4000)
 	{
 		step(0x7C78, 12);                              // BCS to the RTS (the RTS is in the table)
 		return;
@@ -1962,9 +1968,10 @@ void step_pause()
 	step(0x7C8A, 12);
 	poke(0x01FC, fl::dec(peek(0x01FC)));
 	step(0x7C8E, 27);
-	fl::cmp(peek(0x01FC), 0x0078);
+	const uint16_t v7C94 = peek(0x01FC);
+	fl::cmp(v7C94, 0x0078);
 	step(0x7C94, 30);
-	if ((int16_t)peek(0x01FC) > 0x0078)
+	if ((int16_t)v7C94 > 0x0078)
 	{
 		step(0x7CF4, 12);
 		return;
@@ -1974,6 +1981,7 @@ void step_pause()
 	fl::tstb(b);
 	step(0x7C9A, 24);
 	bool tested = false;                               // at 7CB2 with the SUB's flags
+	uint16_t v7CB2 = 0;
 	if (b)
 		step(0x7CAE, 12);
 	else
@@ -1991,6 +1999,7 @@ void step_pause()
 			poke(0x01FC, v);
 			step(0x7CA8, 33);
 			tested = (int16_t)v >= 0;
+			v7CB2 = v;
 			if (tested)
 				step(0x7CB2, 12);
 			else
@@ -2004,10 +2013,11 @@ void step_pause()
 	}
 	if (!tested)
 	{
-		fl::tst(peek(0x01FC));
+		v7CB2 = peek(0x01FC);
+		fl::tst(v7CB2);
 		step(0x7CB2, 24);
 	}
-	if (!peek(0x01FC))
+	if (!v7CB2)
 	{
 		step(0x7CB4, 12);
 		T.r[0] = jsr(0x7CB8, 0xA8FE);
@@ -2061,14 +2071,16 @@ uint16_t show_hint(const Args &)
 		frame.leave();
 		return r0;
 	};
-	fl::tstb(peekb(0x0F26));
+	const uint8_t v7CFE = peekb(0x0F26);
+	fl::tstb(v7CFE);
 	step(0x7CFE, 24);
-	if (peekb(0x0F26))
+	if (v7CFE)
 	{
 		step(0x7D00, 12);
-		fl::cmpb(peekb(0x0273), 4);
+		const uint8_t v7D06 = peekb(0x0273);
+		fl::cmpb(v7D06, 4);
 		step(0x7D06, 30);
-		if (peekb(0x0273) != 4)
+		if (v7D06 != 4)
 		{
 			step(0x7D08, 12);
 			const uint16_t r0 = R[0];
@@ -2081,18 +2093,20 @@ uint16_t show_hint(const Args &)
 		step(0x7D0A, 12);
 	poke(0x0184, lw(0x5CD2));
 	step(0x7D10, 33);
-	fl::tst(peek(0x01FE));
+	const uint16_t v7D14 = peek(0x01FE);
+	fl::tst(v7D14);
 	step(0x7D14, 24);
-	if (!peek(0x01FE))
+	if (!v7D14)
 	{
 		step(0x7D3C, 12);
 		step(0x7E16, 12);
 		return finish();
 	}
 	step(0x7D16, 12);
-	poke(0x01FE, fl::dec(peek(0x01FE)));
+	const uint16_t v7D1A = fl::dec(peek(0x01FE));
+	poke(0x01FE, v7D1A);
 	step(0x7D1A, 27);
-	if (peek(0x01FE))
+	if (v7D1A)
 	{
 		step(0x7E16, 12);
 		return finish();
@@ -2183,10 +2197,11 @@ uint16_t show_hint(const Args &)
 		return finish();
 	}
 	step(0x7D90, 12);
-	fl::tstb(peekb(0x0F31));
+	const uint8_t v7D94 = peekb(0x0F31);
+	fl::tstb(v7D94);
 	step(0x7D94, 24);
 	uint16_t text = 0;
-	if (!peekb(0x0F31))
+	if (!v7D94)
 	{
 		step(0x7D96, 12);
 		text = 0x7818;
@@ -2194,9 +2209,10 @@ uint16_t show_hint(const Args &)
 	else
 	{
 		step(0x7D9C, 12);
-		fl::tstb(peekb(0x025B));
+		const uint8_t v7DA0 = peekb(0x025B);
+		fl::tstb(v7DA0);
 		step(0x7DA0, 24);
-		if (!peekb(0x025B))
+		if (!v7DA0)
 		{
 			step(0x7DA2, 12);
 			text = 0x7822;
@@ -2226,9 +2242,10 @@ uint16_t show_hint(const Args &)
 			step(0x7DC0, 12);
 			R[3] = lb(peekb((uint16_t)(0xFE70 + R[0])));
 			step(0x7DC4, 27);
-			fl::cmp(peek(0x0256), R[3]);
+			const uint16_t v7DC8 = peek(0x0256);
+			fl::cmp(v7DC8, R[3]);
 			step(0x7DC8, 24);
-			if ((int16_t)peek(0x0256) > (int16_t)R[3])
+			if ((int16_t)v7DC8 > (int16_t)R[3])
 			{
 				step(0x7DCA, 12);
 				R[3] = lw(4);
@@ -2960,11 +2977,12 @@ void animate_palette()
 		if (R[3])
 		{
 			step(0x7D02, 12);
-			poke(0x0EAA, fl::sub(peek(0x0EAA), 0x0008));
+			const uint16_t v7D08 = fl::sub(peek(0x0EAA), 0x0008);
+			poke(0x0EAA, v7D08);
 			step(0x7D08, 33);
 			T.psw &= ~(CF | VF);
 			step(0x7D0A, 18);
-			if ((int16_t)peek(0x0EAA) <= 0)
+			if ((int16_t)v7D08 <= 0)
 			{
 				step(0x7D0C, 12);
 				pokeb(0x0EA6, 0);
@@ -3095,9 +3113,10 @@ uint16_t score_landing(const Args &)
 	if (rw(local(4)) == 4)
 	{
 		step(0x7AF4, 12);
-		fl::tstb(peekb(0x01F2));
+		const uint8_t v7AF8 = peekb(0x01F2);
+		fl::tstb(v7AF8);
 		step(0x7AF8, 24);
-		if (peekb(0x01F2))
+		if (v7AF8)
 		{
 			step(0x7AFA, 12);
 			step(0x7DD0, 18);                          // JMP 7DD0
@@ -3219,9 +3238,10 @@ uint16_t score_landing(const Args &)
 	fl::clr();
 	step(0x7B86, 12);
 	const uint16_t level = rw(local(8));
-	fl::tst(peek(0x01B4));
+	const uint16_t v7B8A = peek(0x01B4);
+	fl::tst(v7B8A);
 	step(0x7B8A, 24);
-	if ((int16_t)peek(0x01B4) < 0)
+	if ((int16_t)v7B8A < 0)
 	{
 		step(0x7B8C, 12);
 		fl::cmp(level, 2);
@@ -3237,9 +3257,10 @@ uint16_t score_landing(const Args &)
 	}
 	else
 		step(0x7B96, 12);
-	fl::tst(peek(0x0FAA));
+	const uint16_t v7B9A = peek(0x0FAA);
+	fl::tst(v7B9A);
 	step(0x7B9A, 24);
-	if ((int16_t)peek(0x0FAA) < 0)
+	if ((int16_t)v7B9A < 0)
 	{
 		step(0x7B9C, 12);
 		R[4] = 0;
@@ -3258,9 +3279,10 @@ uint16_t score_landing(const Args &)
 		step(0x7BAA, 12);
 	const uint8_t move = peekb(0x032A);
 	bool none;
-	fl::cmpb(peekb(0x031F), 1);
+	const uint8_t v7BB0 = peekb(0x031F);
+	fl::cmpb(v7BB0, 1);
 	step(0x7BB0, 30);
-	if (peekb(0x031F) == 1)
+	if (v7BB0 == 1)
 	{
 		step(0x7BC8, 12);
 		none = true;
@@ -3364,9 +3386,11 @@ uint16_t score_landing(const Args &)
 			R[4] = lb(peekb((uint16_t)(0x4539 + R[0])));
 			step(0x7C12, 27);
 			R[0] = jsr(0x7C16, 0x90BA);
-			fl::cmpb(peekb(0x0FE0), peekb((uint16_t)(0x4570 + R[0])));
+			const uint8_t v7C1C = peekb(0x0FE0);
+			const uint8_t v7C1C_2 = peekb((uint16_t)(0x4570 + R[0]));
+			fl::cmpb(v7C1C, v7C1C_2);
 			step(0x7C1C, 39);
-			if (peekb(0x0FE0) == peekb((uint16_t)(0x4570 + R[0])))
+			if (v7C1C == v7C1C_2)
 			{
 				step(0x7C1E, 12);
 				R[4] = asl_w(R[4]);
@@ -3376,9 +3400,10 @@ uint16_t score_landing(const Args &)
 				step(0x7C20, 12);
 			R[1] = fl::add(R[1], R[4]);
 			step(0x7C22, 12);
-			fl::tst(peek(0x0FB2));
+			const uint16_t v7C26 = peek(0x0FB2);
+			fl::tst(v7C26);
 			step(0x7C26, 24);
-			if (peek(0x0FB2))
+			if (v7C26)
 			{
 				step(0x7C28, 12);
 				R[1] = fl::add(R[1], 2);
@@ -3392,9 +3417,11 @@ uint16_t score_landing(const Args &)
 			{
 				step(0x7C32, 12);
 				R[0] = jsr(0x7C36, 0x90BA);
-				fl::cmpb(peekb(0x0FE0), peekb((uint16_t)(0x4570 + R[0])));
+				const uint8_t v7C3C = peekb(0x0FE0);
+				const uint8_t v7C3C_2 = peekb((uint16_t)(0x4570 + R[0]));
+				fl::cmpb(v7C3C, v7C3C_2);
 				step(0x7C3C, 39);
-				if (peekb(0x0FE0) != peekb((uint16_t)(0x4570 + R[0])))
+				if (v7C3C != v7C3C_2)
 				{
 					step(0x7C3E, 12);
 					R[1] = lw(14);
@@ -3423,9 +3450,10 @@ uint16_t score_landing(const Args &)
 			}
 			else
 				step(0x7C56, 12);
-			fl::cmpb(peekb(0x032A), 0x0F);
+			const uint8_t v7C5C = peekb(0x032A);
+			fl::cmpb(v7C5C, 0x0F);
 			step(0x7C5C, 30);
-			if (peekb(0x032A) == 0x0F)
+			if (v7C5C == 0x0F)
 			{
 				step(0x7C5E, 12);
 				R[1] = fl::add(R[1], 4);
@@ -3472,9 +3500,10 @@ uint16_t score_landing(const Args &)
 			step(0x7C8A, 27);
 			R[1] = fl::add(R[1], R[4]);
 			step(0x7C8C, 12);
-			fl::cmpb(peekb(0x01EA), 2);
+			const uint8_t v7C92 = peekb(0x01EA);
+			fl::cmpb(v7C92, 2);
 			step(0x7C92, 30);
-			if (peekb(0x01EA) == 2)
+			if (v7C92 == 2)
 			{
 				step(0x7C94, 12);
 				R[1] = fl::add(R[1], 2);
@@ -3593,9 +3622,10 @@ uint16_t score_landing(const Args &)
 				fl::mov(2);
 				step(0x7D0E, 27);
 				jsr(0x7D12, 0x7DD6);                   // update_table_0fb4
-				fl::cmpb(peekb(0x0327), 0x18);
+				const uint8_t v7D18 = peekb(0x0327);
+				fl::cmpb(v7D18, 0x18);
 				step(0x7D18, 30);
-				if (peekb(0x0327) == 0x18)
+				if (v7D18 == 0x18)
 				{
 					step(0x7D1A, 12);
 					R[4] = lw(0x0028);
@@ -3619,14 +3649,16 @@ uint16_t score_landing(const Args &)
 				step(0x7D28, 12);
 				R[3] = fl::add(R[3], 0x0FB4);
 				step(0x7D2C, 18);
-				fl::tstb(peekb(R[3]));
+				const uint8_t v7D2E = peekb(R[3]);
+				fl::tstb(v7D2E);
 				step(0x7D2E, 18);
-				if (peekb(R[3]))
+				if (v7D2E)
 				{
 					step(0x7D30, 12);
-					fl::cmp(peek(0x0FB2), 5);
+					const uint16_t v7D36 = peek(0x0FB2);
+					fl::cmp(v7D36, 5);
 					step(0x7D36, 30);
-					if ((int16_t)peek(0x0FB2) >= 5)
+					if ((int16_t)v7D36 >= 5)
 					{
 						step(0x7D82, 12);
 						const uint8_t v = peekb((uint16_t)(0x45D1 + R[1]));
@@ -3662,9 +3694,10 @@ uint16_t score_landing(const Args &)
 								step(0x7D4E, 18);
 							}
 						}
-						fl::cmpb(peekb(0x0327), 0x18);
+						const uint8_t v7D54 = peekb(0x0327);
+						fl::cmpb(v7D54, 0x18);
 						step(0x7D54, 30);
-						if (peekb(0x0327) == 0x18)
+						if (v7D54 == 0x18)
 						{
 							step(0x7D56, 12);
 							fl::cmp(R[4], 0x0050);
@@ -3688,9 +3721,10 @@ uint16_t score_landing(const Args &)
 						R[1] = sext8(v);
 						fl::movb(v);
 						step(0x7D68, 27);
-						fl::cmpb(peekb(R[3]), 3);
+						const uint8_t v7D6C = peekb(R[3]);
+						fl::cmpb(v7D6C, 3);
 						step(0x7D6C, 24);
-						if (peekb(R[3]) == 3)
+						if (v7D6C == 3)
 						{
 							step(0x7D6E, 12);
 							fl::tst(R[1]);
@@ -3743,9 +3777,10 @@ uint16_t score_landing(const Args &)
 		step(0x7D96, 12);
 		R[1] = asl_w(R[1]);
 		step(0x7D98, 12);
-		fl::cmpb(peekb(0x0F59), 3);
+		const uint8_t v7D9E = peekb(0x0F59);
+		fl::cmpb(v7D9E, 3);
 		step(0x7D9E, 30);
-		if (peekb(0x0F59) < 3)
+		if (v7D9E < 3)
 		{
 			step(0x7DA0, 12);
 			ww(R[6], lw(peek((uint16_t)(0xFCFC + R[1]))));
@@ -3818,9 +3853,10 @@ uint16_t draw_status_line(const Args &)
 	SteppedFrame frame(5, 0x744A);
 	uint16_t *R = T.r;
 	// player labels
-	fl::cmpb(peekb(0x0F26), 1);
+	const uint8_t v7450 = peekb(0x0F26);
+	fl::cmpb(v7450, 1);
 	step(0x7450, 30);
-	if (peekb(0x0F26) == 1)
+	if (v7450 == 1)
 	{
 		step(0x7452, 12);
 		R[1] = lw(0x0010);
@@ -3879,9 +3915,10 @@ uint16_t draw_status_line(const Args &)
 	}
 	step(0x748A, 12);
 	// the timer bar or the park's goal
-	fl::tstb(peekb(0x018F));
+	const uint8_t v748E = peekb(0x018F);
+	fl::tstb(v748E);
 	step(0x748E, 24);
-	if (peekb(0x018F))
+	if (v748E)
 		step(0x754E, 12);
 	else
 	{
@@ -3914,9 +3951,10 @@ uint16_t draw_status_line(const Args &)
 		}
 		if (!goal)
 		{
-			fl::tst(peek(0x0254));
+			const uint16_t v74AE = peek(0x0254);
+			fl::tst(v74AE);
 			step(0x74AE, 24);
-			if ((int16_t)peek(0x0254) > 0)
+			if ((int16_t)v74AE > 0)
 			{
 				step(0x74B0, 12);
 				poke(0x0188, lw(0x4000));
@@ -4014,9 +4052,10 @@ uint16_t draw_status_line(const Args &)
 		}
 	}
 	// scores
-	fl::tstb(peekb(0x01F6));
+	const uint8_t v7552 = peekb(0x01F6);
+	fl::tstb(v7552);
 	step(0x7552, 24);
-	if (peekb(0x01F6))
+	if (v7552)
 	{
 		step(0x7554, 12);
 		const uint8_t me = peekb(0x01F5);
@@ -4065,9 +4104,10 @@ uint16_t draw_status_line(const Args &)
 		fl::mov(1);
 		step(0x75A8, 30);
 		R[0] = jsr(0x75AC, 0xBA9A);
-		fl::tstb(peekb(0x01F5));
+		const uint8_t v75B0 = peekb(0x01F5);
+		fl::tstb(v75B0);
 		step(0x75B0, 24);
-		if (peekb(0x01F5))
+		if (v75B0)
 		{
 			step(0x75BA, 12);
 			poke(0x0186, lw(0x2262));
@@ -4119,9 +4159,10 @@ uint16_t draw_status_line(const Args &)
 	fl::mov(1);
 	step(0x760A, 30);
 	R[0] = jsr(0x760E, 0xBA9A);
-	fl::cmpb(peekb(0x0F26), 1);
+	const uint8_t v7614 = peekb(0x0F26);
+	fl::cmpb(v7614, 1);
 	step(0x7614, 30);
-	if (peekb(0x0F26) == 1)
+	if (v7614 == 1)
 	{
 		step(0x7616, 12);
 		step(0x7754, 18);
@@ -4133,9 +4174,10 @@ uint16_t draw_status_line(const Args &)
 	{
 		step(0x761A, 12);
 		// the high score
-		fl::tstb(peekb(0x018F));
+		const uint8_t v761E = peekb(0x018F);
+		fl::tstb(v761E);
 		step(0x761E, 24);
-		if (peekb(0x018F))
+		if (v761E)
 			step(0x7662, 12);
 		else
 		{
@@ -4281,9 +4323,10 @@ uint16_t draw_status_line(const Args &)
 		step(0x76C6, 33);
 		poke(0x0188, lw(0x8000));
 		step(0x76CC, 33);
-		fl::tstb(peekb(0x01F6));
+		const uint8_t v76D0 = peekb(0x01F6);
+		fl::tstb(v76D0);
 		step(0x76D0, 24);
-		if (peekb(0x01F6))
+		if (v76D0)
 		{
 			step(0x76D2, 12);
 			R[1] = lw(0x0001);
@@ -4401,14 +4444,16 @@ uint16_t draw_status_line(const Args &)
 		step(0x777C, 33);
 		poke(0x0EAA, lw(0x00B4));
 		step(0x7782, 33);
-		fl::tstb(peekb(0x0F59));
+		const uint8_t v7786 = peekb(0x0F59);
+		fl::tstb(v7786);
 		step(0x7786, 24);
-		if (!peekb(0x0F59))
+		if (!v7786)
 		{
 			step(0x7788, 12);
-			fl::cmpb(peekb(0x0F2B), 1);
+			const uint8_t v778E = peekb(0x0F2B);
+			fl::cmpb(v778E, 1);
 			step(0x778E, 30);
-			if (peekb(0x0F2B) == 1)
+			if (v778E == 1)
 			{
 				step(0x7790, 12);
 				ww(R[6], 0x76F0);
@@ -4635,9 +4680,10 @@ void follow_skater_scroll()
 		step(0x7A22, 12);
 		R[1] = fl::sub(R[1], 0x3800);
 		step(0x7A26, 18);
-		fl::cmp(R[1], peek(0x0216));
+		const uint16_t v7A2A = peek(0x0216);
+		fl::cmp(R[1], v7A2A);
 		step(0x7A2A, 24);
-		if ((int16_t)R[1] >= (int16_t)peek(0x0216))
+		if ((int16_t)R[1] >= (int16_t)v7A2A)
 			step(0x7A88, 12);
 		else
 		{
@@ -4709,9 +4755,10 @@ void follow_skater_scroll()
 		step(0x7A7A, 12);
 		R[1] = fl::sub(R[1], 0x5000);
 		step(0x7A7E, 18);
-		fl::cmp(R[1], peek(0x0216));
+		const uint16_t v7A82 = peek(0x0216);
+		fl::cmp(R[1], v7A82);
 		step(0x7A82, 24);
-		if ((int16_t)R[1] > (int16_t)peek(0x0216))
+		if ((int16_t)R[1] > (int16_t)v7A82)
 		{
 			step(0x7A84, 12);
 			poke(0x0216, lw(R[1]));
@@ -4727,9 +4774,10 @@ void follow_skater_scroll()
 	if ((int16_t)R[1] < 0)
 	{
 		step(0x7A90, 12);
-		fl::cmp(R[1], peek(0x0214));
+		const uint16_t v7A94 = peek(0x0214);
+		fl::cmp(R[1], v7A94);
 		step(0x7A94, 24);
-		if ((int16_t)R[1] < (int16_t)peek(0x0214))
+		if ((int16_t)R[1] < (int16_t)v7A94)
 		{
 			step(0x7A96, 12);
 			poke(0x0214, lw(R[1]));
@@ -4749,9 +4797,10 @@ void follow_skater_scroll()
 	if ((int16_t)R[1] > 0)
 	{
 		step(0x7AA4, 12);
-		fl::cmp(R[1], peek(0x0214));
+		const uint16_t v7AA8 = peek(0x0214);
+		fl::cmp(R[1], v7AA8);
 		step(0x7AA8, 24);
-		if ((int16_t)R[1] > (int16_t)peek(0x0214))
+		if ((int16_t)R[1] > (int16_t)v7AA8)
 		{
 			step(0x7AAA, 12);
 			poke(0x0214, lw(R[1]));
@@ -5095,9 +5144,10 @@ void park_mode_step()
 			step(0x66F0, 12);
 		if (goal)
 		{
-			fl::cmpb(peekb(0x027A), 2);
+			const uint8_t v66CC = peekb(0x027A);
+			fl::cmpb(v66CC, 2);
 			step(0x66CC, 30);
-			if (peekb(0x027A) >= 2)
+			if (v66CC >= 2)
 			{
 				step(0x66CE, 12);
 				pokeb(0x0F1E, lb(0x3C));
@@ -5167,9 +5217,10 @@ void park_mode_step()
 			poke(0x0F22, lw(0x012C));
 			step(0x6728, 33);
 		}
-		fl::cmpb(peekb(0x027A), 2);
+		const uint8_t v672E = peekb(0x027A);
+		fl::cmpb(v672E, 2);
 		step(0x672E, 30);
-		if (peekb(0x027A) < 2)
+		if (v672E < 2)
 		{
 			step(0x6730, 12);
 			pokeb(0x0FA2, lb((uint8_t)(peekb(0x0FA2) | 0x04)));
@@ -5233,9 +5284,10 @@ void park_mode_step()
 		}
 		else
 		{
-			fl::cmpb(peekb(0x027A), 2);
+			const uint8_t v6778 = peekb(0x027A);
+			fl::cmpb(v6778, 2);
 			step(0x6778, 30);
-			if (peekb(0x027A) < 2)
+			if (v6778 < 2)
 			{
 				step(0x6780, 12);
 				push(0x005D);
@@ -5270,9 +5322,10 @@ void park_mode_step()
 		}
 		step(0x679A, 12);
 		restart_park();
-		fl::cmpb(peekb(0x027A), 2);
+		const uint8_t v67AC = peekb(0x027A);
+		fl::cmpb(v67AC, 2);
 		step(0x67AC, 30);
-		if (peekb(0x027A) < 2)
+		if (v67AC < 2)
 		{
 			step(0x67AE, 12);
 			poke(0x0258, lw(peek(0x0F20)));
@@ -5469,19 +5522,22 @@ void park_mode_step()
 	}
 	case 6:
 	{
-		fl::cmp(peek(0x0F22), 1);
+		const uint16_t v68C2 = peek(0x0F22);
+		fl::cmp(v68C2, 1);
 		step(0x68C2, 30);
-		if (peek(0x0F22) == 1)
+		if (v68C2 == 1)
 		{
 			step(0x68C4, 12);
-			fl::cmpb(peekb(0x0F59), 3);
+			const uint8_t v68CA = peekb(0x0F59);
+			fl::cmpb(v68CA, 3);
 			step(0x68CA, 30);
-			if (peekb(0x0F59) < 3)
+			if (v68CA < 3)
 			{
 				step(0x68CC, 12);
-				fl::tst(peek(0x0F20));
+				const uint16_t v68D0 = peek(0x0F20);
+				fl::tst(v68D0);
 				step(0x68D0, 24);
-				if ((int16_t)peek(0x0F20) <= 0)
+				if ((int16_t)v68D0 <= 0)
 				{
 					step(0x68D8, 12);
 					R[0] = jsr(0x68DC, 0xA8FE);
@@ -5522,14 +5578,16 @@ void park_mode_step()
 			return;
 		}
 		step(0x68FA, 12);
-		fl::cmpb(peekb(0x0F59), 3);
+		const uint8_t v6900 = peekb(0x0F59);
+		fl::cmpb(v6900, 3);
 		step(0x6900, 30);
-		if (peekb(0x0F59) < 3)
+		if (v6900 < 3)
 		{
 			step(0x6902, 12);
-			fl::tst(peek(0x0F20));
+			const uint16_t v6906 = peek(0x0F20);
+			fl::tst(v6906);
 			step(0x6906, 24);
-			if ((int16_t)peek(0x0F20) <= 0)
+			if ((int16_t)v6906 <= 0)
 			{
 				step(0x6926, 12);
 				poke(0x0F22, lw(0x0060));
@@ -5540,9 +5598,10 @@ void park_mode_step()
 				return;
 			}
 			step(0x6908, 12);
-			fl::tstb(peekb(0x0E95));
+			const uint8_t v690C = peekb(0x0E95);
+			fl::tstb(v690C);
 			step(0x690C, 24);
-			if (peekb(0x0E95))
+			if (v690C)
 			{
 				step(0x6914, 12);
 				push(0x0032);
@@ -5566,9 +5625,10 @@ void park_mode_step()
 		else
 		{
 			step(0x692E, 12);
-			fl::tst(peek(0x0F34));
+			const uint16_t v6932 = peek(0x0F34);
+			fl::tst(v6932);
 			step(0x6932, 24);
-			if ((int16_t)peek(0x0F34) <= 0)
+			if ((int16_t)v6932 <= 0)
 			{
 				step(0x6968, 12);
 				poke(0x0F22, lw(0x0040));
@@ -5584,9 +5644,10 @@ void park_mode_step()
 			fl::mov(0x0020);
 			step(0x693E, 30);
 			jsr(0x6942, 0xEF24);
-			fl::cmp(peek(0x0F34), 0x0040);
+			const uint16_t v6948 = peek(0x0F34);
+			fl::cmp(v6948, 0x0040);
 			step(0x6948, 30);
-			if ((int16_t)peek(0x0F34) < 0x0040)
+			if ((int16_t)v6948 < 0x0040)
 			{
 				step(0x694A, 12);
 				ww(R[6], lw(peek(0x0F34)));
@@ -5618,10 +5679,11 @@ void park_mode_step()
 			return;
 		}
 		step(0x697C, 12);
-		fl::tstb(peekb(0x01F6));
+		const uint8_t v6980 = peekb(0x01F6);
+		fl::tstb(v6980);
 		step(0x6980, 24);
 		bool kind2 = false;
-		if (peekb(0x01F6))
+		if (v6980)
 		{
 			step(0x6982, 12);
 			fl::cmpb(peekb(0x0F2B), 2);
@@ -5668,9 +5730,10 @@ void park_mode_step()
 		}
 		step(0x699E, 12);
 		jsr(0x69A2, 0x820C);
-		fl::cmpb(peekb(0x0F2B), 2);
+		const uint8_t v69A8 = peekb(0x0F2B);
+		fl::cmpb(v69A8, 2);
 		step(0x69A8, 30);
-		if (peekb(0x0F2B) == 2)
+		if (v69A8 == 2)
 		{
 			step(0x69AA, 12);
 			jsr(0x69AE, 0xE730);
@@ -5844,9 +5907,10 @@ uint16_t choose_park_level(const Args &)
 	step(0x7164, 12);
 	R[1] = lb(peekb(0x0F31));
 	step(0x7168, 24);
-	fl::tstb(peekb(0x01F6));
+	const uint8_t v716C = peekb(0x01F6);
+	fl::tstb(v716C);
 	step(0x716C, 24);
-	if (peekb(0x01F6))
+	if (v716C)
 	{
 		step(0x716E, 12);
 		R[0] = 0;
@@ -5910,9 +5974,10 @@ uint16_t choose_park_level(const Args &)
 	}
 	else
 	{
-		fl::tstb(peekb(0x0F2D));
+		const uint8_t v71A6 = peekb(0x0F2D);
+		fl::tstb(v71A6);
 		step(0x71A6, 24);
-		if ((int8_t)peekb(0x0F2D) <= 0)
+		if ((int8_t)v71A6 <= 0)
 		{
 			step(0x71CC, 12);
 			fresh = false;
@@ -5986,9 +6051,10 @@ uint16_t score_landing_screen3(const Args &)
 	step(0x7EA4, 27);
 	poke(0x1400, lw(R[0]));
 	step(0x7EA8, 27);
-	fl::cmpb(peekb(0x031F), 1);
+	const uint8_t v7EAE = peekb(0x031F);
+	fl::cmpb(v7EAE, 1);
 	step(0x7EAE, 30);
-	if (peekb(0x031F) == 1)
+	if (v7EAE == 1)
 		step(0x7F44, 12);
 	else
 	{
@@ -6005,9 +6071,10 @@ uint16_t score_landing_screen3(const Args &)
 		step(0x7EBC, 18);
 		R[2] = fl::add(R[2], R[0]);
 		step(0x7EBE, 12);
-		fl::tstb(peekb(R[2]));
+		const uint8_t v7EC0 = peekb(R[2]);
+		fl::tstb(v7EC0);
 		step(0x7EC0, 18);
-		if (!peekb(R[2]))
+		if (!v7EC0)
 		{
 			step(0x7EC2, 12);
 			R[1] = 0;
@@ -6163,9 +6230,10 @@ uint16_t add_tickets(const Args &a)
 	}
 	else
 		step(0x72E4, 12);
-	fl::tstb(peekb(0x0F59));
+	const uint8_t v72E8 = peekb(0x0F59);
+	fl::tstb(v72E8);
 	step(0x72E8, 24);
-	if (!peekb(0x0F59))
+	if (!v72E8)
 	{
 		step(0x72EA, 12);
 		const uint8_t me = peekb(0x01F5);
@@ -6374,9 +6442,10 @@ uint16_t next_turn(const Args &)
 	}
 	if (choose)
 	{
-		fl::tstb(peekb(0x0F26));
+		const uint8_t v6D54 = peekb(0x0F26);
+		fl::tstb(v6D54);
 		step(0x6D54, 24);
-		if (peekb(0x0F26))
+		if (v6D54)
 		{
 			step(0x6D56, 12);
 			jsr(0x6D5A, 0x7140);                       // choose_park_level
@@ -6386,9 +6455,10 @@ uint16_t next_turn(const Args &)
 	}
 	poke(0x0EAA, lw(0x0001));
 	step(0x6D60, 33);
-	fl::tstb(peekb(0x0F26));
+	const uint8_t v6D64 = peekb(0x0F26);
+	fl::tstb(v6D64);
 	step(0x6D64, 24);
-	if (peekb(0x0F26))
+	if (v6D64)
 	{
 		step(0x6D66, 12);
 		push(0);
@@ -6400,9 +6470,10 @@ uint16_t next_turn(const Args &)
 	}
 	else
 		step(0x6D6E, 12);
-	fl::tstb(peekb(0x0F29));
+	const uint8_t v6D72 = peekb(0x0F29);
+	fl::tstb(v6D72);
 	step(0x6D72, 24);
-	if (!peekb(0x0F29))
+	if (!v6D72)
 	{
 		step(0x6D74, 12);
 		push(lw(peek(0x564E)));
@@ -6593,9 +6664,10 @@ uint16_t start_game_town(const Args &)
 	fl::mov(0x78AC);
 	step(0x659E, 27);
 	jsr(0x65A2, 0xA9FC);
-	fl::tstb(peekb(0x01F6));
+	const uint8_t v65A6 = peekb(0x01F6);
+	fl::tstb(v65A6);
 	step(0x65A6, 24);
-	if (peekb(0x01F6))
+	if (v65A6)
 	{
 		step(0x65A8, 12);
 		ww(R[6], 0x75EA);
@@ -6751,9 +6823,10 @@ uint16_t park_start_screen(const Args &)
 		step(0x7260, 12);
 	}
 	step(0x7280, 12);
-	fl::tst(peek(0x0254));
+	const uint16_t v7284 = peek(0x0254);
+	fl::tst(v7284);
 	step(0x7284, 24);
-	if (!peek(0x0254))
+	if (!v7284)
 	{
 		step(0x7286, 12);
 		ww(R[6], 0x5F06);
@@ -6915,9 +6988,10 @@ void selftest_sprite_screen()
 		step(0x75C0, 30);
 		fl::tst(pop());
 		step(0x75C2, 18);
-		fl::tstb(peekb(0x0FE6));
+		const uint8_t v75C6 = peekb(0x0FE6);
+		fl::tstb(v75C6);
 		step(0x75C6, 24);
-		if (peekb(0x0FE6)) break;
+		if (v75C6) break;
 		step(0x752E, 12);
 	}
 	step(0x75C8, 12);
@@ -7033,9 +7107,10 @@ void selftest_colour_bars_screen()
 	}
 	for (;;)
 	{
-		fl::tstb(peekb(0x0FE6));
+		const uint8_t v7458 = peekb(0x0FE6);
+		fl::tstb(v7458);
 		step(0x7458, 24);
-		if (peekb(0x0FE6)) break;
+		if (v7458) break;
 		step(0x745A, 12);
 		jsr(0x745E, 0xF8EA);                           // button_hold_timer
 		jsr(0x7462, 0x8D50);                           // wait_vblank
@@ -7381,9 +7456,10 @@ void selftest_playfield_screen()
 				break;
 			}
 			step(0x7286, 12);
-			fl::tstb(peekb(0x0FE6));
+			const uint8_t v728A = peekb(0x0FE6);
+			fl::tstb(v728A);
 			step(0x728A, 24);
-			if (peekb(0x0FE6))
+			if (v728A)
 			{
 				step(0x728C, 12);
 				pokeb(0x0FE6, 0);
@@ -7415,6 +7491,881 @@ void selftest_playfield_screen()
 	}
 	R[6] = fl::add(R[6], 8);
 	step(0x72AE, 18);
+}
+
+// B6:6B7E (assembly, self test): the controller test: the controller position (F:8D86,
+// F:8E2E steps) and the two buttons are shown every frame until a press of the other button
+// (0x0FE6); the settings chosen (bits in 8(SP)) are then sent to the sound CPU (commands 0x16
+// and the setting, F:8F50, F:8F62 answers polled up to 11 times) and confirmed after a button
+// press.  Locals: (SP) scratch / poll counter, 2(SP) position parity, 4(SP) and 6(SP) the two
+// toggles, 8(SP) the settings.
+void selftest_controls_screen()
+{
+	uint16_t *R = T.r;
+	auto L = [&](int off) { return (uint16_t)(R[6] + off); };
+	R[6] = fl::sub(R[6], 0x000A);
+	step(0x6B82, 18);
+	jsr(0x6B86, 0x8D2C);                               // clear_playfield_ram
+	jsr(0x6B8A, 0x8D86);
+	jsr(0x6B8E, 0x8E2E);                               // rotary_step
+	poke(0x0184, lw(0x5C04));
+	step(0x6B94, 33);
+	R[0] = lw(0x001F);
+	step(0x6B98, 18);
+	jsr(0x6B9C, 0x8AB6);
+	for (int i = 0; i < 4; i++)
+	{
+		ww(L(8 - 2 * i), 0);
+		fl::clr();
+		step((uint16_t)(0x6BA0 + 4 * i), 30);
+	}
+	R[1] = 0;
+	fl::clr();
+	step(0x6BAE, 12);
+	for (;;)
+	{
+		R[0] = lw(R[1]);
+		step(0x6BB0, 12);
+		R[0] = fl::add(R[0], 0x003D);
+		step(0x6BB4, 18);
+		jsr(0x6BB8, 0x8AB6);
+		R[1] = fl::inc(R[1]);
+		step(0x6BBA, 12);
+		fl::cmp(R[1], 5);
+		step(0x6BBE, 18);
+		if ((int16_t)R[1] > 5) break;
+		step(0x6BAE, 12);
+	}
+	step(0x6BC0, 12);
+	for (;;)                                           // while the button is still pressed
+	{
+		const uint8_t v6BC4 = peekb(0x0193);
+		fl::tstb(v6BC4);
+		step(0x6BC4, 24);
+		if (!(v6BC4 & 0x80)) break;
+		step(0x6BC6, 12);
+		ww(L(0), fl::inc(rw(L(0))));
+		step(0x6BC8, 21);
+		step(0x6BC0, 12);
+	}
+	step(0x6BCA, 12);
+	for (;;)
+	{
+		jsr(0x6BCE, 0x8D50);                           // wait_vblank
+		jsr(0x6BD2, 0x8D86);
+		R[0] = jsr(0x6BD6, 0x8E2E);                    // rotary_step
+		ww(L(0), lw(R[0]));
+		step(0x6BD8, 21);
+		R[0] = lw(rw(L(2)));
+		step(0x6BDC, 27);
+		R[0] = fl::add(R[0], rw(L(0)));
+		step(0x6BDE, 18);
+		ww(L(2), lw(R[0]));
+		step(0x6BE2, 30);
+		ww(L(2), lw(rw(L(2)) & 0x0001));
+		step(0x6BE8, 36);
+		const uint8_t pressed = lb(peekb(0x0193) & 0x40);
+		step(0x6BEE, 30);
+		if (pressed)
+		{
+			step(0x6BF0, 12);
+			fl::tst(rw(L(2)));
+			step(0x6BF4, 27);
+			if (!rw(L(2)))
+			{
+				step(0x6BF6, 12);
+				R[0] = lw(1);
+				step(0x6BFA, 18);
+				ww(L(6), lw((uint16_t)(rw(L(6)) ^ R[0])));
+				step(0x6BFE, 30);
+				step(0x6C08, 12);
+			}
+			else
+			{
+				step(0x6C00, 12);
+				R[0] = lw(1);
+				step(0x6C04, 18);
+				ww(L(4), lw((uint16_t)(rw(L(4)) ^ R[0])));
+				step(0x6C08, 30);
+			}
+			for (;;)
+			{
+				const uint8_t held = lb(peekb(0x0193) & 0x40);
+				step(0x6C0E, 30);
+				if (!held) break;
+				step(0x6C08, 12);
+			}
+			step(0x6C10, 12);
+		}
+		else
+			step(0x6C10, 12);
+		fl::tst(rw(L(6)));
+		step(0x6C14, 27);
+		if (!rw(L(6)))
+		{
+			step(0x6C16, 12);
+			R[0] = lw(0x0043);
+			step(0x6C1A, 18);
+			jsr(0x6C1E, 0x8AB6);
+			ww(L(8), lw(rw(L(8)) & ~0x0001));
+			step(0x6C24, 36);
+			step(0x6C34, 12);
+		}
+		else
+		{
+			step(0x6C26, 12);
+			R[0] = lw(0x0044);
+			step(0x6C2A, 18);
+			jsr(0x6C2E, 0x8AB6);
+			ww(L(8), lw(rw(L(8)) | 0x0001));
+			step(0x6C34, 36);
+		}
+		fl::tst(rw(L(2)));
+		step(0x6C38, 27);
+		if (!rw(L(2)))
+		{
+			step(0x6C3A, 12);
+			R[0] = lw(0x003F);
+			step(0x6C3E, 18);
+			step(0x6C44, 12);
+		}
+		else
+		{
+			step(0x6C40, 12);
+			R[0] = lw(0x0023);
+			step(0x6C44, 18);
+		}
+		jsr(0x6C48, 0x8B52);                           // draw_large_char
+		fl::tst(rw(L(4)));
+		step(0x6C4C, 27);
+		if (!rw(L(4)))
+		{
+			step(0x6C4E, 12);
+			R[0] = lw(0x0045);
+			step(0x6C52, 18);
+			jsr(0x6C56, 0x8AB6);
+			ww(L(8), lw(rw(L(8)) & ~0x0006));
+			step(0x6C5C, 36);
+			step(0x6C6C, 12);
+		}
+		else
+		{
+			step(0x6C5E, 12);
+			R[0] = lw(0x0046);
+			step(0x6C62, 18);
+			jsr(0x6C66, 0x8AB6);
+			ww(L(8), lw(rw(L(8)) | 0x0006));
+			step(0x6C6C, 36);
+		}
+		fl::tst(rw(L(2)));
+		step(0x6C70, 27);
+		if (rw(L(2)))
+		{
+			step(0x6C72, 12);
+			R[0] = lw(0x003F);
+			step(0x6C76, 18);
+			step(0x6C7C, 12);
+		}
+		else
+		{
+			step(0x6C78, 12);
+			R[0] = lw(0x0023);
+			step(0x6C7C, 18);
+		}
+		jsr(0x6C80, 0x8B52);                           // draw_large_char
+		const uint8_t v6C84 = peekb(0x0FE6);
+		fl::tstb(v6C84);
+		step(0x6C84, 24);
+		if (v6C84) break;
+		step(0x6BCA, 12);
+	}
+	step(0x6C86, 12);
+	pokeb(0x0FE6, 0);
+	fl::clr();
+	step(0x6C8A, 27);
+	fl::tst(rw(L(8)));
+	step(0x6C8E, 27);
+	if (rw(L(8)))
+	{
+		step(0x6C90, 12);
+		jsr(0x6C94, 0x8D2C);                           // clear_playfield_ram
+		R[0] = lw(0x0047);
+		step(0x6C98, 18);
+		jsr(0x6C9C, 0x8AB6);
+		R[0] = lw(0x0048);
+		step(0x6CA0, 18);
+		jsr(0x6CA4, 0x8AB6);
+		push(0x0016);
+		fl::mov(0x0016);
+		step(0x6CA8, 30);
+		jsr(0x6CAC, 0x8EA2);                           // send_sound_command
+		jsr(0x6CB0, 0x8F50);
+		ww(R[6], lw(rw(L(0x0A))));
+		step(0x6CB4, 36);
+		jsr(0x6CB8, 0x8EA2);                           // send_sound_command
+		R[1] = lw(0x000B);
+		step(0x6CBC, 18);
+		for (;;)
+		{
+			pokeb(0x01A2, 0);
+			fl::clr();
+			step(0x6CC0, 27);
+			jsr(0x6CC4, 0x8F62);
+			const uint8_t v6CC8 = peekb(0x01A2);
+			fl::tstb(v6CC8);
+			step(0x6CC8, 24);
+			if (!v6CC8)
+			{
+				step(0x6CCC, 12);
+				break;
+			}
+			step(0x6CCA, 12);
+			R[1] = (uint16_t)(R[1] - 1);               // SOB
+			if (!R[1])
+			{
+				step(0x6CCC, 18);
+				break;
+			}
+			step(0x6CBC, 18);
+		}
+		R[0] = lw(0x0148);
+		step(0x6CD0, 18);
+		jsr(0x6CD4, 0x8AB6);
+		const uint8_t v6CD8 = peekb(0x01A2);
+		fl::tstb(v6CD8);
+		step(0x6CD8, 24);
+		if (!v6CD8)
+		{
+			step(0x6CDA, 12);
+			R[0] = lw(0x0049);
+			step(0x6CDE, 18);
+			jsr(0x6CE2, 0x8AB6);
+			step(0x6CE8, 12);
+		}
+		else
+		{
+			step(0x6CE4, 12);
+			jsr(0x6CE8, 0x8A9E);
+		}
+		R[0] = lw(0x001F);
+		step(0x6CEC, 18);
+		jsr(0x6CF0, 0x8AB6);
+		jsr(0x6CF4, 0x8D60);                           // wait_button_press
+		fl::tst(pop());
+		step(0x6CF6, 18);
+	}
+	else
+		step(0x6CF6, 12);
+	R[6] = fl::add(R[6], 0x000A);
+	step(0x6CFA, 18);
+}
+
+// B6:6CFC (assembly, self test): the switch tests: every 16 frames the DIP switch settings
+// (A?:435A reads them into 0x01FA, 0x01F3) are shown as texts until a press of the other
+// button; then the coin and game settings 0x01F4 are edited with the controller and the
+// button (two toggles in 4(SP) and 6(SP), the setting in 2(SP)) and sent to the sound CPU
+// (commands 0x1B and the setting, F:8F50, F:8F62).  Locals: (SP) scratch, 2(SP) setting,
+// 4(SP) position parity, 6(SP) toggle, 8(SP) step.
+void selftest_switches_screen()
+{
+	uint16_t *R = T.r;
+	auto L = [&](int off) { return (uint16_t)(R[6] + off); };
+	R[6] = fl::sub(R[6], 0x000A);
+	step(0x6D00, 18);
+	jsr(0x6D04, 0x8D2C);                               // clear_playfield_ram
+	R[0] = lw(0x001F);
+	step(0x6D08, 18);
+	jsr(0x6D0C, 0x8AB6);
+	R[1] = 0;
+	fl::clr();
+	step(0x6D0E, 12);
+	for (;;)
+	{
+		R[0] = lw(R[1]);
+		step(0x6D10, 12);
+		R[0] = fl::add(R[0], 0x004A);
+		step(0x6D14, 18);
+		jsr(0x6D18, 0x8AB6);
+		R[1] = fl::inc(R[1]);
+		step(0x6D1A, 12);
+		fl::cmp(R[1], 4);
+		step(0x6D1E, 18);
+		if ((int16_t)R[1] > 4) break;
+		step(0x6D0E, 12);
+	}
+	step(0x6D20, 12);
+	for (;;)
+	{
+		const uint8_t v6D24 = peekb(0x0193);
+		fl::tstb(v6D24);
+		step(0x6D24, 24);
+		if (!(v6D24 & 0x80)) break;
+		step(0x6D26, 12);
+		ww(L(0), fl::inc(rw(L(0))));
+		step(0x6D28, 21);
+		step(0x6D20, 12);
+	}
+	step(0x6D2A, 12);
+	// a text by two bits of the switches (the 2-bit groups at (SP), each shown and shifted)
+	auto show = [&](uint16_t at, uint16_t mask, uint16_t base) {
+		R[0] = lw(rw(L(0)));
+		step((uint16_t)(at + 2), 18);
+		R[0] = lw(R[0] & ~mask);
+		step((uint16_t)(at + 6), 18);
+		R[0] = fl::add(R[0], base);
+		step((uint16_t)(at + 10), 18);
+		jsr((uint16_t)(at + 14), 0x8AB6);
+	};
+	auto shift = [&](uint16_t at) {
+		ww(L(0), asr_w(rw(L(0))));
+		step((uint16_t)(at + 2), 21);
+	};
+	auto text = [&](uint16_t at, uint16_t t) {
+		R[0] = lw(t);
+		step((uint16_t)(at + 4), 18);
+		jsr((uint16_t)(at + 8), 0x8AB6);
+	};
+	for (;;)
+	{
+		jsr(0x6D2E, 0x8D50);                           // wait_vblank
+		const uint8_t f = lb(peekb(0x01C4) & 0x0F);
+		step(0x6D34, 30);
+		if (!f)
+		{
+			step(0x6D36, 12);
+			jsr(0x6D3A, 0x435A);
+			ww(L(0), 0);
+			fl::clr();
+			step(0x6D3C, 21);
+			wb(L(0), lb(peekb(0x01FA)));
+			step(0x6D40, 33);
+			show(0x6D40, 0xFFFC, 0x004F);
+			shift(0x6D4E);
+			shift(0x6D50);
+			text(0x6D52, 0x0053);
+			show(0x6D5A, 0xFFFC, 0x0054);
+			shift(0x6D68);
+			shift(0x6D6A);
+			text(0x6D6C, 0x0058);
+			show(0x6D74, 0xFFFE, 0x0059);
+			shift(0x6D82);
+			show(0x6D84, 0xFFF8, 0x005B);
+			R[0] = 0;
+			fl::clr();
+			step(0x6D94, 12);
+			R[0] = lb(peekb(0x01F3));
+			step(0x6D98, 24);
+			for (int i = 0; i < 6; i++)
+			{
+				R[0] = asr_w(R[0]);
+				step((uint16_t)(0x6D9A + 2 * i), 12);
+			}
+			R[0] = fl::add(R[0], 0x0063);
+			step(0x6DA8, 18);
+			jsr(0x6DAC, 0x8AB6);
+		}
+		else
+			step(0x6DAC, 12);
+		const uint8_t v6DB0 = peekb(0x0FE6);
+		fl::tstb(v6DB0);
+		step(0x6DB0, 24);
+		if (v6DB0) break;
+		step(0x6D2A, 12);
+	}
+	step(0x6DB2, 12);
+	pokeb(0x0FE6, 0);
+	fl::clr();
+	step(0x6DB6, 27);
+	jsr(0x6DBA, 0x8D2C);                               // clear_playfield_ram
+	R[0] = lw(0x001F);
+	step(0x6DBE, 18);
+	jsr(0x6DC2, 0x8AB6);
+	poke(0x0184, lw(0x5CD2));
+	step(0x6DC8, 33);
+	R[0] = lw(0x005C);
+	step(0x6DCC, 18);
+	jsr(0x6DD0, 0x8AB6);
+	ww(L(4), 0);
+	fl::clr();
+	step(0x6DD4, 30);
+	wb(L(2), lb(peekb(0x01F4)));
+	step(0x6DDA, 42);
+	ww(L(2), lw(rw(L(2)) & 0x0003));
+	step(0x6DE0, 36);
+	// BIT (PC),2(SP): the word after the opcode (2) is the source
+	if (!lw(rw(L(2)) & 0x0002))
+	{
+		step(0x6DE4, 33);
+		step(0x6DE6, 12);
+		R[0] = lw(1);
+		step(0x6DEA, 18);
+		ww(L(2), lw((uint16_t)(rw(L(2)) ^ R[0])));
+		step(0x6DEE, 30);
+	}
+	else
+	{
+		step(0x6DE4, 33);
+		step(0x6DEE, 12);
+	}
+	R[0] = 0;
+	fl::clr();
+	step(0x6DF0, 12);
+	R[0] = lb(peekb(0x01F4));
+	step(0x6DF4, 24);
+	for (int i = 0; i < 5; i++)
+	{
+		R[0] = asr_w(R[0]);
+		step((uint16_t)(0x6DF6 + 2 * i), 12);
+	}
+	ww(L(6), lw(R[0]));
+	step(0x6E02, 30);
+	ww(L(6), asr_w(rw(L(6))));
+	step(0x6E06, 30);
+	ww(L(6), asr_w(rw(L(6))));
+	step(0x6E0A, 30);
+	R[1] = lw(0x000C);
+	step(0x6E0E, 18);
+	for (;;)
+	{
+		R[0] = lw(R[1]);
+		step(0x6E10, 12);
+		R[0] = fl::add(R[0], 0x0050);
+		step(0x6E14, 18);
+		jsr(0x6E18, 0x8AB6);
+		R[1] = fl::inc(R[1]);
+		step(0x6E1A, 12);
+		fl::cmp(R[1], 0x0015);
+		step(0x6E1E, 18);
+		if ((int16_t)R[1] > 0x15) break;
+		step(0x6E0E, 12);
+	}
+	step(0x6E20, 12);
+	for (;;)
+	{
+		const uint8_t v6E24 = peekb(0x0193);
+		fl::tstb(v6E24);
+		step(0x6E24, 24);
+		if (!(v6E24 & 0x80)) break;
+		step(0x6E26, 12);
+		ww(L(0), fl::inc(rw(L(0))));
+		step(0x6E28, 21);
+		step(0x6E20, 12);
+	}
+	step(0x6E2A, 12);
+	for (;;)
+	{
+		jsr(0x6E2E, 0x8D50);                           // wait_vblank
+		jsr(0x6E32, 0x435A);
+		ww(L(0), 0);
+		fl::clr();
+		step(0x6E34, 21);
+		wb(L(0), lb(peekb(0x01F3)));
+		step(0x6E38, 33);
+		R[1] = 0;
+		fl::clr();
+		step(0x6E3A, 12);
+		for (;;)
+		{
+			R[0] = lw(rw(L(0)));
+			step(0x6E3C, 18);
+			R[0] = lw(R[0] & 0x0003);
+			step(0x6E40, 18);
+			R[0] = fl::add(R[0], R[1]);
+			step(0x6E42, 12);
+			R[0] = fl::add(R[0], 0x0050);
+			step(0x6E46, 18);
+			jsr(0x6E4A, 0x8AB6);
+			ww(L(0), asr_w(rw(L(0))));
+			step(0x6E4C, 21);
+			ww(L(0), asr_w(rw(L(0))));
+			step(0x6E4E, 21);
+			R[1] = fl::add(R[1], 4);
+			step(0x6E52, 18);
+			fl::cmp(R[1], 8);
+			step(0x6E56, 18);
+			if ((int16_t)R[1] > 8) break;
+			step(0x6E3A, 12);
+		}
+		step(0x6E58, 12);
+		jsr(0x6E5C, 0x8D86);
+		R[0] = jsr(0x6E60, 0x8E2E);                    // rotary_step
+		ww(L(8), lw(R[0]));
+		step(0x6E64, 30);
+		R[0] = lw(rw(L(4)));
+		step(0x6E68, 27);
+		R[0] = fl::add(R[0], rw(L(8)));
+		step(0x6E6C, 27);
+		ww(L(4), lw(R[0]));
+		step(0x6E70, 30);
+		ww(L(4), lw(rw(L(4)) & 0x0001));
+		step(0x6E76, 36);
+		const uint8_t pressed = lb(peekb(0x0193) & 0x40);
+		step(0x6E7C, 30);
+		if (pressed)
+		{
+			step(0x6E7E, 12);
+			fl::tst(rw(L(4)));
+			step(0x6E82, 27);
+			if (!rw(L(4)))
+			{
+				step(0x6E84, 12);
+				ww(L(2), fl::inc(rw(L(2))));
+				step(0x6E88, 30);
+				if ((int16_t)rw(L(2)) < 0)
+				{
+					step(0x6E8A, 12);
+					ww(L(2), lw(3));
+					step(0x6E90, 36);
+					step(0x6EA8, 12);
+				}
+				else
+				{
+					step(0x6E92, 12);
+					fl::cmp(rw(L(2)), 3);
+					step(0x6E98, 33);
+					if ((int16_t)rw(L(2)) > 3)
+					{
+						step(0x6E9A, 12);
+						ww(L(2), 0);
+						fl::clr();
+						step(0x6E9E, 30);
+						step(0x6EA8, 12);
+					}
+					else
+						step(0x6EA8, 12);
+				}
+			}
+			else
+			{
+				step(0x6EA0, 12);
+				R[0] = lw(1);
+				step(0x6EA4, 18);
+				ww(L(6), lw((uint16_t)(rw(L(6)) ^ R[0])));
+				step(0x6EA8, 30);
+			}
+			for (;;)
+			{
+				const uint8_t held = lb(peekb(0x0193) & 0x40);
+				step(0x6EAE, 30);
+				if (!held) break;
+				step(0x6EA8, 12);
+			}
+			step(0x6EB0, 12);
+		}
+		else
+			step(0x6EB0, 12);
+		R[0] = lw(rw(L(2)));
+		step(0x6EB4, 27);
+		R[0] = fl::add(R[0], 0x0066);
+		step(0x6EB8, 18);
+		jsr(0x6EBC, 0x8AB6);
+		fl::tst(rw(L(4)));
+		step(0x6EC0, 27);
+		if (!rw(L(4)))
+		{
+			step(0x6EC2, 12);
+			R[0] = lw(0x003F);
+			step(0x6EC6, 18);
+			step(0x6ECC, 12);
+		}
+		else
+		{
+			step(0x6EC8, 12);
+			R[0] = lw(0x0023);
+			step(0x6ECC, 18);
+		}
+		jsr(0x6ED0, 0x8B52);                           // draw_large_char
+		fl::tst(rw(L(6)));
+		step(0x6ED4, 27);
+		if (!rw(L(6)))
+		{
+			step(0x6ED6, 12);
+			R[0] = lw(0x006A);
+			step(0x6EDA, 18);
+			step(0x6EE0, 12);
+		}
+		else
+		{
+			step(0x6EDC, 12);
+			R[0] = lw(0x006B);
+			step(0x6EE0, 18);
+		}
+		jsr(0x6EE4, 0x8AB6);
+		fl::tst(rw(L(4)));
+		step(0x6EE8, 27);
+		if (rw(L(4)))
+		{
+			step(0x6EEA, 12);
+			R[0] = lw(0x003F);
+			step(0x6EEE, 18);
+			step(0x6EF4, 12);
+		}
+		else
+		{
+			step(0x6EF0, 12);
+			R[0] = lw(0x0023);
+			step(0x6EF4, 18);
+		}
+		jsr(0x6EF8, 0x8B52);                           // draw_large_char
+		const uint8_t v6EFC = peekb(0x0FE6);
+		fl::tstb(v6EFC);
+		step(0x6EFC, 24);
+		if (v6EFC) break;
+		step(0x6E2A, 12);
+	}
+	step(0x6EFE, 12);
+	if (!lw(rw(L(2)) & 0x0002))                        // BIT (PC),2(SP)
+	{
+		step(0x6F02, 33);
+		step(0x6F04, 12);
+		R[0] = lw(1);
+		step(0x6F08, 18);
+		ww(L(2), lw((uint16_t)(rw(L(2)) ^ R[0])));
+		step(0x6F0C, 30);
+	}
+	else
+	{
+		step(0x6F02, 33);
+		step(0x6F0C, 12);
+	}
+	push(0x001B);
+	fl::mov(0x001B);
+	step(0x6F10, 30);
+	jsr(0x6F14, 0x8EA2);                               // send_sound_command
+	jsr(0x6F18, 0x8F50);
+	R[0] = lw(rw(L(8)));
+	step(0x6F1C, 27);
+	for (int i = 0; i < 7; i++)
+	{
+		R[0] = asl_w(R[0]);
+		step((uint16_t)(0x6F1E + 2 * i), 12);
+	}
+	ww(R[6], lw(R[0]));
+	step(0x6F2C, 21);
+	ww(R[6], lw((uint16_t)(rw(R[6]) | rw(L(4)))));
+	step(0x6F30, 36);
+	jsr(0x6F34, 0x8EA2);                               // send_sound_command
+	jsr(0x6F38, 0x8F62);
+	pokeb(0x0FE6, 0);
+	fl::clr();
+	step(0x6F3C, 27);
+	poke(0x0184, lw(0x5C04));
+	step(0x6F42, 33);
+	R[6] = fl::add(R[6], 0x000C);
+	step(0x6F46, 18);
+}
+
+// B6:69B2 (assembly, self test): the statistics screen: titles, the sound CPU's version
+// (command 0x14, F:8F0C into 0x0370), five counters of the list at 0x0370 (F:BA9A), the
+// third and fourth also kept (0(SP) and R2 = 2 x fifth + fourth), then three play times
+// (F:68E2 prints a {minutes, seconds, frames} triple built on the stack) and two averages
+// (B6:6938 divides a time by a count); until a button press (F:8D60).  Locals: 2(SP) the list
+// pointer, 0(SP) a count, 4(SP) a result triple, 0xA(SP) the time triple.
+void selftest_statistics_screen()
+{
+	uint16_t *R = T.r;
+	auto L = [&](int off) { return (uint16_t)(R[6] + off); };
+	R[6] = fl::sub(R[6], 0x0010);
+	step(0x69B6, 18);
+	R[0] = lw(0x3800);
+	step(0x69BA, 18);
+	poke(0x01D2, lw(R[0]));
+	step(0x69BE, 27);
+	poke(0x1400, lw(R[0]));
+	step(0x69C2, 27);
+	poke(0x0184, lw(0x5C04));
+	step(0x69C8, 33);
+	jsr(0x69CC, 0x8D2C);                               // clear_playfield_ram
+	R[0] = lw(0x001F);
+	step(0x69D0, 18);
+	jsr(0x69D4, 0x8AB6);
+	ww(L(2), lw(0x0370));
+	step(0x69DA, 36);
+	R[0] = lw(0x0030);
+	step(0x69DE, 18);
+	jsr(0x69E2, 0x8AB6);
+	push(0x0014);
+	fl::mov(0x0014);
+	step(0x69E6, 30);
+	jsr(0x69EA, 0x8EA2);                               // send_sound_command
+	ww(R[6], 0x001A);
+	fl::mov(0x001A);
+	step(0x69EE, 27);
+	push(0x0370);
+	fl::mov(0x0370);
+	step(0x69F2, 30);
+	jsr(0x69F6, 0x8F0C);
+	R[2] = 0;
+	fl::clr();
+	step(0x69F8, 12);
+	R[1] = lw(1);
+	step(0x69FC, 18);
+	for (;;)
+	{
+		R[0] = lw(R[1]);
+		step(0x69FE, 12);
+		R[0] = fl::add(R[0], 0x0030);
+		step(0x6A02, 18);
+		jsr(0x6A06, 0x8AB6);
+		ww(R[6], lw(peek(rw(L(6)))));
+		step(0x6A0A, 42);
+		push(0);
+		fl::clr();
+		step(0x6A0C, 24);
+		push(5);
+		fl::mov(5);
+		step(0x6A10, 30);
+		push(1);
+		fl::mov(1);
+		step(0x6A14, 30);
+		{
+			const uint16_t v = rw(R[6]);
+			push(v);
+			fl::mov(v);
+		}
+		step(0x6A16, 30);
+		jsr(0x6A1A, 0xBA9A);
+		fl::cmp(R[1], 3);
+		step(0x6A1E, 18);
+		if ((int16_t)R[1] >= 3)
+		{
+			step(0x6A20, 12);
+			R[0] = lw(R[1]);
+			step(0x6A22, 12);
+			R[0] = fl::sub(R[0], 3);
+			step(0x6A26, 18);
+			R[0] = asl_w(R[0]);
+			step(0x6A28, 12);
+			// jump table at 0x6B78 for counters 3-5 (ADD to PC)
+			f_nzvc(0);
+			if (R[1] == 3)
+			{
+				step(0x6A2C, 27);
+				ww(L(0x0C), lw(peek(rw(L(0x0E)))));
+				step(0x6A32, 51);
+				step(0x6A44, 12);
+			}
+			else if (R[1] == 4)
+			{
+				step(0x6A34, 27);
+				R[2] = lw(peek(rw(L(0x0E))));
+				step(0x6A38, 33);
+				step(0x6A44, 12);
+			}
+			else
+			{
+				step(0x6A3A, 27);
+				R[0] = lw(peek(rw(L(0x0E))));
+				step(0x6A3E, 33);
+				R[0] = asl_w(R[0]);
+				step(0x6A40, 12);
+				R[0] = fl::add(R[0], R[2]);
+				step(0x6A42, 12);
+				R[2] = lw(R[0]);
+				step(0x6A44, 12);
+			}
+		}
+		else
+			step(0x6A44, 12);
+		ww(L(0x0E), fl::add(rw(L(0x0E)), 2));
+		step(0x6A4A, 36);
+		R[6] = fl::add(R[6], 8);
+		step(0x6A4E, 18);
+		R[1] = fl::inc(R[1]);
+		step(0x6A50, 12);
+		fl::cmp(R[1], 5);
+		step(0x6A54, 18);
+		if ((int16_t)R[1] > 5) break;
+		step(0x69FC, 12);
+	}
+	step(0x6A56, 12);
+	// a time triple from the list into 0xE(SP) (+ the stack offset), the list pointer at p(SP)
+	auto load_time = [&](uint16_t at, int p, int t) {
+		ww(L(t), lw(peek(rw(L(p)))));
+		step((uint16_t)(at + 6), 51);
+		ww(L(p), fl::add(rw(L(p)), 2));
+		step((uint16_t)(at + 12), 36);
+		wb(L(t + 2), lb(peekb(rw(L(p)))));
+		step((uint16_t)(at + 18), 51);
+		wb(L(t + 3), 0);
+		fl::clr();
+		step((uint16_t)(at + 22), 30);
+		R[0] = lw(peek(rw(L(p))));
+		step((uint16_t)(at + 26), 33);
+		R[0] &= 0xFF00;
+		fl::clr();
+		step((uint16_t)(at + 28), 12);
+		R[0] = (uint16_t)((R[0] >> 8) | (R[0] << 8));
+		f_nzvc(nzb((uint8_t)R[0]));
+		step((uint16_t)(at + 30), 12);
+		ww(L(t + 4), lw(R[0]));
+		step((uint16_t)(at + 34), 30);
+	};
+	// (SP) = SP + off: the address of a stack triple
+	auto address_arg = [&](uint16_t at, uint16_t off) {
+		ww(R[6], lw(off));
+		step((uint16_t)(at + 4), 27);
+		ww(R[6], fl::add(rw(R[6]), R[6]));
+		step((uint16_t)(at + 6), 21);
+	};
+	R[0] = lw(0x0036);
+	step(0x6A5A, 18);
+	jsr(0x6A5E, 0x8AB6);
+	load_time(0x6A5E, 6, 0x0E);
+	address_arg(0x6A80, 0x000E);
+	jsr(0x6A8A, 0x68E2);                               // print_time
+	ww(L(6), fl::add(rw(L(6)), 2));
+	step(0x6A90, 36);
+	R[0] = lw(0x0037);
+	step(0x6A94, 18);
+	jsr(0x6A98, 0x8AB6);
+	load_time(0x6A98, 6, 0x0E);
+	address_arg(0x6ABA, 0x000E);
+	jsr(0x6AC4, 0x68E2);                               // print_time
+	ww(L(6), fl::add(rw(L(6)), 2));
+	step(0x6ACA, 36);
+	load_time(0x6ACA, 6, 0x0E);
+	address_arg(0x6AEC, 0x000E);
+	push(R[2]);
+	fl::mov(R[2]);
+	step(0x6AF4, 24);
+	push(0x000C);
+	fl::mov(0x000C);
+	step(0x6AF8, 30);
+	ww(R[6], fl::add(rw(R[6]), R[6]));
+	step(0x6AFA, 21);
+	jsr(0x6AFE, 0x6938);                               // divide_time
+	R[0] = lw(0x0039);
+	step(0x6B02, 18);
+	jsr(0x6B06, 0x8AB6);
+	R[0] = lw(0x003A);
+	step(0x6B0A, 18);
+	jsr(0x6B0E, 0x8AB6);
+	address_arg(0x6B0E, 0x000C);
+	jsr(0x6B18, 0x68E2);                               // print_time
+	ww(L(0x0A), fl::add(rw(L(0x0A)), 2));
+	step(0x6B1E, 36);
+	load_time(0x6B1E, 0x0A, 0x12);
+	address_arg(0x6B40, 0x0012);
+	push(lw(rw(L(8))));
+	step(0x6B4A, 39);
+	push(0x0010);
+	fl::mov(0x0010);
+	step(0x6B4E, 30);
+	ww(R[6], fl::add(rw(R[6]), R[6]));
+	step(0x6B50, 21);
+	jsr(0x6B54, 0x6938);                               // divide_time
+	R[0] = lw(0x003B);
+	step(0x6B58, 18);
+	jsr(0x6B5C, 0x8AB6);
+	R[0] = lw(0x003C);
+	step(0x6B60, 18);
+	jsr(0x6B64, 0x8AB6);
+	address_arg(0x6B64, 0x0010);
+	jsr(0x6B6E, 0x68E2);                               // print_time
+	jsr(0x6B72, 0x8D60);                               // wait_button_press
+	R[6] = fl::add(R[6], 0x001C);
+	step(0x6B76, 18);
 }
 
 }
@@ -7454,6 +8405,9 @@ LOGIC_TABLE(bankb,
 	wait_routine("B6", 0x74E4, "selftest_sprite_screen", with_rts<selftest_sprite_screen>, 0),
 	wait_routine("B6", 0x7388, "selftest_colour_bars_screen", with_rts<selftest_colour_bars_screen>, 0),
 	wait_routine("B6", 0x713E, "selftest_playfield_screen", with_rts<selftest_playfield_screen>, 0),
+	wait_routine("B6", 0x6B7E, "selftest_controls_screen", with_rts<selftest_controls_screen>, 0),
+	wait_routine("B6", 0x6CFC, "selftest_switches_screen", with_rts<selftest_switches_screen>, 0),
+	wait_routine("B6", 0x69B2, "selftest_statistics_screen", with_rts<selftest_statistics_screen>, 0),
 )
 
 }
