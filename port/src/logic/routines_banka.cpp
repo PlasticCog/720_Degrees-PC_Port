@@ -10,6 +10,10 @@ using namespace t11rt;
 uint16_t sext8(uint8_t v) { return (uint16_t)(int16_t)(int8_t)v; }
 uint16_t asr(uint16_t v, int n) { return (uint16_t)((int16_t)v >> n); }
 
+// cycles of the original's instructions on the path taken (tools/insn_cycles.py), so that each
+// call costs exactly what the original's does; the table charge is only the common epilogue
+inline void cyc(int n) { T.icount -= n; }
+
 // select bank B (shadow 0x01D4 and the hardware register)
 void set_bank_b(uint16_t v)
 {
@@ -28,8 +32,10 @@ void set_bank_b(uint16_t v)
 uint16_t step_map_column(const Args &a)
 {
 	uint16_t r0;
+	cyc(39);
 	if (a.s(0) > 0)
 	{
+		cyc(279);
 		r0 = (uint16_t)(peekb(0x0F44) + 0x20);
 		pokeb(0x0F44, (uint8_t)r0);
 		poke(0x0F46, (uint16_t)(peek(0x0F46) + 2));
@@ -39,12 +45,14 @@ uint16_t step_map_column(const Args &a)
 	}
 	else
 	{
+		cyc(180);
 		r0 = (uint16_t)(peekb(0x0F44) - 0x20);
 		pokeb(0x0F44, (uint8_t)r0);
 		poke(0x0F46, (uint16_t)(peek(0x0F46) - 2));
 		pokeb(0x0F45, (uint8_t)r0);
 		poke(0x0F48, peek(0x0F46));
 	}
+	cyc(153);
 	poke(0x0F42, peek(0x0F40));
 	pokeb(0x0F5D, 8);
 	pokeb(0x0F5C, 0);
@@ -58,33 +66,44 @@ uint16_t step_map_column(const Args &a)
 void step_map_row()
 {
 	const int16_t dir = (int16_t)rw((uint16_t)(T.r[6] + 2));
+	cyc(39);
 	if (dir > 0)
 	{
+		cyc(111);
 		poke(0x0F40, (uint16_t)(peek(0x0F40) - 0x0800));
 		T.r[1] = peekb(0x0F5A);
 		if (peek(0x0F40) & 0x0800)
 		{
+			cyc(102);
 			poke(0x0F46, (uint16_t)(peek(0x0F46) - T.r[1]));
 			T.r[0] = (uint16_t)(sext8(peekb(0x0F5B)) - 1);
 			pokeb(0x0F5B, (uint8_t)T.r[0]);
 			if ((int8_t)T.r[0] < 0)
 			{
+				cyc(135);
 				pokeb(0x0F5B, 0x17);
 				T.r[0] = (uint16_t)(peek(0x0F46) - 0x0180);
 				poke(0x0F46, (uint16_t)(0x0A6C + T.r[0]));
 			}
+			cyc(48);
 			T.r[0] = (uint16_t)(T.r[1] * 3);
 		}
 		else
+		{
+			cyc(36);
 			T.r[0] = (uint16_t)(T.r[1] << 2);
+		}
+		cyc(150);
 		poke(0x0F48, (uint16_t)(peek(0x0F46) - T.r[0]));
 		poke(0x0F42, (uint16_t)(peek(0x0F40) - 0x3800));
 	}
 	else
 	{
+		cyc(75);
 		poke(0x0F40, (uint16_t)(peek(0x0F40) + 0x0800));
 		if (!(peek(0x0F40) & 0x0800))
 		{
+			cyc(210);
 			T.r[0] = peekb(0x0F5A);
 			poke(0x0F46, (uint16_t)(peek(0x0F46) + T.r[0]));
 			T.r[0] = (uint16_t)(sext8(peekb(0x0F5B)) + 1);
@@ -93,14 +112,17 @@ void step_map_row()
 			T.r[1] = sext8(peekb(0x0F5B));
 			if (T.r[1] == T.r[0])
 			{
+				cyc(114);
 				pokeb(0x0F5B, 0);
 				T.r[0] = (uint16_t)(peek(0x0F46) - 0x0A80 + 0x0194);
 				poke(0x0F46, T.r[0]);
 			}
 		}
+		cyc(78);
 		poke(0x0F42, peek(0x0F40));
 		poke(0x0F48, peek(0x0F46));
 	}
+	cyc(153);
 	pokeb(0x0F45, peekb(0x0F44));
 	pokeb(0x0F5C, 0x20);
 	poke(0x0F4A, 0);
@@ -114,72 +136,100 @@ void step_map_row()
 // final stack word (the row or column difference).
 void draw_map_strip()
 {
+	cyc(57);
 	T.r[6] = (uint16_t)(T.r[6] - 2);
 	const uint16_t local = T.r[6];
 	poke(local, 0);
 	pokeb(local, peekb(0x0F5D));
+	cyc(30);                                           // 41D4: TST (SP)
 	if (peek(local))
 	{
 		do
 		{
+			cyc(90);
 			pokeb(0x0F5D, (uint8_t)(peekb(0x0F5D) - 1));
 			poke(0x0F42, peek(0x0F42) & ~0xC001);
 			call(0xE82E, {});
+			cyc(141);
 			poke(0x0F42, (uint16_t)(peek(0x0F42) + peek(0x0F4A)));
 			T.r[1] = (uint16_t)~peek(0x0F4A);
 			T.r[0] = peek(0x0F42) & ~T.r[1];
 			if (T.r[0] & 0x0800)
 			{
+				cyc(96);
 				T.r[0] = peekb(0x0F5A);
 				poke(0x0F48, (uint16_t)(peek(0x0F48) - T.r[0]));
 				poke(0x0F56, (uint16_t)(peek(0x0F56) - 6));
 			}
+			cyc(123);
 			T.r[1] = sext8(peekb(0x0F5C));
 			T.r[0] = (uint16_t)(peekb(0x0F45) + T.r[1]);
 			pokeb(0x0F45, (uint8_t)T.r[0]);
 			if ((uint8_t)T.r[1])
 			{
+				cyc(93);
 				poke(0x0F48, (uint16_t)(peek(0x0F48) + 2));
 				T.r[0] = peekb(0x0F58);
 				if (T.r[0])
 				{
+					cyc(63);
 					T.r[1] = (uint16_t)(T.r[0] << 1);
 					pokeb(0x0F58, (uint8_t)T.r[1]);
 					if (!(uint8_t)T.r[1])
 					{
+						cyc(54);
 						pokeb(0x0F58, (uint8_t)(peekb(0x0F58) + 1));
 						poke(0x0F56, (uint16_t)(peek(0x0F56) + 1));
 					}
 				}
 			}
+			cyc(84);
 			poke(local, 0);
 			pokeb(local, peekb(0x0F5D));
 		} while (peek(local));
+		cyc(39 + 30);                                  // 424E: INCB, BR; 41D4: TST (SP)
 		pokeb(0x0F5E, (uint8_t)(peekb(0x0F5E) + 1));
 	}
+	cyc(126);
 	T.r[0] = (uint16_t)((peek(0x01AA) + 0x0800) & ~0x0FFF);
 	poke(local, (uint16_t)(peek(0x0F3E) - T.r[0]));
 	if (peek(local))
 	{
-		call(0x42BC, {peek(local)});
+		cyc(60);
+		call(0x42BC, {peek(local)});                   // step_map_row
+		cyc(39 + 45);
 		if ((int16_t)peek(local) >= 0) poke(0x0F3E, (uint16_t)(peek(0x0F3E) - 0x1000));
 		else poke(0x0F3E, (uint16_t)(peek(0x0F3E) + 0x1000));
 	}
 	else
 	{
+		cyc(117);
 		T.r[0] = (uint16_t)(((peek(0x01A8) + 0x1000) & ~0x1FFF) - peek(0x0F3C));
 		poke(local, T.r[0]);
 		if (!T.r[0])
 		{
+			cyc(39);
 			T.r[6] = (uint16_t)(T.r[6] + 2);
 			fl::tst(peek(local));
 			return;
 		}
-		call(0x438C, {T.r[0]});
-		if ((int16_t)peek(local) > 0) poke(0x0F3C, (uint16_t)(peek(0x0F3C) + 0x2000));
-		else poke(0x0F3C, (uint16_t)(peek(0x0F3C) - 0x2000));
+		cyc(54);
+		call(0x438C, {T.r[0]});                        // step_map_column
+		cyc(39);
+		if ((int16_t)peek(local) > 0)
+		{
+			cyc(45);
+			poke(0x0F3C, (uint16_t)(peek(0x0F3C) + 0x2000));
+		}
+		else
+		{
+			cyc(33);
+			poke(0x0F3C, (uint16_t)(peek(0x0F3C) - 0x2000));
+		}
 	}
+	cyc(30);
 	call(0x4894, {});                                  // town_alt_cell_bit
+	cyc(18 + 39);
 	T.r[6] = (uint16_t)(T.r[6] + 2);
 	fl::tst(peek(local));
 }
@@ -189,6 +239,7 @@ void draw_map_strip()
 // row argument is left decremented on the stack, as the original does.
 uint16_t init_map_view(const Args &a)
 {
+	cyc(207 + 1113);                                   // F162 prologue, 4004-40B2
 	uint16_t saved[6];
 	for (int i = 1; i <= 5; i++) saved[i] = T.r[i];
 	const uint16_t col = a.u(0);
@@ -212,18 +263,32 @@ uint16_t init_map_view(const Args &a)
 	poke(0x01D6, peek((uint16_t)(0xFED2 + (peek(0x01CC) << 1))));
 	poke(0x01D8, peek((uint16_t)(0xFED2 + (peek(0x01CE) << 1))));
 	poke(0x0F46, peek((uint16_t)(0x7F8C + (level << 1))));
-	if ((int16_t)level > 0 && (int16_t)level < 5)
+	T.r[6] = (uint16_t)(T.r[6] - 2);                   // TST -(SP): the strip counter
+	const uint16_t counter = T.r[6];
+	if (level > 0) cyc(30);
+	if (level > 0 && level < 5)
 	{
+		cyc(30);
 		uint16_t r0 = call(0x90BA, {});
+		cyc(135);
 		const uint16_t r1 = (uint16_t)(peekb((uint16_t)(0xFE8F + r0)) + peek(0x0F46));
 		pokeb(0x0F5A, peekb((uint16_t)(r1 + 0x000C)));
 		r0 = call(0x90BA, {});
+		cyc(126);
 		r0 = (uint16_t)((peekb((uint16_t)(0xFE8F + r0)) << 1) + peek(0x0F46));
 		poke(0x0F46, peek(r0));
 	}
 	else
+	{
+		cyc(42);
 		pokeb(0x0F5A, peekb((uint16_t)(0x7F9C + level)));
-	poke(0x0F46, (uint16_t)(peekb(0x0F5A) * row + peek(0x0F46) + (col << 1)));   // mul16
+	}
+	cyc(111);
+	push(row);
+	push(peekb(0x0F5A));
+	const uint16_t product = call(0x80D8, {});         // mul16
+	cyc(840);
+	poke(0x0F46, (uint16_t)(product + peek(0x0F46) + (col << 1)));
 	poke(0x0F40, (uint16_t)(((row & 0x0F) << 12) - 0x0800));
 	pokeb(0x0F44, (uint8_t)(col << 5));
 	poke(0x099A, asr(row, 1));
@@ -231,21 +296,40 @@ uint16_t init_map_view(const Args &a)
 	poke(0x0996, (uint16_t)(asr((uint16_t)(col - 1), 1) << 4));
 	poke(0x0998, (uint16_t)(peek(0x0996) + 0x0040));
 	poke(0x0F4E, peek((uint16_t)(0xFF54 + (peekb(0x0F59) << 1))));
-	poke(0x099E, peekb(0x0F59) ? 0x0FFF : 0x000C);
+	if (peekb(0x0F59))
+	{
+		cyc(33);
+		poke(0x099E, 0x0FFF);
+	}
+	else
+	{
+		cyc(45);
+		poke(0x099E, 0x000C);
+	}
+	cyc(234);
 	pokeb(0x0E9B, 0);
 	poke(0x09A0, peek(0x01A8) & 0xC000);
 	poke(0x09A2, peek(0x01AA) & 0xC000);
 	pokeb(0x0F58, 0);
+	poke(counter, 0x0008);
 	T.r[0] = (uint16_t)(peekb(0x0F59) << 1);
 	T.r[1] = (uint16_t)(col << 1);
 	T.r[2] = row;
 	T.r[3] = col;
-	for (int n = 8; n > 0; n--)
+	do
 	{
-		call(0x42BC, {0xFFFF});                        // step_map_row
+		cyc(57);
+		poke(T.r[6], 0xFFFF);
+		call(0x42BC, {});                              // step_map_row(-1)
+		cyc(30);
 		call(0x4894, {});                              // town_alt_cell_bit
+		cyc(30);
 		call(0x41CE, {});                              // draw_map_strip
-	}
+		cyc(42);
+		poke(counter, (uint16_t)(peek(counter) - 1));
+	} while (peek(counter));
+	cyc(39);
+	T.r[6] = (uint16_t)(T.r[6] + 6);
 	const uint16_t r0 = T.r[0];
 	for (int i = 1; i <= 5; i++) T.r[i] = saved[i];
 	return r0;
@@ -257,6 +341,7 @@ uint16_t init_map_view(const Args &a)
 // deactivated (F:C3E6).  The flag word on the stack is passed to the callees.
 void update_map_slots()
 {
+	cyc(207);
 	T.r[6] = (uint16_t)(T.r[6] - 2);
 	const uint16_t local = T.r[6];
 	pokeb(0x0E99, 0);
@@ -265,12 +350,17 @@ void update_map_slots()
 	T.r[2] = peek(0x099C);
 	T.r[3] = peek(0x0996);
 	T.r[1] = peek(0x0998);
-	if ((int16_t)T.r[4] < 0 && (int16_t)T.r[3] >= 0x00C0)
+	if ((int16_t)T.r[4] < 0)
 	{
-		T.r[4] = (uint16_t)(T.r[4] + 0x000C);
-		T.r[2] = (uint16_t)(T.r[2] + 0x000C);
-		T.r[3] = (uint16_t)(T.r[3] - 0x0050);
-		T.r[1] = (uint16_t)(T.r[1] - 0x0050);
+		cyc(30);
+		if ((int16_t)T.r[3] >= 0x00C0)
+		{
+			cyc(72);
+			T.r[4] = (uint16_t)(T.r[4] + 0x000C);
+			T.r[2] = (uint16_t)(T.r[2] + 0x000C);
+			T.r[3] = (uint16_t)(T.r[3] - 0x0050);
+			T.r[1] = (uint16_t)(T.r[1] - 0x0050);
+		}
 	}
 	// one pass of the loop at 0x4902 costs 111 (test of the slot number) + 39 (in use?)
 	// + 39 (next slot) cycles, an occupied slot 114 + 30 + 24 more plus the range tests
@@ -322,6 +412,7 @@ void update_map_slots()
 		poke(0x09AA, (uint16_t)(peek(0x09AA) - 1));
 		tick(0x4902, pass);
 	}
+	cyc(111 + 18 + 21);                                // last test, TST (SP)+, RTS
 	T.r[6] = (uint16_t)(T.r[6] + 2);
 	fl::tst(peek(local));
 }
@@ -332,24 +423,39 @@ void update_map_slots()
 // an effect channel (0x01A6 / 0x01A7), free the channel and queue its stop command
 uint16_t stop_effect_sound(const Args &a)
 {
+	cyc(180);
 	set_bank_b(0x0400);
 	const uint16_t s = peekb((uint16_t)(0x6567 + a.u(0)));
-	if (!s) return 0;
+	if (!s)
+	{
+		cyc(39);
+		return 0;
+	}
 	uint16_t cmd;
+	cyc(60);
 	if (peekb(0x01A6) == s)
 	{
+		cyc(69);
 		pokeb(0x01A6, 0);
 		cmd = 0x0070;
 	}
-	else if (peekb(0x01A7) == s)
+	else
 	{
+		cyc(60);
+		if (peekb(0x01A7) != s)
+		{
+			cyc(39);
+			return s;
+		}
+		cyc(57);
 		pokeb(0x01A7, 0);
 		cmd = 0x0076;
 	}
-	else
-		return s;
+	cyc(30);
 	T.r[0] = s;
-	return call(0x8E78, {cmd});
+	const uint16_t r0 = call(0x8E78, {cmd});
+	cyc(18 + 39);
+	return r0;
 }
 
 // A5:5B46: rolling sound: when the skater's speed differs from the sound's level 0x01DC by
@@ -357,30 +463,83 @@ uint16_t stop_effect_sound(const Args &a)
 // up, 0x49 down, 0x53 to silence below speed 128).  Not while 0x031F or 0x0330 is set.
 uint16_t rolling_sound(const Args &)
 {
-	if (peekb(0x031F) || peekb(0x0330)) return T.r[0];
+	cyc(159 + 36);
+	if (peekb(0x031F))
+	{
+		cyc(21);
+		return T.r[0];
+	}
+	cyc(36);
+	if (peekb(0x0330))
+	{
+		cyc(21);
+		return T.r[0];
+	}
+	cyc(60);
 	const uint16_t speed = peek(0x01B4);
-	const uint16_t mag = (int16_t)speed >= 0 ? speed : (uint16_t)-speed;
+	const bool forward = (int16_t)speed >= 0;
+	cyc(forward ? 36 : 24);
+	const uint16_t mag = forward ? speed : (uint16_t)-speed;
 	uint16_t r0 = (uint16_t)(mag - peek(0x01DC));
+	cyc(36 + 24 + 30);
 	const uint16_t diff = (r0 & 0x8000) ? (uint16_t)-r0 : r0;
-	if ((int16_t)diff < 0x0032) r0 = 0;
-	if (!r0) return 0;
+	if ((int16_t)diff < 0x0032)
+	{
+		cyc(12);
+		r0 = 0;
+	}
+	cyc(24);
+	if (!r0)
+	{
+		cyc(21);
+		return 0;
+	}
+	cyc(12);
+	uint16_t cmd;
 	if ((int16_t)r0 > 0)
 	{
-		const uint16_t cmd = (int16_t)peek(0x01DC) > 0 ? 0x0048 : 0x0046;
+		cyc(36);
+		if ((int16_t)peek(0x01DC) > 0)
+		{
+			cyc(30);
+			cmd = 0x0048;
+		}
+		else
+		{
+			cyc(42);
+			cmd = 0x0046;
+		}
+		cyc(30);
 		T.r[0] = r0;
 		const uint16_t res = call(0x8E78, {cmd});
+		cyc(45 + 18 + 21);
 		poke(0x01DC, (uint16_t)(peek(0x01DC) + 0x001B));
 		return res;
 	}
+	cyc(57);
 	poke(0x01DC, (uint16_t)(peek(0x01DC) - 0x001B));
-	uint16_t cmd = 0x0049;
-	if ((int16_t)mag < 0x0080 && peek(0x01DC))
+	if (!forward) cyc(12);
+	cyc(42);
+	cmd = 0x0049;
+	if ((int16_t)mag < 0x0080)
 	{
-		poke(0x01DC, 0);
-		cmd = 0x0053;
+		cyc(36);
+		if (peek(0x01DC))
+		{
+			cyc(69);
+			poke(0x01DC, 0);
+			cmd = 0x0053;
+		}
+		else
+			cyc(30);
 	}
+	else
+		cyc(30);
+	cyc(30);
 	T.r[0] = mag;
-	return call(0x8E78, {cmd});
+	const uint16_t res = call(0x8E78, {cmd});
+	cyc(18 + 21);
+	return res;
 }
 
 // A5:5BD2 (assembly): Skate City music.  The music level 0x01E6 (0-13, commands from 0x5AF6)
@@ -390,33 +549,69 @@ uint16_t rolling_sound(const Args &)
 // starts, the first time with F:C98E(5, 0x40) when 0x0B78 is negative.
 void town_music()
 {
+	cyc(36);
 	const uint8_t level = peekb(0x0F59);
 	fl::tstb(level);
-	if (level) return;
+	if (level)
+	{
+		cyc(21);
+		return;
+	}
+	cyc(60);
 	T.r[1] = peek(0x0996);
 	T.r[0] = peek(0x099A);
 	if ((int16_t)T.r[0] < 0)
 	{
+		cyc(36);
 		T.r[1] = (uint16_t)(T.r[1] + 0x0050);
 		T.r[0] = (uint16_t)(T.r[0] + 0x000C);
 	}
+	cyc(42);
 	T.r[2] = (uint16_t)(T.r[1] - 0x0090);
-	if (T.r[2] & 0x8000) T.r[2] = (uint16_t)-T.r[2];
+	if (T.r[2] & 0x8000)
+	{
+		cyc(12);
+		T.r[2] = (uint16_t)-T.r[2];
+	}
+	cyc(102);
 	T.r[1] = asr(T.r[2], 4);
 	T.r[2] = (uint16_t)(T.r[0] - 0x0005);
-	if (T.r[2] & 0x8000) T.r[2] = (uint16_t)-T.r[2];
+	if (T.r[2] & 0x8000)
+	{
+		cyc(12);
+		T.r[2] = (uint16_t)-T.r[2];
+	}
+	cyc(48);
 	T.r[0] = (uint16_t)(T.r[2] << 1);
-	if (!((int16_t)T.r[1] > (int16_t)T.r[0])) T.r[1] = T.r[0];
-	if ((int16_t)T.r[1] > 0x000D) T.r[1] = 0x000D;
+	if (!((int16_t)T.r[1] > (int16_t)T.r[0]))
+	{
+		cyc(12);
+		T.r[1] = T.r[0];
+	}
+	cyc(30);
+	if ((int16_t)T.r[1] > 0x000D)
+	{
+		cyc(18);
+		T.r[1] = 0x000D;
+	}
+	cyc(60);
 	T.r[0] = peekb(0x01E6);
 	if (T.r[1] != T.r[0])
 	{
+		cyc(90);
 		call(0x8E78, {peekb((uint16_t)(0x5AF6 + T.r[1]))});
+		cyc(45);
 		pokeb(0x01E6, (uint8_t)T.r[1]);
 	}
+	cyc(36);
 	const uint8_t frame = peekb(0x01C4);
 	fl::tstb(frame);
-	if (frame) return;
+	if (frame)
+	{
+		cyc(21);
+		return;
+	}
+	cyc(102);
 	T.r[2] = 0x00E0;
 	T.psw = (uint8_t)((T.psw & 0x10) | 0xE0);         // MTPS: interrupts off
 	T.check_irqs = true;
@@ -424,38 +619,56 @@ void town_music()
 	const uint16_t arg = T.r[6];
 	poke(arg, 0x000D);
 	call(0x8EA2, {});                                  // send_sound_command(0x0D)
+	cyc(30);
 	call(0x8ED2, {});                                  // read_sound_response
+	cyc(42);
 	T.r[1] = T.r[0];
 	call(0x8F62, {});
+	cyc(66);
 	T.r[2] = 0;
 	T.psw = (uint8_t)(T.psw & 0x10);                   // MTPS #0
 	T.check_irqs = true;
 	if (!T.r[1])
 	{
-		if (!peekb(0x01DA)) pokeb(0x01DA, 0xFF);
+		cyc(36);
+		if (!peekb(0x01DA))
+		{
+			cyc(33);
+			pokeb(0x01DA, 0xFF);
+		}
+		cyc(30);
 		call(0x9152, {});                              // next_random
 		for (;;)
 		{
+			cyc(105);
 			T.r[1] = T.r[0] & 0x0007;
 			T.r[0] = (uint16_t)(T.r[1] << 1);
 			if (peekb(0x01DA) & rb((uint16_t)(0xFC7C + T.r[0]))) break;
+			cyc(36);
 			T.r[0] = (uint16_t)(T.r[1] + 1);
 		}
+		cyc(162);
 		T.r[0] = (uint16_t)(T.r[1] << 1);
 		pokeb(0x01DA, peekb(0x01DA) & ~rb((uint16_t)(0xFC7C + T.r[0])));
 		T.r[1] = rb((uint16_t)(0x5B04 + T.r[1]));
 		poke(arg, T.r[1]);
 		call(0x8E78, {});                              // queue_sound(tune)
+		cyc(36);
 		if (!peekb(0x01E7))
 		{
+			cyc(36);
 			if ((int16_t)peek(0x0B78) < 0)
 			{
+				cyc(87);
 				poke(arg, 0x0040);
 				call(0xC98E, {0x0005});
+				cyc(18);
 			}
+			cyc(27);
 			pokeb(0x01E7, (uint8_t)(peekb(0x01E7) + 1));
 		}
 	}
+	cyc(18 + 21);
 	T.r[6] = (uint16_t)(T.r[6] + 2);
 	fl::tst(peek(arg));
 }
@@ -467,19 +680,34 @@ void town_music()
 // column offset 0x4980[col].  A non-zero kind is written back as 9 into the argument.
 uint16_t draw_text_block_3x3(const Args &a)
 {
+	cyc(183 + 30);
 	call(0x8068, {});                                  // select_video_bank0
-	uint16_t r0 = (uint16_t)(a.u(1) * 0x0180 + peek((uint16_t)(0x4980 + (a.u(2) << 1))));
+	cyc(138);
+	push(a.u(1));
+	push(0x0180);
+	uint16_t r0 = (uint16_t)(call(0x80D8, {}) + peek((uint16_t)(0x4980 + (a.u(2) << 1))));   // mul16
+	cyc(126);
 	poke(0x0186, r0);
 	poke(0x0186, (uint16_t)(peek(0x0186) + 0x1E80));
-	if (a.u(0)) poke((uint16_t)(a.sp + 2), 0x0009);
-	const uint16_t first = a.u(0), last = (uint16_t)(first + 6);
-	for (uint16_t i = first; (int16_t)i <= (int16_t)last; i = (uint16_t)(i + 3))
+	if (a.u(0))
 	{
+		cyc(36);
+		poke((uint16_t)(a.sp + 2), 0x0009);
+	}
+	cyc(84);
+	const uint16_t first = a.u(0), last = (uint16_t)(first + 6);
+	for (uint16_t i = first;; i = (uint16_t)(i + 3))
+	{
+		cyc(24);
+		if (!((int16_t)i <= (int16_t)last)) break;
+		cyc(381);
 		r0 = peek(0x0186);
 		for (int j = 0; j < 3; j++)
 			poke((uint16_t)(r0 + 2 * j), peek((uint16_t)(0x495C + (i << 1) + 2 * j)) | peek(0x0188));
 		poke(0x0186, (uint16_t)(peek(0x0186) + 0x0080));
 	}
+	cyc(45);
+	T.r[6] = (uint16_t)(T.r[6] + 4);
 	return r0;
 }
 
@@ -489,16 +717,25 @@ uint16_t draw_text_block_3x3(const Args &a)
 // ends as 0x0C00.
 uint16_t slope_height(const Args &a)
 {
+	cyc(135 + 153);
 	set_bank_b(0x2C00);
 	uint16_t r0 = sext8(peekb(0x031D));
 	const uint16_t t = a.u(0);
 	if (t & 7)
 	{
+		cyc(42);
 		if ((t & 7) == 7)
+		{
+			cyc(84);
 			r0 = (uint16_t)(((t & 0x0038) << 1) + r0 + 0x0220);
+		}
 		else
+		{
+			cyc(189);
 			r0 = (uint16_t)(((t & 7) << 4) + peek((uint16_t)(0x79E8 + (asr(t, 3) << 1))) + r0);
+		}
 	}
+	cyc(168);
 	r0 = (uint16_t)(peek(0x02E6) - peek((uint16_t)(0x6AC8 + (r0 << 1))));
 	set_bank_b(0x0C00);
 	return r0;
@@ -557,23 +794,53 @@ uint16_t project_speed(const Args &)
 // with the frame counter jittering the x difference
 uint16_t direction_from_object7(const Args &)
 {
+	cyc(159 + 258 + 24 + 30);
 	const uint16_t dx = (uint16_t)(peek(0x06F0) - peek(0x06FE) + 0x0500 + (peek(0x01C4) & 0x01FF));
 	const uint16_t dy = (uint16_t)(peek(0x0730) - peek(0x073E) + peek(0x06B0) + 0x0500);
 	const uint16_t ax = (int16_t)dx < 0 ? (uint16_t)-dx : dx;
 	uint16_t r;
 	if ((int16_t)ax < 0x0200)
-		r = (int16_t)dy < 0 ? 0x000C : 0x0004;
-	else
 	{
-		const uint16_t ay = (int16_t)dy < 0 ? (uint16_t)-dy : dy;
-		if ((int16_t)ay < 0x0200)
-			r = (int16_t)dx < 0 ? 0x0008 : 0x0000;
-		else
+		cyc(42 + 12);
+		r = 0x0004;
+		if ((int16_t)dy < 0)
 		{
-			r = (int16_t)dx < 0 ? 0x0006 : 0x0002;
-			if ((int16_t)dy < 0) r = (uint16_t)(0x0010 - r);
+			cyc(30);
+			r = 0x000C;
 		}
 	}
+	else
+	{
+		cyc(24 + 24 + 30);
+		const uint16_t ay = (int16_t)dy < 0 ? (uint16_t)-dy : dy;
+		if ((int16_t)ay < 0x0200)
+		{
+			cyc(24 + 12);
+			r = 0x0000;
+			if ((int16_t)dx < 0)
+			{
+				cyc(30);
+				r = 0x0008;
+			}
+		}
+		else
+		{
+			cyc(42);
+			r = 0x0002;
+			if ((int16_t)dx < 0)
+			{
+				cyc(18);
+				r = 0x0006;
+			}
+			cyc(24);
+			if ((int16_t)dy < 0)
+			{
+				cyc(30);
+				r = (uint16_t)(0x0010 - r);
+			}
+		}
+	}
+	cyc(33);
 	return r;
 }
 
@@ -582,9 +849,11 @@ uint16_t direction_from_object7(const Args &)
 // 0x40).  Object 6 instead gets the animation 0x50FA in the template slot of object 5.
 uint16_t hold_object(const Args &a)
 {
+	cyc(81);
 	const uint16_t i = a.u(0), w = (uint16_t)(i << 1);
 	if (i == 6)
 	{
+		cyc(159);
 		poke(0x03BA, 0x50FA);
 		pokeb(0x0495, peekb(0x0495) | 0x18);
 		poke(0x04FA, 0);
@@ -593,6 +862,7 @@ uint16_t hold_object(const Args &a)
 	}
 	else
 	{
+		cyc(336);
 		pokeb(0x0E6A, (uint8_t)i);
 		pokeb(0x0E68, 0xB4);
 		poke(0x0E66, peek((uint16_t)(0x0430 + w)));
@@ -602,6 +872,7 @@ uint16_t hold_object(const Args &a)
 		poke(0x0E62, peek((uint16_t)(0x03B0 + w)));
 		poke(0x0E64, peek((uint16_t)(0x03F0 + w)));
 	}
+	cyc(219);
 	poke((uint16_t)(0x0430 + w), 0);
 	pokeb((uint16_t)(0x04B0 + i), peekb((uint16_t)(0x04B0 + i)) | 0x40);
 	poke((uint16_t)(0x03F0 + w), 0);
@@ -622,9 +893,11 @@ uint16_t hold_object(const Args &a)
 // Skate City also redraws the number 0x0244/0x0246 at 0x3746.  Bank B is 0x2800 meanwhile.
 uint16_t message_box(const Args &a)
 {
+	cyc(207 + 204);
 	const uint16_t saved_a = peek(0x01D2), saved_b = peek(0x01D4);
 	set_bank_b(0x2800);
 	call(0x8068, {});                                  // select_video_bank0
+	cyc(252);
 	poke(0x0188, 0xE000);
 	const uint16_t box = a.u(1);
 	uint16_t p = (uint16_t)((peek(box) + 0x2000) & ~1);
@@ -634,6 +907,7 @@ uint16_t message_box(const Args &a)
 	uint16_t r0;
 	if (a.u(0))
 	{
+		cyc(54);
 		for (uint16_t r = rows; r > 0; r--)
 		{
 			for (uint16_t c = cols; c > 0; c--)
@@ -644,43 +918,60 @@ uint16_t message_box(const Args &a)
 			p = (uint16_t)(p - back + 0x0080);
 			tick(0x4D84, 120 + 39 * cols);             // one row of the loop at 0x4D84
 		}
-		if (peekb(0x036C) == 1 && !peekb(0x0F59))
+		cyc(42);
+		if (peekb(0x036C) == 1)
 		{
-			poke(0x0188, 0xA000);
-			call(0xEAD4, {0x0000, 0x5DF6});
-			poke(0x0186, 0x3746);
-			call(0xBA96, {0x0001, 0x0000, 0x0008, peek(0x0246), peek(0x0244), 0x5DF6});
+			cyc(36);
+			if (!peekb(0x0F59))
+			{
+				cyc(117);
+				poke(0x0188, 0xA000);
+				call(0xEAD4, {0x0000, 0x5DF6});
+				cyc(216);
+				poke(0x0186, 0x3746);
+				call(0xBA96, {0x0001, 0x0000, 0x0008, peek(0x0246), peek(0x0244), 0x5DF6});
+				cyc(18);
+			}
 		}
+		cyc(87);
 		r0 = (uint16_t)(peekb(0x036C) >> 1);
 		pokeb(0x036C, (uint8_t)r0);
 	}
 	else
 	{
+		cyc(84);
 		const uint16_t flags = (uint16_t)(peekb(0x036C) << 1);
 		pokeb(0x036C, (uint8_t)flags);
 		if (peek(box) & 1)
 		{
+			cyc(150);
 			pokeb(0x036C, (uint8_t)(peekb(0x036C) | 1));
 			call(0xEAD4, {0x0001, 0x5DF6});
+			cyc(36);
 		}
+		else
+			cyc(27);
 		r0 = peek(0x0188);
+		const int16_t inner = (int16_t)(cols - 2);
 		auto put = [&](uint16_t v) { poke(p, v); p = (uint16_t)(p + 2); };
 		auto line = [&](uint16_t left, uint16_t mid, uint16_t right) {
 			put(left);
-			for (int16_t n = (int16_t)(cols - 2); n > 0; n--) put(mid);
+			for (int16_t n = inner; n > 0; n--) put(mid);
 			put(right);
 		};
+		cyc(156 + (inner > 0 ? 39 * inner : 0) + 360);
 		line(r0 | 0x0110, r0 | 0x0111, r0 | 0x0112);
 		p = (uint16_t)(p - back + 0x0080);
-		const int16_t inner = (int16_t)(cols - 2);
 		for (int16_t n = (int16_t)(rows - 2); n > 0; n--)
 		{
 			line(r0 | 0x0113, r0 | 0x0087, r0 | 0x0114);
 			p = (uint16_t)(p - back + 0x0080);
 			tick(0x4E6A, 198 + (inner > 0 ? 54 * inner : 0));   // one row of the loop at 0x4E6A
 		}
+		cyc(126 + (inner > 0 ? 39 * inner : 0) + 48);
 		line(r0 | 0x0115, r0 | 0x0116, r0 | 0x0117);
 	}
+	cyc(201);
 	poke(0x01D2, saved_a);
 	poke(0x01D4, saved_b);
 	poke(0x1400, peek(0x01D2));
@@ -694,42 +985,69 @@ uint16_t message_box(const Args &a)
 // are those of comparing the two saved bank words.
 void expire_messages()
 {
+	cyc(66);
 	T.r[6] = (uint16_t)(T.r[6] - 4);
 	const uint16_t sp = T.r[6];
 	T.r[5] = sext8(peekb(0x0336));
 	if (!((int16_t)T.r[5] < 0))
 	{
+		cyc(126);
 		poke((uint16_t)(sp + 2), peek(0x01D2));
 		poke(sp, peek(0x01D4));
 		poke(0x036A, (uint16_t)(peek(0x036A) + 1));
-		for (T.r[4] = 0; (int16_t)T.r[4] <= (int16_t)T.r[5]; T.r[4]++)
+		for (T.r[4] = 0;; T.r[4]++)
 		{
+			cyc(24);                                   // 4C0A: CMP R4,R5
+			if (!((int16_t)T.r[4] <= (int16_t)T.r[5])) break;
+			cyc(75);
 			T.r[0] = (uint16_t)(T.r[4] << 1);
-			if (peek((uint16_t)(0x0338 + T.r[0])) != peek(0x036A)) continue;
+			if (peek((uint16_t)(0x0338 + T.r[0])) != peek(0x036A))
+			{
+				cyc(12);                               // INC R4
+				continue;
+			}
+			cyc(123);
 			T.r[1] = 0x2800;
 			set_bank_b(0x2800);
 			const uint16_t box = peek((uint16_t)(0x0348 + T.r[0]));
 			if ((int16_t)peek(box) >= 0x4000)
+			{
+				cyc(105);
 				call(0xEAD4, {0x0001, peek(box)});
+				cyc(12);
+			}
 			else
+			{
+				cyc(99);
 				call(0x4D30, {0x0001, box});           // message_box(erase)
+			}
+			cyc(87);
 			T.r[0] = (uint16_t)(sext8(peekb(0x0336)) - 1);
 			pokeb(0x0336, (uint8_t)T.r[0]);
 			T.r[3] = sext8((uint8_t)T.r[0]);
-			if ((int16_t)T.r[3] < 0) continue;
-			for (T.r[2] = T.r[4]; (int16_t)T.r[2] <= (int16_t)T.r[3]; T.r[2]++)
+			if ((int16_t)T.r[3] >= 0)
 			{
-				T.r[1] = (uint16_t)(T.r[2] << 1);
-				T.r[0] = T.r[1];
-				poke((uint16_t)(0x0348 + T.r[1]), peek((uint16_t)(0x034A + T.r[0])));
-				poke((uint16_t)(0x0338 + T.r[1]), peek((uint16_t)(0x033A + T.r[0])));
+				cyc(36);
+				for (T.r[2] = T.r[4];; T.r[2]++)
+				{
+					cyc(36);                           // 4C00: INC R2, CMP, BLE
+					if (!((int16_t)T.r[2] <= (int16_t)T.r[3])) break;
+					cyc(138);
+					T.r[1] = (uint16_t)(T.r[2] << 1);
+					T.r[0] = T.r[1];
+					poke((uint16_t)(0x0348 + T.r[1]), peek((uint16_t)(0x034A + T.r[0])));
+					poke((uint16_t)(0x0338 + T.r[1]), peek((uint16_t)(0x033A + T.r[0])));
+				}
 			}
+			cyc(24 + 12);                              // CMP (SP)+,(SP)+; INC R4
 		}
+		cyc(153);
 		poke(0x01D2, peek((uint16_t)(sp + 2)));
 		poke(0x01D4, peek(sp));
 		poke(0x1400, peek(0x01D2));
 		poke(0x1402, peek(0x01D4));
 	}
+	cyc(45);
 	T.r[6] = (uint16_t)(T.r[6] + 4);
 	fl::cmp(peek(sp), peek((uint16_t)(sp + 2)));
 }
@@ -740,44 +1058,74 @@ void expire_messages()
 // argument word left on the stack.
 void show_next_message()
 {
+	cyc(75);
 	T.r[0] = (uint16_t)(sext8(peekb(0x0358)) << 1);
 	const uint16_t msg = peek((uint16_t)(0x0362 + T.r[0]));
 	fl::tst(msg);
-	if (!msg) return;
+	if (!msg)
+	{
+		cyc(21);
+		return;
+	}
+	cyc(42);
 	if (peekb(0x0336) == 7)
 	{
+		cyc(171);
 		T.r[3] = peek(0x01D2);
 		T.r[4] = peek(0x01D4);
 		T.r[0] = 0x2800;
 		set_bank_b(0x2800);
 		const uint16_t box = peek(0x0348);
 		if ((int16_t)peek(box) >= 0x4000)
-			call(0xEAD4, {0x0001, peek(box)});
-		else
-			call(0x4D30, {0x0001, box});               // message_box(erase)
-		for (T.r[2] = 0; (int16_t)T.r[2] <= 6; T.r[2]++)
 		{
+			cyc(105);
+			call(0xEAD4, {0x0001, peek(box)});
+			cyc(12);
+		}
+		else
+		{
+			cyc(96);
+			call(0x4D30, {0x0001, box});               // message_box(erase)
+		}
+		cyc(12);
+		for (T.r[2] = 0; (int16_t)T.r[2] <= 6;)
+		{
+			cyc(180);
 			T.r[1] = (uint16_t)(T.r[2] << 1);
 			T.r[0] = T.r[1];
 			poke((uint16_t)(0x0348 + T.r[1]), peek((uint16_t)(0x034A + T.r[0])));
 			poke((uint16_t)(0x0338 + T.r[1]), peek((uint16_t)(0x033A + T.r[0])));
+			T.r[2]++;
 		}
+		cyc(189);
 		pokeb(0x0336, 6);
 		poke(0x01D2, T.r[3]);
 		poke(0x01D4, T.r[4]);
 		poke(0x1400, peek(0x01D2));
 		poke(0x1402, peek(0x01D4));
 	}
-	if (peekb(0x036D) & 1) call(0xA8FE, {});
+	cyc(42);
+	if (peekb(0x036D) & 1)
+	{
+		cyc(30);
+		call(0xA8FE, {});
+	}
+	cyc(117);
 	T.r[0] = (uint16_t)(peekb(0x036D) >> 1);
 	pokeb(0x036D, (uint8_t)T.r[0]);
-	if (peek(0x036E) & 1) poke(0x0184, 0x5CD2);
+	if (peek(0x036E) & 1)
+	{
+		cyc(33);
+		poke(0x0184, 0x5CD2);
+	}
+	cyc(180);
 	T.r[0] = (uint16_t)(peekb(0x036E) >> 1);
 	pokeb(0x036E, (uint8_t)T.r[0]);
 	T.r[0] = (uint16_t)(sext8(peekb(0x0358)) << 1);
 	push(peek((uint16_t)(0x0362 + T.r[0])));
 	const uint16_t arg = T.r[6];
 	call(0xA9FC, {});
+	cyc(399);
 	poke(0x0184, 0x5AC8);
 	T.r[0] = (uint16_t)(sext8(peekb(0x0336)) + 1);
 	pokeb(0x0336, (uint8_t)T.r[0]);
@@ -790,7 +1138,12 @@ void show_next_message()
 	T.r[0] = (uint16_t)(sext8(peekb(0x0358)) - 1);
 	pokeb(0x0358, (uint8_t)T.r[0]);
 	T.r[0] = sext8((uint8_t)T.r[0]);
-	if ((int16_t)T.r[0] < 0) poke(T.r[0], 0);
+	if ((int16_t)T.r[0] < 0)
+	{
+		cyc(21);
+		poke(T.r[0], 0);
+	}
+	cyc(18 + 21);
 	T.r[6] = (uint16_t)(T.r[6] + 2);
 	fl::tst(peek(arg));
 }
@@ -806,41 +1159,89 @@ uint16_t text(uint16_t n)
 }
 uint16_t credit_messages(const Args &a)
 {
+	cyc(159 + 72);
 	poke(0x0188, 0xE000);
 	if (!a.u(0))
 	{
+		cyc(48);
 		text(0x0053);
-		if (peekb(0x01F9) > 4) text(0x005A);
+		cyc(42);
+		if (peekb(0x01F9) > 4)
+		{
+			cyc(48);
+			text(0x005A);
+		}
+		cyc(255);
 		poke(0x0186, (uint16_t)(peek(0x0186) - 0x0018));
 		call(0xBA96, {0x0000, 0x0001, 0x0002, 0x0000, (uint16_t)(peekb(0x01F9) >> 2)});
+		cyc(42);
 		if (peekb(0x01F9) & 3)
 		{
+			cyc(417);
 			uint16_t r1 = rb((uint16_t)(0x5A49 + (sext8(peekb(0x01FA)) & 3)));
 			r1 = (uint16_t)(((sext8(peekb(0x01F9)) & 3) << 1) + r1 - 2);
 			const uint16_t at = peek(0x0186);
 			poke(at, peek((uint16_t)(0x5A4E + (r1 << 1))) | peek(0x0188));
 			poke((uint16_t)(peek(0x0186) + 2), peek((uint16_t)(0x5A50 + (r1 << 1))) | peek(0x0188));
 		}
+		cyc(30);
 	}
-	else if ((peekb(0x01FA) & 0xE0) == 0xE0)
-		text(0x0059);
 	else
 	{
-		const uint16_t m = (uint16_t)((peekb(0x01F3) >> 6) & 3);
-		text((uint16_t)(m + 0x0054));
-		if (m != 1) text(0x0058);
+		cyc(84);
+		if ((peekb(0x01FA) & 0xE0) == 0xE0)
+		{
+			cyc(18 + 30);
+			text(0x0059);
+		}
+		else
+		{
+			cyc(198);
+			const uint16_t m = (uint16_t)((peekb(0x01F3) >> 6) & 3);
+			text((uint16_t)(m + 0x0054));
+			cyc(30);
+			if (m != 1)
+			{
+				cyc(30 + 30);
+				text(0x0058);
+			}
+		}
 	}
+	cyc(75);
 	uint16_t n = peekb(0x01F9);
 	if (!a.u(1))
+	{
+		cyc(30);
 		n = 3;
+	}
 	else
 	{
+		cyc(201);
 		const uint16_t price = rb((uint16_t)(0x5A46 + ((peekb(0x01F3) >> 6) & 3)));
-		if ((int16_t)n >= (int16_t)(price << 1)) n = 0;
-		else if ((int16_t)n >= (int16_t)price) n = 1;
-		else n = 2;
+		if ((int16_t)n >= (int16_t)(price << 1))
+		{
+			cyc(24);
+			n = 0;
+		}
+		else
+		{
+			cyc(63);
+			if ((int16_t)n >= (int16_t)price)
+			{
+				cyc(30);
+				n = 1;
+			}
+			else
+			{
+				cyc(18);
+				n = 2;
+			}
+		}
 	}
-	return text((uint16_t)(n + 0x004F));
+	cyc(60);
+	const uint16_t r0 = text((uint16_t)(n + 0x004F));
+	cyc(21);
+	return r0;
 }
 
 // ---------------------------------------------------------------- game state
@@ -851,34 +1252,70 @@ uint16_t credit_messages(const Args &a)
 // towards the skater; the timer restarts at 5 (on screen) or 16-31 (random).
 uint16_t chaser_step(const Args &)
 {
+	cyc(135 + 138);
 	poke(0x043E, 0x0001);
 	poke(0x0EB4, (uint16_t)(peek(0x0EB4) - 1));
 	uint16_t r1 = 0, r2 = 0;
 	const uint16_t sx = peek(0x063E), sy = peek(0x067E);
-	bool visible = sx > 0x8200 && sx < 0xF000;
-	if (!visible) visible = (int16_t)sy < 0x1000 && sy > 0x9000;
+	bool visible = false;
+	if (sx > 0x8200)
+	{
+		cyc(42);
+		visible = sx < 0xF000;
+	}
+	if (!visible)
+	{
+		cyc(42);
+		if ((int16_t)sy < 0x1000)
+		{
+			cyc(42);
+			visible = sy > 0x9000;
+		}
+	}
 	if (visible)
 	{
+		cyc(105);
 		r1 = peek(0x04F0);
 		r2 = (uint16_t)(peek(0x0570) + peek(0x05B0));
 		poke(0x0EB4, 0xFFFF);
 	}
-	if ((int16_t)peek(0x0EB4) > 0) return 0;
+	cyc(36);
+	if ((int16_t)peek(0x0EB4) > 0)
+	{
+		cyc(21);
+		return 0;
+	}
+	cyc(36);
 	if ((int16_t)peek(0x0F22) <= 0)
 	{
-		if ((int8_t)peekb(0x0EB2) <= 6) pokeb(0x0EB2, (uint8_t)(peekb(0x0EB2) + 1));
+		cyc(42);
+		if ((int8_t)peekb(0x0EB2) <= 6)
+		{
+			cyc(63);
+			pokeb(0x0EB2, (uint8_t)(peekb(0x0EB2) + 1));
+		}
+		cyc(105);
 		pokeb(0x0F22, rb((uint16_t)(0xFE0D + peekb(0x0F2E))));
 		pokeb(0x0F23, 0);
 	}
+	cyc(30);
 	const uint16_t dir = call(0x4F98, {});             // direction_from_object7
+	cyc(150);
 	uint16_t r0 = call(0xE13A, {r2, r1, sext8(peekb(0x0EB2)), dir});
+	cyc(36);
 	if ((int16_t)peek(0x0EB4) < 0)
+	{
+		cyc(45);
 		poke(0x0EB4, 0x0005);
+	}
 	else
 	{
+		cyc(30);
 		r0 = call(0x9152, {});                         // next_random
+		cyc(93);
 		poke(0x0EB4, (uint16_t)((r0 & 0x000F) + 0x0010));
 	}
+	cyc(18 + 21);
 	return r0;
 }
 
@@ -887,43 +1324,68 @@ uint16_t chaser_step(const Args &)
 // paid (F:F002) and a sound plays; otherwise the "not enough" message.  The request is cleared.
 uint16_t shop_purchase(const Args &)
 {
-	if (!(peekb(0x0ED7) & 0x10)) return T.r[0];
+	cyc(135 + 42);
+	if (!(peekb(0x0ED7) & 0x10))
+	{
+		cyc(21);
+		return T.r[0];
+	}
+	cyc(30);
 	const uint16_t shop = call(0x5326, {});
+	cyc(210);
 	pokeb(0x0ED8, (uint8_t)(peekb(0x0ED8) | rb((uint16_t)(0xFC74 + shop))));
 	const uint16_t price = rb((uint16_t)(0xFE70 + rb((uint16_t)(0xFE7C + peekb(0x0F31)))));
 	if ((int16_t)peek(0x0256) >= (int16_t)price)
 	{
+		cyc(60);
 		const uint16_t item = (uint16_t)(0x025C + shop);
-		if ((int8_t)peekb(item) < 0) pokeb(item, 0);
+		if ((int8_t)peekb(item) < 0)
+		{
+			cyc(21);
+			pokeb(item, 0);
+		}
+		cyc(141);
 		pokeb(item, (uint8_t)(peekb(item) + 1));
 		push(0x76C8);
 		push(0x00D2);
 		push(0x0001);
 		call(0xA974, {});
+		cyc(63);
 		poke(T.r[6], (uint16_t)-price);
 		call(0xF002, {});
+		cyc(75);
 		poke(T.r[6], shop);
 		push(0x0000);
 		call(0xD97C, {});
+		cyc(30);
 		T.r[0] = call(0x9152, {}) & 0x0007;
+		cyc(105);
 		poke(T.r[6], rb((uint16_t)(0xFE1E + T.r[0])));
 		call(0x8E78, {});
+		cyc(30);
 		call(0x5602, {});
+		cyc(30);
 		call(0xD8D2, {});
+		cyc(12);
 	}
 	else
 	{
+		cyc(120);
 		push(0x76D6);
 		push(0x00F0);
 		push(0x0001);
 		call(0xA974, {});
+		cyc(81);
 		poke(T.r[6], shop);
 		push(0x0001);
 		call(0xD97C, {});
+		cyc(30);
 		T.r[0] = call(0x9152, {}) & 0x0003;
+		cyc(105);
 		poke(T.r[6], rb((uint16_t)(0xFE26 + T.r[0])));
 		call(0x8E78, {});
 	}
+	cyc(51 + 21);
 	pokeb(0x0ED7, peekb(0x0ED7) & ~0x10);
 	T.r[6] = (uint16_t)(T.r[6] + 8);
 	return T.r[0];
@@ -934,6 +1396,7 @@ uint16_t shop_purchase(const Args &)
 // moving the lower entries down.  Returns the place or -1.
 uint16_t insert_high_score(const Args &a)
 {
+	cyc(207 + 186 + 66);                               // prologue, setup, first test of the loop
 	const uint16_t first = a.u(0), lo = a.u(1), hi = a.u(2);
 	const uint32_t score = (uint32_t)hi << 16 | lo;
 	uint16_t place = 0xFFFF;
@@ -943,18 +1406,27 @@ uint16_t insert_high_score(const Args &a)
 		const uint32_t v = (uint32_t)peek(e) << 16 | peek((uint16_t)(e + 2));
 		if ((int16_t)((v - score) >> 16) < 0)
 		{
+			cyc(288 + 84 + 39 + 30);                   // the pass that finds it, F:80D0 sub32 included
 			place = i;
 			break;
 		}
 		tick(0x4410, 477);                             // one pass, F:80D0 sub32 included
 	}
-	if ((int16_t)place < 0) return place;
+	if (place == 0xFFFF) cyc(12);                      // TST R5 after the loop
+	cyc(12);                                           // BLT
+	if ((int16_t)place < 0)
+	{
+		cyc(51);
+		return place;
+	}
+	cyc(81 + 36);
 	for (uint16_t j = (uint16_t)(first + 14); (int16_t)j >= (int16_t)(uint16_t)(place + 1); j = (uint16_t)(j - 1))
 	{
 		for (int k = 0; k < 8; k += 2)
 			poke((uint16_t)(0x0370 + (j << 3) + k), peek((uint16_t)(0x0368 + (j << 3) + k)));
 		tick(0x4454, 324);                             // one entry moved by the loop at 0x4454
 	}
+	cyc(138 + 51);
 	poke((uint16_t)(0x0370 + (place << 3)), hi);
 	poke((uint16_t)(0x0372 + (place << 3)), lo);
 	return place;
@@ -965,38 +1437,81 @@ uint16_t insert_high_score(const Args &a)
 // Returns the object or 0.
 uint16_t find_collision(const Args &)
 {
+	cyc(198);
 	uint16_t saved[6];
 	for (int i = 1; i <= 5; i++) saved[i] = T.r[i];
 	const uint16_t box = peek(0x023A);
 	uint16_t result = 0;
-	for (uint16_t r2 = (uint16_t)((sext8(peekb(0x0994)) - 5) << 1); (int16_t)r2 >= 0; r2 = (uint16_t)(r2 - 2))
+	for (uint16_t r2 = (uint16_t)((sext8(peekb(0x0994)) - 5) << 1);; r2 = (uint16_t)(r2 - 2))
 	{
+		if ((int16_t)r2 < 0)
+		{
+			cyc(24 + 12);                              // TST R2 / BLT, CLR R0
+			break;
+		}
+		int pass = 24 + 39 + 30;                       // tests of the loop and the object, SUB/BR
 		const uint16_t p = peek((uint16_t)(0x03FA + r2));
-		if (!p) continue;
+		if (!p)
+		{
+			tick(0x569C, pass);
+			continue;
+		}
+		pass += 138;
 		uint16_t a1 = (uint16_t)(peek((uint16_t)(0x063A + r2)) + peek(p));
 		uint16_t b1 = (uint16_t)(peek(0x0630) + peek(box));
 		uint16_t d = (uint16_t)(a1 - b1);
 		if ((int16_t)a1 >= (int16_t)b1)
 		{
-			if (d >= peek((uint16_t)(box + 4))) continue;
+			pass += 39;
+			if (d >= peek((uint16_t)(box + 4)))
+			{
+				tick(0x569C, pass + 12);
+				continue;
+			}
 		}
-		else if ((uint16_t)-d >= peek((uint16_t)(p + 4)))
-			continue;
+		else
+		{
+			pass += 51;
+			if ((uint16_t)-d >= peek((uint16_t)(p + 4)))
+			{
+				tick(0x569C, pass);
+				continue;
+			}
+		}
+		pass += 129;
 		a1 = (uint16_t)(peek((uint16_t)(0x067A + r2)) + peek((uint16_t)(p + 2)));
 		b1 = (uint16_t)(peek(0x0238) + peek((uint16_t)(box + 2)));
 		d = (uint16_t)(a1 - b1);
 		if ((int16_t)a1 >= (int16_t)b1)
 		{
-			if (d >= peek((uint16_t)(box + 6))) continue;
+			pass += 39;
+			if (d >= peek((uint16_t)(box + 6)))
+			{
+				tick(0x569C, pass + 12);
+				continue;
+			}
 		}
-		else if ((uint16_t)-d >= peek((uint16_t)(p + 6)))
-			continue;
-		if (call(0x572A, {d, (uint16_t)(r2 + 10), r2, box}))
+		else
 		{
+			pass += 63;
+			if ((uint16_t)-d >= peek((uint16_t)(p + 6)))
+			{
+				tick(0x569C, pass);
+				continue;
+			}
+		}
+		cyc(pass - 30 + 153);                          // this pass so far, the call
+		const uint16_t touch = call(0x572A, {d, (uint16_t)(r2 + 10), r2, box});
+		cyc(87);
+		if (touch)
+		{
+			cyc(66);
 			result = (uint16_t)((r2 >> 1) + 5);
 			break;
 		}
+		tick(0x569C, 30);
 	}
+	cyc(111);
 	for (int i = 1; i <= 5; i++) T.r[i] = saved[i];
 	return result;
 }
@@ -1007,88 +1522,146 @@ uint16_t find_collision(const Args &)
 // not used by the game.  When the state is clear the kick state is reset (F:E238).
 void fallen_skater()
 {
+	cyc(36);
 	const uint8_t st = peekb(0x031F);
 	T.r[1] = sext8(st);
 	fl::movb(st);
-	if (!st) return;
-	if (peek(0x02FA)) poke(0x02FA, (uint16_t)(peek(0x02FA) - 1));
+	if (!st)
+	{
+		cyc(21);
+		return;
+	}
+	cyc(36);
+	if (peek(0x02FA))
+	{
+		cyc(27);
+		poke(0x02FA, (uint16_t)(peek(0x02FA) - 1));
+	}
+	cyc(30);
 	if (T.r[1] == 1)
 	{
+		cyc(42);
 		bool end;
 		if ((int16_t)peek(0x02FC) >= 0x0380)
 		{
+			cyc(36);
 			if (!peek(0x02FA))
 				end = true;
 			else
 			{
+				cyc(27 + 36);
 				poke(0x02FA, (uint16_t)(peek(0x02FA) - 1));
 				end = !peek(0x02FA);
 			}
 		}
 		else
+		{
+			cyc(36);
 			end = !peek(0x02FA);
+		}
 		if (end)
 		{
+			cyc(90);
 			call(0xB602, {0x0002, 0x0002});
+			cyc(84);
 			pokeb(0x031F, 0);
 			call(0x8E78, {0x0055});
+			cyc(24);
 		}
+		cyc(42);
 		if (peekb(0x0327) & 7)
 		{
+			cyc(177);
 			T.r[0] = rb((uint16_t)(0xFCD0 + (peekb(0x0327) >> 3)));
 			T.r[2] = peekb(0x031D);
 			if (T.r[0] != T.r[2])
 			{
+				cyc(84);
 				pokeb(0x031D, (uint8_t)T.r[0]);
 				pokeb(0x01F8, (uint8_t)T.r[0]);
 				call(0x9B82, {});
 			}
 		}
-		else if (!peekb(0x031E))
+		else
 		{
-			const uint16_t v = (uint16_t)(peek(0x01B4) - 0x0014);
-			poke(0x01B4, v);
-			if (!((int16_t)v > 0))
+			cyc(36);
+			if (!peekb(0x031E))
 			{
-				poke(0x01B4, 0);
-				call(0x8E78, {0x0055});
+				cyc(63);
+				const uint16_t v = (uint16_t)(peek(0x01B4) - 0x0014);
+				poke(0x01B4, v);
+				if (!((int16_t)v > 0))
+				{
+					cyc(87);
+					poke(0x01B4, 0);
+					call(0x8E78, {0x0055});
+					cyc(30);
+				}
 			}
 		}
 	}
+	cyc(30);
 	if (T.r[1] == 2)
 	{
+		cyc(63);
 		poke(0x01B4, 0);
 		if (!peek(0x02FA))
 		{
+			cyc(132);
 			pokeb(0x031B, 0x3F);
 			pokeb(0x031F, 0);
 			T.r[0] = sext8(peekb(0x0327)) & 0x0007;
 			if (T.r[0] >= 4)
 			{
+				cyc(147);
 				pokeb(0x0325, 0x7F);
 				T.r[0] = (uint16_t)(peekb(0x0327) >> 3);
 				pokeb(0x031D, rb((uint16_t)(0xFCD0 + T.r[0])));
 			}
 		}
 	}
+	cyc(36);
 	const uint8_t now = peekb(0x031F);
 	fl::tstb(now);
-	if (!now) call(0xE238, {});                       // reset_skater_state
+	if (!now)
+	{
+		cyc(30);
+		call(0xE238, {});                             // reset_skater_state
+	}
+	cyc(21);
 }
 
 // A7:4B3E: every 128 frames ask the sound CPU for its status (command 9); a bit of 0-2 that
 // stays set from the last answer (0x01A3) marks it as failing (0x01A2 = 1)
 uint16_t poll_sound_status(const Args &)
 {
-	if (peekb(0x01C4) & 0x7F) return T.r[0];
+	cyc(135 + 42);
+	if (peekb(0x01C4) & 0x7F)
+	{
+		cyc(21);
+		return T.r[0];
+	}
+	cyc(30);
 	call(0x8E6A, {});                                  // set_flag_01a4
-	call(0x8EA2, {0x0009});                            // send_sound_command
+	cyc(60);
+	push(0x0009);
+	call(0x8EA2, {});                                  // send_sound_command
+	cyc(30);
 	const uint16_t status = call(0x8ED2, {});          // read_sound_response
+	cyc(42);
 	call(0x8F62, {});
+	cyc(30);
 	call(0x8E72, {});                                  // clear_flag_01a4
+	cyc(102);
 	const uint16_t r0 = peekb(0x01A3) & status;
-	if (r0 & 7) pokeb(0x01A2, 1);
+	if (r0 & 7)
+	{
+		cyc(33);
+		pokeb(0x01A2, 1);
+	}
+	cyc(45 + 21);
 	pokeb(0x01A3, (uint8_t)status);
+	T.r[6] = (uint16_t)(T.r[6] + 2);
 	return r0;
 }
 
@@ -1106,24 +1679,31 @@ void scan_zone_switches()
 	const uint16_t E = T.r[6];
 	const uint16_t L0 = (uint16_t)(E - 8), L2 = (uint16_t)(E - 6), L4 = (uint16_t)(E - 4), L6 = (uint16_t)(E - 2);
 	T.r[6] = L0;
-	auto finish = [&]() { T.r[6] = fl::add(T.r[6], 0x0008); };
-	auto finish_pop = [&]() { T.r[6] = (uint16_t)(T.r[6] + 2); finish(); };
+	auto finish = [&]() { cyc(39); T.r[6] = fl::add(T.r[6], 0x0008); };   // ADD #8,SP; RTS
+	auto finish_pop = [&](int extra) { cyc(extra + 18); T.r[6] = (uint16_t)(T.r[6] + 2); finish(); };
 	auto zone_at = [&](uint16_t i) -> uint16_t { return peekb((uint16_t)(0x0F60 + i)); };
 	auto set_bank = [&]() { T.r[0] = call(0xEEE6, {}); };   // set_tile_bank(stack word)
+	cyc(120);
 	T.r[0] = peek(0x01AA);
 	T.r[2] = T.r[0] & ~0x01FF;
 	T.r[5] = 0;
 	if (T.r[2] != peek(0x0F52))
+	{
+		cyc(24);
 		T.r[5] = 1;
+	}
 	else
 	{
+		cyc(78);
 		T.r[1] = peek(0x01A8) & ~0x01FF;
 		if (T.r[1] == peek(0x0F54))
 		{
+			cyc(18);
 			finish();
 			return;
 		}
 	}
+	cyc(471);
 	poke(0x0236, 0);
 	T.r[4] = asr(T.r[0], 9);
 	poke(0x0232, T.r[4] & 7);
@@ -1138,20 +1718,25 @@ void scan_zone_switches()
 	T.r[5] = (uint16_t)((carry ? 0x8000 : 0) | (T.r[5] >> 1));   // ROR
 	if (row_changed)
 	{
+		cyc(186);
 		poke(L2, (uint16_t)(T.r[0] - peek(0x0F52)));
 		poke(0x0F52, T.r[2]);
 		poke(L0, (uint16_t)(T.r[3] + 4));
 		if ((int16_t)peek(L2) < 0)
 		{
+			cyc(249);
 			poke(L6, (uint16_t)(T.r[4] << 3));
 			T.r[0] = (uint16_t)(T.r[3] + peek(L6));
 			push(zone_at(T.r[0]));
 			T.r[0] = call(0x43F8, {});                 // zone_switch_a
-			if (peek(0x0236)) { finish_pop(); return; }
+			cyc(36);
+			if (peek(0x0236)) { finish_pop(18); return; }
+			cyc(45);
 			T.r[2] = peek(L6);
 			T.r[1] = 3;
 			do
 			{
+				cyc(162);
 				T.r[0] = (uint16_t)(((T.r[1] + T.r[3]) & 7) + T.r[2]);
 				T.r[5] = zone_at(T.r[0]);
 				T.r[0] = (uint16_t)((T.r[5] & 7) << 1);
@@ -1159,81 +1744,108 @@ void scan_zone_switches()
 				switch (T.r[5] & 7)
 				{
 				case 1: case 2: case 5: sw = true; break;
-				case 3: case 4: case 7: sw = (int16_t)peek(0x0232) < 7; break;
+				case 3: case 4: case 7: cyc(42); sw = (int16_t)peek(0x0232) < 7; break;
 				default: break;                        // 0, 6: no switch
 				}
 				if (sw)
 				{
+					cyc(51);
 					poke(T.r[6], T.r[5]);
 					set_bank();
 				}
-				if (peek(0x0236)) { finish_pop(); return; }
+				cyc(36);
+				if (peek(0x0236)) { finish_pop(18); return; }
+				cyc(18);
 			} while (--T.r[1]);
+			cyc(159);
 			T.r[0] = (uint16_t)((peek(L0) & 7) + peek(L6));
 			poke(T.r[6], zone_at(T.r[0]));
 			T.r[0] = call(0x4442, {});                 // zone_switch_b
 		}
 		else
 		{
+			cyc(36);
 			T.r[0] = peek(0x0232) ? 6 : 5;
+			cyc(peek(0x0232) ? 18 : 30);
+			cyc(291);
 			T.r[0] = (uint16_t)(T.r[0] + T.r[4]);
 			T.r[1] = T.r[0] & 7;
 			poke(L6, (uint16_t)(T.r[1] << 3));
 			T.r[0] = (uint16_t)(T.r[3] + peek(L6));
 			push(zone_at(T.r[0]));
 			T.r[0] = call(0x4496, {});                 // zone_switch_c
-			if (peek(0x0236)) { finish_pop(); return; }
+			cyc(36);
+			if (peek(0x0236)) { finish_pop(18); return; }
+			cyc(63);
 			T.r[2] = peek(L6);
 			poke(L4, 1);
 			do
 			{
+				cyc(177);
 				T.r[0] = (uint16_t)(((T.r[3] + peek(L4)) & 7) + T.r[2]);
 				T.r[5] = zone_at(T.r[0]);
 				T.r[0] = (uint16_t)((T.r[5] & 7) << 1);
 				bool sw = false;
 				switch (T.r[5] & 7)
 				{
-				case 1: case 2: sw = peek(0x0232) != 1; break;
+				case 1: case 2: cyc(42); sw = peek(0x0232) != 1; break;
 				case 3: case 4: case 5: case 7: sw = true; break;
 				default: break;                        // 0, and 6 (enters an instruction): no switch
 				}
 				if (sw)
 				{
+					cyc(51);
 					poke(T.r[6], T.r[5]);
 					set_bank();
 				}
-				if (peek(0x0236)) { finish_pop(); return; }
+				cyc(36);
+				if (peek(0x0236)) { finish_pop(18); return; }
+				cyc(75);
 				poke(L4, (uint16_t)(peek(L4) + 1));
 			} while ((int16_t)peek(L4) <= 3);
+			cyc(159);
 			T.r[0] = (uint16_t)((peek(L0) & 7) + peek(L6));
 			poke(T.r[6], zone_at(T.r[0]));
 			T.r[0] = call(0x44EC, {});                 // zone_switch_d
+			cyc(12);
 		}
-		if (peek(0x0236)) { finish_pop(); return; }
+		cyc(36);
+		if (peek(0x0236)) { finish_pop(18); return; }
+		cyc(18);
 		T.r[6] = (uint16_t)(T.r[6] + 2);
 	}
+	else
+		cyc(18);                                       // JMP 4704
+	cyc(78);
 	T.r[0] = peek(0x01A8) & ~0x01FF;
 	if (T.r[0] == peek(0x0F54))
 	{
+		cyc(18);
 		finish();
 		return;
 	}
+	cyc(219);
 	T.r[5] = (uint16_t)(peek(0x01A8) - peek(0x0F54));
 	poke(0x0F54, T.r[0]);
 	poke(L6, (uint16_t)(T.r[4] << 3));
 	if ((int16_t)T.r[5] < 0)
 	{
+		cyc(39);
 		if (!((int16_t)peek(L2) > 0))
 		{
+			cyc(84 + 66);
 			T.r[0] = (uint16_t)((T.r[4] << 3) + T.r[3]);
 			push(zone_at(T.r[0]));
 			T.r[0] = call(0x43F8, {});                 // zone_switch_a
+			cyc(18);
 			T.r[6] = (uint16_t)(T.r[6] + 2);
 		}
+		cyc(75);
 		T.r[2] = (uint16_t)(T.r[3] + peek(L6));
 		poke(L4, 5);
 		do
 		{
+			cyc(168);
 			T.r[0] = (uint16_t)(T.r[2] + 8);
 			T.r[2] = T.r[0] & 0x003F;
 			T.r[5] = zone_at(T.r[2]);
@@ -1243,39 +1855,56 @@ void scan_zone_switches()
 			switch (mode)
 			{
 			case 1: case 3: case 5: sw = true; break;
-			case 2: case 4: case 7: sw = (int16_t)peek(0x0234) < 14; break;
+			case 2: case 4: case 7: cyc(42); sw = (int16_t)peek(0x0234) < 14; break;
 			default: break;                            // 0: no switch, 6: also skips the check
 			}
 			if (sw)
 			{
+				cyc(54);
 				push(T.r[5]);
 				set_bank();
+				cyc(18);
 				T.r[6] = (uint16_t)(T.r[6] + 2);
 			}
-			if (mode != 6 && peek(0x0236)) { finish(); return; }
+			if (mode != 6)
+			{
+				cyc(36);
+				if (peek(0x0236)) { finish(); return; }
+			}
+			cyc(42);
 			poke(L4, (uint16_t)(peek(L4) - 1));
 		} while (peek(L4));
+		cyc(39);
 		if ((int16_t)peek(L2) < 0) { finish(); return; }
+		cyc(186);
 		T.r[0] = (uint16_t)((((T.r[4] + 6) << 3) & 0x0038) + T.r[3]);
 		push(zone_at(T.r[0]));
 		T.r[0] = call(0x4496, {});                     // zone_switch_c
-		finish_pop();
+		finish_pop(12);
 		return;
 	}
+	cyc(36);
+	cyc(peek(0x0234) ? 18 : 30);
+	cyc(81);
 	T.r[0] = (uint16_t)((peek(0x0234) ? 4 : 3) + T.r[3]);
 	T.r[1] = T.r[0] & 7;
 	if (!((int16_t)peek(L2) > 0))
 	{
+		cyc(150);
 		T.r[0] = (uint16_t)((T.r[4] << 3) + T.r[1]);
 		push(zone_at(T.r[0]));
 		T.r[0] = call(0x4442, {});                     // zone_switch_b
-		if (peek(0x0236)) { finish_pop(); return; }
+		cyc(36);
+		if (peek(0x0236)) { finish_pop(0); return; }
+		cyc(18);
 		T.r[6] = (uint16_t)(T.r[6] + 2);
 	}
+	cyc(57);
 	T.r[2] = (uint16_t)(T.r[1] + peek(L6));
 	T.r[3] = 5;
 	do
 	{
+		cyc(168);
 		T.r[0] = (uint16_t)(T.r[2] + 8);
 		T.r[2] = T.r[0] & 0x003F;
 		T.r[5] = zone_at(T.r[2]);
@@ -1283,23 +1912,37 @@ void scan_zone_switches()
 		bool sw = false;
 		switch (T.r[5] & 7)
 		{
-		case 1: case 3: sw = (int16_t)peek(0x0234) > 2 || peek(0x0234) == 0; break;
+		case 1: case 3:
+			cyc(42);
+			if ((int16_t)peek(0x0234) > 2) sw = true;
+			else
+			{
+				cyc(36);
+				sw = peek(0x0234) == 0;
+			}
+			break;
 		case 2: case 4: case 5: sw = true; break;
 		default: break;                                // 0, and 6/7 (outside the routine): no switch
 		}
 		if (sw)
 		{
+			cyc(54);
 			push(T.r[5]);
 			set_bank();
+			cyc(18);
 			T.r[6] = (uint16_t)(T.r[6] + 2);
 		}
+		cyc(36);
 		if (peek(0x0236)) { finish(); return; }
+		cyc(18);
 	} while (--T.r[3]);
+	cyc(39);
 	if ((int16_t)peek(L2) < 0) { finish(); return; }
+	cyc(174);
 	T.r[4] = (uint16_t)((((T.r[4] + 6) << 3) & 0x0038) + T.r[1]);
 	push(zone_at(T.r[4]));
 	T.r[0] = call(0x44EC, {});                         // zone_switch_d
-	finish_pop();
+	finish_pop(0);
 }
 
 // ---------------------------------------------------------------- terrain events
@@ -1312,140 +1955,227 @@ void scan_zone_switches()
 uint16_t terrain_event(const Args &)
 {
 	const uint16_t saved_r1 = T.r[1];
+	cyc(60);
 	T.r[0] = sext8(peekb(0x032A));
-	if ((int16_t)T.r[0] <= 0) return T.r[0];
+	if ((int16_t)T.r[0] <= 0)
+	{
+		cyc(24);
+		return T.r[0];
+	}
+	cyc(51);
 	const uint16_t ev = T.r[0];
 	T.r[0] = (uint16_t)((T.r[0] - 1) << 1);
 	switch (ev)
 	{
 	case 1: case 2: case 3: case 4:
 	{
+		cyc(30);
 		T.r[0] = call(0x5360, {});
+		cyc(102);
 		pokeb(0x027A, (uint8_t)T.r[0]);
 		T.r[1] = T.r[0] & 0x00FF;
-		if (peekb(0x0EA4) & rb((uint16_t)(0xFC74 + T.r[1]))) break;
-		T.r[0] = (peek(0x0ED6) | peekb(0x0F29)) & 0x00FF;
-		if (T.r[0] & rb((uint16_t)(0xFC74 + T.r[1]))) break;
-		bool other_park = false;
-		if (peekb(0x01F6) && peekb(0x0F2B) == 1)
+		if (peekb(0x0EA4) & rb((uint16_t)(0xFC74 + T.r[1])))
 		{
-			T.r[0] = peekb(0x02B8);
-			other_park = T.r[1] != T.r[0];
+			cyc(24);
+			break;
+		}
+		cyc(105);
+		T.r[0] = (peek(0x0ED6) | peekb(0x0F29)) & 0x00FF;
+		if (T.r[0] & rb((uint16_t)(0xFC74 + T.r[1])))
+		{
+			cyc(24);
+			break;
+		}
+		bool other_park = false;
+		cyc(36);
+		if (peekb(0x01F6))
+		{
+			cyc(42);
+			if (peekb(0x0F2B) == 1)
+			{
+				cyc(60);
+				T.r[0] = peekb(0x02B8);
+				other_park = T.r[1] != T.r[0];
+			}
 		}
 		if (other_park)
 		{
+			cyc(120);
 			push(0x75F4);
 			push(0x00B4);
 			push(0x0001);
 			T.r[0] = call(0xA974, {});
+			cyc(30);
 			T.r[6] = (uint16_t)(T.r[6] + 2);
-		}
-		else if (!peekb(0x025B))
-		{
-			pokeb(0x0EA6, 1);
-			poke(0x0EAA, 0x00B4);
-			push((uint16_t)(T.r[1] + 4));
-			push(0x0001);
-			T.r[0] = call(0xD97C, {});
-			T.r[0] = call(0x9152, {}) & 0x0003;          // next_random
-			poke(T.r[6], rb((uint16_t)(0xFE2A + T.r[0])));
-			T.r[0] = call(0x8E78, {});                     // queue_sound
 		}
 		else
 		{
-			push(0xFFFF);
-			T.r[0] = call(0x72CA, {});
-			pokeb(0x0279, (uint8_t)(peekb(0x0279) | 1));
-			poke(T.r[6], (uint16_t)(peekb(0x027A) + 4));
-			push(0x0000);
-			T.r[0] = call(0xD97C, {});
-			poke(T.r[6], peekb(0x027A));
-			T.r[0] = call(0xDA02, {});
-			T.r[0] = call(0x50C8, {});
+			cyc(36);
+			if (!peekb(0x025B))
+			{
+				cyc(177);
+				pokeb(0x0EA6, 1);
+				poke(0x0EAA, 0x00B4);
+				push((uint16_t)(T.r[1] + 4));
+				push(0x0001);
+				T.r[0] = call(0xD97C, {});
+				cyc(30);
+				T.r[0] = call(0x9152, {}) & 0x0003;    // next_random
+				cyc(105);
+				poke(T.r[6], rb((uint16_t)(0xFE2A + T.r[0])));
+				T.r[0] = call(0x8E78, {});             // queue_sound
+				cyc(12);
+			}
+			else
+			{
+				cyc(60);
+				push(0xFFFF);
+				T.r[0] = call(0x72CA, {});
+				cyc(168);
+				pokeb(0x0279, (uint8_t)(peekb(0x0279) | 1));
+				poke(T.r[6], (uint16_t)(peekb(0x027A) + 4));
+				push(0x0000);
+				T.r[0] = call(0xD97C, {});
+				cyc(84);
+				poke(T.r[6], peekb(0x027A));
+				T.r[0] = call(0xDA02, {});
+				cyc(30);
+				T.r[0] = call(0x50C8, {});
+			}
 		}
+		cyc(114 + 12);
 		T.r[0] = peekb(0x027A);
 		pokeb(0x0ED6, (uint8_t)(peekb(0x0ED6) | rb((uint16_t)(0xFC74 + T.r[0]))));
 		T.r[6] = (uint16_t)(T.r[6] + 4);
 		break;
 	}
 	case 5: case 6: case 7: case 8:
+		cyc(96);
 		T.r[1] = (sext8(peekb(0x0ED7)) | peekb(0x0ED8)) & 0x00FF;
 		T.r[0] = call(0x5326, {});
-		if (!(T.r[1] & rb((uint16_t)(0xFC74 + T.r[0])))) pokeb(0x0ED7, (uint8_t)(peekb(0x0ED7) | 0x10));
+		cyc(39);
+		if (!(T.r[1] & rb((uint16_t)(0xFC74 + T.r[0]))))
+		{
+			cyc(45);
+			pokeb(0x0ED7, (uint8_t)(peekb(0x0ED7) | 0x10));
+		}
+		cyc(12);
 		break;
 	case 9:
+		cyc(57);
 		pokeb(0x0F27, 1);
 		break;
 	case 10:
+		cyc(57);
 		pokeb(0x0F28, 1);
 		break;
 	case 11: case 18:
+		cyc(36);
 		if (!peekb(0x01EA))
-			poke(0x0FB2, (uint16_t)(peek(0x0FB2) + 1));
-		else if (peekb(0x031F) != 5)
 		{
-			push(0x0053);
-			T.r[0] = call(0x8E78, {});                     // queue_sound
-			T.r[0] = 0x1C00;
-			set_bank_b(0x1C00);
-			T.r[0] = call(0x78E4, {});
-			if (peekb(0x032A) == 0x12)
-			{
-				poke(T.r[6], 0x0069);
-				T.r[0] = call(0x8E78, {});
-				poke(0x03B4, 0x57A8);
-			}
-			else
-			{
-				poke(T.r[6], 0x006A);
-				T.r[0] = call(0x8E78, {});
-				poke(0x03B4, 0x57AA);
-			}
-			poke(0x03B2, 0x50FA);
-			poke(T.r[6], 0x0002);
-			push(0x0012);
-			T.r[0] = call(0xB602, {});
-			T.r[6] = (uint16_t)(T.r[6] + 4);
+			cyc(39);
+			poke(0x0FB2, (uint16_t)(peek(0x0FB2) + 1));
 		}
+		else
+		{
+			cyc(42);
+			if (peekb(0x031F) != 5)
+			{
+				cyc(60);
+				push(0x0053);
+				T.r[0] = call(0x8E78, {});             // queue_sound
+				cyc(102);
+				T.r[0] = 0x1C00;
+				set_bank_b(0x1C00);
+				T.r[0] = call(0x78E4, {});
+				cyc(42);
+				if (peekb(0x032A) == 0x12)
+				{
+					cyc(57);
+					poke(T.r[6], 0x0069);
+					T.r[0] = call(0x8E78, {});
+					cyc(45);
+					poke(0x03B4, 0x57A8);
+				}
+				else
+				{
+					cyc(57);
+					poke(T.r[6], 0x006A);
+					T.r[0] = call(0x8E78, {});
+					cyc(33);
+					poke(0x03B4, 0x57AA);
+				}
+				cyc(120);
+				poke(0x03B2, 0x50FA);
+				poke(T.r[6], 0x0002);
+				push(0x0012);
+				T.r[0] = call(0xB602, {});
+				cyc(24);
+				T.r[6] = (uint16_t)(T.r[6] + 4);
+			}
+		}
+		cyc(39);
 		pokeb(0x032A, 0);
 		break;
 	case 13:
+		cyc(45);
 		poke(0x0ED4, 0x7800);
 		break;
 	case 14:
+		cyc(45);
 		poke(0x0ED4, 0x5800);
 		break;
 	case 16:
+		cyc(72);
 		T.r[0] = (uint16_t)(peek(0x0F32) + 1);
 		if ((int16_t)T.r[0] < (int16_t)peek(0x099A))
 		{
+			cyc(69);
 			poke(0x0F32, peek(0x099A));
 			T.r[0] = call(0x7A9E, {});
+			cyc(12);
 		}
 		break;
 	case 17:
-		if (!peekb(0x01EA) || peekb(0x018F) > 1) break;
-		T.r[0] = call(0x52FC, {});                         // difficulty_step
+		cyc(36);
+		if (!peekb(0x01EA)) break;
+		cyc(42);
+		if (peekb(0x018F) > 1) break;
+		cyc(30);
+		T.r[0] = call(0x52FC, {});                     // difficulty_step
+		cyc(81);
 		T.r[0] = rb((uint16_t)(0xFC74 + T.r[0]));
 		if (peekb(0x0F2A) & T.r[0]) break;
+		cyc(129 + 12);
 		pokeb(0x0F36, 1);
 		T.r[1] = sext8(peekb(0x0F2A)) | T.r[0];
 		pokeb(0x0F2A, (uint8_t)T.r[1]);
 		pokeb(0x0F2A, (uint8_t)(peekb(0x0F2A) | 0x80));
 		break;
 	case 19:
-		if (!peekb(0x01EA) || peekb(0x0F26) >= 5 || peekb(0x031F) == 5) break;
+		cyc(36);
+		if (!peekb(0x01EA)) break;
+		cyc(42);
+		if (peekb(0x0F26) >= 5) break;
+		cyc(42);
+		if (peekb(0x031F) == 5) break;
+		cyc(102);
 		T.r[0] = 0x1C00;
 		set_bank_b(0x1C00);
 		T.r[0] = call(0x78E4, {});
+		cyc(12);
 		break;
 	case 20: case 21: case 22: case 23:
+		cyc(30);
 		T.r[0] = call(0x5360, {});
+		cyc(114);
 		pokeb(0x027A, (uint8_t)T.r[0]);
 		T.r[0] = peekb(0x027A);
 		if (!(peekb(0x0EA4) & rb((uint16_t)(0xFC74 + T.r[0])))) break;
+		cyc(60);
 		push(0x0053);
 		T.r[0] = call(0x8E78, {});
+		cyc(51);
 		pokeb(0x0F26, 1);
 		T.r[6] = (uint16_t)(T.r[6] + 2);
 		break;
@@ -1472,6 +2202,12 @@ void shapes_touch()
 	const uint16_t OX = (uint16_t)(E - 8), SX = (uint16_t)(E - 10), S0 = (uint16_t)(E - 12);
 	T.r[6] = L0;
 	auto shift = [&](uint16_t mask, uint16_t n) { T.r[0] = mask; T.r[1] = n; call(0x7DB8, {}); };
+	auto byte_shift = [&](uint16_t a, uint16_t v, int cost) {   // MOV/CLRB/SWAB/BPL [COMB]
+		cyc(cost);
+		if (v & 0x8000) cyc(27);
+		poke(a, asr(v, 8));
+	};
+	cyc(333);
 	T.r[0] = peek((uint16_t)(E + 4));
 	T.r[2] = peek((uint16_t)(E + 2));
 	T.r[1] = peek((uint16_t)(0x03F0 + T.r[0]));
@@ -1483,15 +2219,22 @@ void shapes_touch()
 	push(T.r[3]);
 	poke(S0, (uint16_t)(peek(S0) - peek(SX)));
 	T.r[3] = peek(S0);
-	poke(0x0234, asr(peek((uint16_t)(T.r[1] + 4)), 8));
-	poke(0x0236, (uint16_t)(asr(peek((uint16_t)(T.r[1] + 6)), 8) << 1));
+	byte_shift(0x0234, peek((uint16_t)(T.r[1] + 4)), 108);
+	byte_shift(0x0236, peek((uint16_t)(T.r[1] + 6)), 108);
+	poke(0x0236, (uint16_t)(peek(0x0236) << 1));
+	cyc(357);
 	poke(L4, (uint16_t)(peek((uint16_t)(T.r[4] + 2)) + peek(0x0238)));   // skater top
 	T.r[5] = (uint16_t)(peek(L4) + peek((uint16_t)(T.r[4] + 6)));
 	const uint16_t oy = (uint16_t)(peek((uint16_t)(0x0670 + T.r[0])) + peek((uint16_t)(T.r[1] + 2)));
 	ww((uint16_t)(E - 14), oy);                        // pushed and popped
 	poke(L2, oy);                                      // object top
 	T.r[0] = (uint16_t)(peek(L2) + peek((uint16_t)(T.r[1] + 6)));
-	if (!((int16_t)T.r[5] >= (int16_t)T.r[0])) T.r[0] = T.r[5];
+	if (!((int16_t)T.r[5] >= (int16_t)T.r[0]))
+	{
+		cyc(12);
+		T.r[0] = T.r[5];
+	}
+	cyc(138);
 	poke(0x0230, T.r[0]);
 	poke(L0, peek(L4));
 	T.r[0] = (uint16_t)(peek(L0) - peek(L2));
@@ -1504,7 +2247,8 @@ void shapes_touch()
 		T.r[5] = (uint16_t)(T.r[0] << 1);
 		T.r[2] = (uint16_t)(T.r[1] - T.r[5]);
 		T.r[0] = (uint16_t)(peek(0x0230) - peek(L0) + 0x00C0);
-		poke(0x0230, asr(T.r[0], 8));
+		byte_shift(0x0230, T.r[0], 348);
+		cyc(45);
 		poke(0x0232, peek(S0));
 	}
 	else
@@ -1515,118 +2259,184 @@ void shapes_touch()
 		T.r[0] = (uint16_t)(asr(T.r[5], 8) << 1);
 		T.r[2] = (uint16_t)(T.r[4] - T.r[0]);
 		T.r[0] = (uint16_t)(peek(0x0230) - peek(L2) + 0x00C0);
-		poke(0x0230, asr(T.r[0], 8));
+		byte_shift(0x0230, T.r[0], 342);
+		cyc(84);
 		poke(0x0232, (uint16_t)(peek(SX) - peek(OX)));
 	}
+	cyc(78);
 	T.r[0] = peek(0x0232);
 	T.r[4] = peek(0x0234);
 	bool hit = false;
 	if (!((int16_t)T.r[4] > 0x10))
 	{
+		cyc(24);
 		const bool left = (int16_t)T.r[0] < 0;
-		if (left) T.r[1] = (uint16_t)-T.r[0];
-		poke(0x0232, asr(left ? T.r[1] : T.r[0], 8));
+		if (left)
+		{
+			T.r[1] = (uint16_t)-T.r[0];
+			byte_shift(0x0232, T.r[1], 117);
+		}
+		else
+			byte_shift(0x0232, T.r[0], 93);
+		cyc(36);
 		T.r[5] = peek(0x0230);
 		if ((int16_t)T.r[5] > 0)
 			do
 			{
+				cyc(72);
 				if (left)
 				{
 					shift(peek(T.r[2]), peek(0x0232));
+					cyc(30);
 					hit = (peek(T.r[3]) & T.r[0]) != 0;
 				}
 				else
 				{
 					shift(peek(T.r[3]), peek(0x0232));
+					cyc(30);
 					hit = (T.r[0] & peek(T.r[2])) != 0;
 				}
-				if (hit) break;
+				if (hit)
+				{
+					cyc(12);                           // 595C BR / 59B0 BNE
+					break;
+				}
+				cyc(54);
 				T.r[3] = (uint16_t)(T.r[3] - 2);
 				T.r[2] = (uint16_t)(T.r[2] - 2);
 			} while (--T.r[5]);
+		if (!hit) cyc((left && (int16_t)peek(0x0230) > 0 ? 12 : 0) + 18);   // BR 58C8 / JMP 5A3E
 	}
 	else
 	{
 		poke(OX, T.r[3]);
 		poke(L0, T.r[2]);
-		poke(0x0232, asr(T.r[0], 8));
+		byte_shift(0x0232, T.r[0], 153);
+		cyc(93);
 		T.r[0] = peek(0x0232);
 		T.r[1] = (uint16_t)(T.r[4] - 0x0010);
 		if (peek(L4))
 		{
+			cyc(54);
 			T.r[5] = (uint16_t)(T.r[0] - T.r[1]);
 			if ((int16_t)T.r[4] > 0x20)
 			{
+				cyc(60);
 				poke(L2, T.r[5]);
 				T.r[5] = (uint16_t)(T.r[5] + 0x0010);
 			}
 		}
 		else
 		{
+			cyc(54);
 			T.r[5] = (uint16_t)(T.r[1] + T.r[0]);
 			if ((int16_t)T.r[4] > 0x20)
 			{
+				cyc(48);
 				poke(L2, T.r[5]);
 				T.r[5] = (uint16_t)(T.r[5] - 0x0010);
 			}
 		}
-		if ((int16_t)T.r[0] < 0) T.r[0] = (uint16_t)-T.r[0];
+		cyc(24);
+		if ((int16_t)T.r[0] < 0)
+		{
+			cyc(12);
+			T.r[0] = (uint16_t)-T.r[0];
+		}
+		cyc(30);
 		if ((int16_t)T.r[0] < 0x10)
 		{
-			poke(S0, (int16_t)T.r[4] > 0x20 ? (uint16_t)(peek(0x0236) << 1) : peek(0x0236));
+			cyc(30);
+			if ((int16_t)T.r[4] > 0x20)
+			{
+				cyc(54);
+				poke(S0, (uint16_t)(peek(0x0236) << 1));
+			}
+			else
+			{
+				cyc(45);
+				poke(S0, peek(0x0236));
+			}
+			cyc(54);
 			poke(SX, peek(0x0230));
 			if ((int16_t)peek(SX) > 0)
 				do
 				{
+					cyc(39);
 					if (peek(L4))
 					{
+						cyc(102);
 						T.r[4] = (uint16_t)(T.r[3] - peek(S0));
 						shift(peek(T.r[4]), peek(0x0232));
+						cyc(30);
 						hit = (T.r[0] & peek(T.r[2])) != 0;
 					}
 					else
 					{
+						cyc(72);
 						shift(peek(T.r[3]), peek(0x0232));
+						cyc(60);
 						T.r[1] = T.r[0];
 						T.r[0] = (uint16_t)(T.r[2] - peek(S0));
 						hit = (T.r[1] & peek(T.r[0])) != 0;
 					}
-					if (hit) break;
+					cyc(12);                           // 595A BEQ
+					if (hit)
+					{
+						cyc(12);
+						break;
+					}
+					cyc(78);
 					T.r[3] = (uint16_t)(T.r[3] - 2);
 					T.r[2] = (uint16_t)(T.r[2] - 2);
 					poke(SX, (uint16_t)(peek(SX) - 1));
 				} while (peek(SX));
 			if (!hit)
 			{
+				cyc(54);
 				T.r[3] = peek(OX);
 				T.r[2] = peek(L0);
 			}
 		}
 		if (!hit)
 		{
+			cyc(24 + 24 + 30);
 			T.r[0] = (int16_t)T.r[5] < 0 ? (uint16_t)-T.r[5] : T.r[5];
 			if ((int16_t)T.r[0] < 0x10)
 			{
+				cyc(42);
 				if ((int16_t)peek(0x0234) > 0x20)
 				{
+					cyc(54);
 					poke(SX, peek(0x0230));
 					if ((int16_t)peek(SX) > 0)
 						do
 						{
+							cyc(39);
 							if (peek(L4))
 							{
+								cyc(96);
 								T.r[4] = (uint16_t)(T.r[3] - peek(0x0236));
 								shift(peek(T.r[4]), T.r[5]);
+								cyc(30);
 								hit = (T.r[0] & peek(T.r[2])) != 0;
 							}
 							else
 							{
+								cyc(60);
 								shift(peek(T.r[3]), T.r[5]);
+								cyc(66);
 								T.r[1] = T.r[0];
 								T.r[0] = (uint16_t)(T.r[2] - peek(0x0236));
 								hit = (T.r[1] & peek(T.r[0])) != 0;
 							}
-							if (hit) break;
+							cyc(12);                   // 59DE BEQ
+							if (hit)
+							{
+								cyc(12);
+								break;
+							}
+							cyc(78);
 							T.r[3] = (uint16_t)(T.r[3] - 2);
 							T.r[2] = (uint16_t)(T.r[2] - 2);
 							poke(SX, (uint16_t)(peek(SX) - 1));
@@ -1634,72 +2444,101 @@ void shapes_touch()
 				}
 				else
 				{
+					cyc(36);
 					T.r[4] = peek(0x0230);
 					if ((int16_t)T.r[4] > 0)
+					{
 						do
 						{
+							cyc(60);
 							shift(peek(T.r[3]), T.r[5]);
+							cyc(30);
 							hit = (T.r[0] & peek(T.r[2])) != 0;
 							if (hit) break;
+							cyc(54);
 							T.r[3] = (uint16_t)(T.r[3] - 2);
 							T.r[2] = (uint16_t)(T.r[2] - 2);
 						} while (--T.r[4]);
+						if (!hit) cyc(12);             // BR 5A02
+					}
 				}
 				if (!hit)
 				{
+					cyc(54);
 					T.r[3] = peek(OX);
 					T.r[2] = peek(L0);
 				}
 			}
 		}
-		if (!hit && (int16_t)peek(L2) > (int16_t)0xFFF0 && (int16_t)peek(0x0234) > 0x20)
+		if (!hit)
 		{
-			T.r[4] = peek(0x0230);
-			if ((int16_t)T.r[4] > 0)
-				do
+			cyc(45);
+			if ((int16_t)peek(L2) > (int16_t)0xFFF0)
+			{
+				cyc(42);
+				if ((int16_t)peek(0x0234) > 0x20)
 				{
-					shift(peek(T.r[3]), peek(L2));
-					hit = (T.r[0] & peek(T.r[2])) != 0;
-					if (hit) break;
-					T.r[3] = (uint16_t)(T.r[3] - 2);
-					T.r[2] = (uint16_t)(T.r[2] - 2);
-				} while (--T.r[4]);
+					cyc(36);
+					T.r[4] = peek(0x0230);
+					if ((int16_t)T.r[4] > 0)
+						do
+						{
+							cyc(75);
+							shift(peek(T.r[3]), peek(L2));
+							cyc(30);
+							hit = (T.r[0] & peek(T.r[2])) != 0;
+							if (hit) break;
+							cyc(54);
+							T.r[3] = (uint16_t)(T.r[3] - 2);
+							T.r[2] = (uint16_t)(T.r[2] - 2);
+						} while (--T.r[4]);
+				}
+			}
 		}
 	}
-	T.r[0] = hit ? 1 : 0;
+	if (hit)
+	{
+		cyc(30);                                       // MOV #1,R0; BR
+		T.r[0] = 1;
+	}
+	else
+	{
+		cyc(12);                                       // CLR R0
+		T.r[0] = 0;
+	}
 	T.r[6] = fl::add(T.r[6], 0x000C);
 }
 
 }
 
 LOGIC_TABLE(banka,
-	c_routine("A5", 0x438C, "step_map_column", step_map_column, 0, 428),
-	asm_routine("A5", 0x42BC, "step_map_row", step_map_row, 461),
-	asm_routine("A5", 0x41CE, "draw_map_strip", draw_map_strip, 369),
-	c_routine("A5", 0x4000, "init_map_view", init_map_view, 0, 4777),
-	asm_routine("A5", 0x48CC, "update_map_slots", update_map_slots, 357),
-	c_routine("A5", 0x5D08, "stop_effect_sound", stop_effect_sound, 0, 313),
-	c_routine("A5", 0x5B46, "rolling_sound", rolling_sound, 0, 416),
-	wait_routine("A5", 0x5BD2, "town_music", town_music, 420),
-	c_routine("A5", 0x4984, "draw_text_block_3x3", draw_text_block_3x3, 0, 3014),
-	c_routine("A5", 0x51EE, "slope_height", slope_height, 0, 645),
+	c_routine("A5", 0x438C, "step_map_column", step_map_column, 0, 0),
+	asm_routine("A5", 0x42BC, "step_map_row", step_map_row, 0),
+	asm_routine("A5", 0x41CE, "draw_map_strip", draw_map_strip, 0),
+	c_routine("A5", 0x4000, "init_map_view", init_map_view, 0, 111),
+	asm_routine("A5", 0x48CC, "update_map_slots", update_map_slots, 0),
+	c_routine("A5", 0x5D08, "stop_effect_sound", stop_effect_sound, 0, 0),
+	c_routine("A5", 0x5B46, "rolling_sound", rolling_sound, 0, 87),
+	wait_routine("A5", 0x5BD2, "town_music", town_music, 0),
+	c_routine("A5", 0x4984, "draw_text_block_3x3", draw_text_block_3x3, 0, 105),
+	c_routine("A5", 0x51EE, "slope_height", slope_height, 0, 69),
 	asm_routine("A7", 0x4098, "move_objects_0_3", move_objects_0_3, 3003),
 	c_routine("A7", 0x410C, "project_speed", project_speed, 0, 1140),
-	c_routine("A7", 0x4F98, "direction_from_object7", direction_from_object7, 0, 750),
-	c_routine("A7", 0x4ECC, "hold_object", hold_object, 0, 636),
-	c_routine("A7", 0x4D30, "message_box", message_box, 0, 2836),
-	asm_routine("A7", 0x4B84, "expire_messages", expire_messages, 188),
-	asm_routine("A7", 0x4C28, "show_next_message", show_next_message, 97),
-	c_routine("A7", 0x5A7E, "credit_messages", credit_messages, 0, 972),
-	c_routine("A7", 0x5018, "chaser_step", chaser_step, 0, 478),
-	c_routine("A7", 0x5248, "shop_purchase", shop_purchase, 0, 267),
-	c_routine("A7", 0x43C0, "insert_high_score", insert_high_score, 0, 645),
-	c_routine("A7", 0x5684, "find_collision", find_collision, 0, 1897),
-	asm_routine("A7", 0x50F8, "fallen_skater", fallen_skater, 79),
-	wait_c_routine("A7", 0x4B3E, "poll_sound_status", poll_sound_status, 267),
-	asm_routine("A5", 0x454A, "scan_zone_switches", scan_zone_switches, 375),
-	c_routine("A7", 0x538E, "terrain_event", terrain_event, 0, 132),
-	asm_routine("A7", 0x572A, "shapes_touch", shapes_touch, 3171),
+	c_routine("A7", 0x4F98, "direction_from_object7", direction_from_object7, 0, 87),
+	c_routine("A7", 0x4ECC, "hold_object", hold_object, 0, 0),
+	c_routine("A7", 0x4D30, "message_box", message_box, 0, 111),
+	asm_routine("A7", 0x4B84, "expire_messages", expire_messages, 0),
+	asm_routine("A7", 0x4C28, "show_next_message", show_next_message, 0),
+	c_routine("A7", 0x5A7E, "credit_messages", credit_messages, 0, 87),
+	c_routine("A7", 0x5018, "chaser_step", chaser_step, 0, 69),
+	c_routine("A7", 0x5248, "shop_purchase", shop_purchase, 0, 69),
+	c_routine("A7", 0x43C0, "insert_high_score", insert_high_score, 0, 111),
+	c_routine("A7", 0x5684, "find_collision", find_collision, 0, 0),
+	asm_routine("A7", 0x50F8, "fallen_skater", fallen_skater, 0),
+	wait_c_routine("A7", 0x4B3E, "poll_sound_status", poll_sound_status, 69),
+	asm_routine("A5", 0x454A, "scan_zone_switches", scan_zone_switches, 0),
+	c_routine("A7", 0x538E, "terrain_event", terrain_event, 0, 39),
+	asm_routine("A7", 0x572A, "shapes_touch", shapes_touch, 39),
 )
 
 }
