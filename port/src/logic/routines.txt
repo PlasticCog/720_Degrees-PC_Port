@@ -253,3 +253,5 @@ B6:713E selftest_playfield_screen
 B6:6B7E selftest_controls_screen
 B6:6CFC selftest_switches_screen
 B6:69B2 selftest_statistics_screen
+B3:6E92 end_of_park_screen
+B3:6A6E load_park
