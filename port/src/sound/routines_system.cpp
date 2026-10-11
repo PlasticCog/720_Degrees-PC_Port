@@ -1441,6 +1441,766 @@ void system_init()
 	rts();
 }
 
+// ---- the main CPU's commands (table 0x5ECA, run in the NMI; each ends at 44BD)
+
+// F703 (command 7, and after 6): the state to the main CPU: 0x66 | 0x67 (0xC0 becomes 0x80 after
+// it), the settings read again from the POKEYs' pots (0x49), the credits and coin units, 0x93,
+// 0x0D81
+void cmd_status()
+{
+	lda(imm(0x07), 0xF705);
+	sta(wab(0x180F), 0xF708);
+	sta(wab(0x183F), 0xF70B);
+	lda(zp(0x66), 0xF70D);
+	ora(zp(0x67), 0xF70F);
+	jsr(0xF70F, 0x44CD);                               // send_main
+	lda(zp(0x66), 0xF714);
+	cmp(imm(0xC0), 0xF716);
+	if (!bne(0xF716, 0xF71C))
+	{
+		lda(imm(0x80), 0xF71A);
+		sta(wzp(0x66), 0xF71C);
+	}
+	lda(imm(0x00), 0xF71E);
+	sta(wab(0x180B), 0xF721);
+	sta(wab(0x183B), 0xF724);
+	ldx(imm(0x02), 0xF726);
+	do
+		dex(0xF727);
+	while (bne(0xF727, 0xF726));
+	lda(ab(0x1838), 0xF72C);
+	sta(wzp(0x93), 0xF72E);
+	lda(ab(0x1808), 0xF731);
+	sta(wzp(0x49), 0xF733);
+	jsr(0xF733, 0x44CD);
+	lda(zp(0x48), 0xF738);
+	asl_a(0xF739);
+	asl_a(0xF73A);
+	eor(zp(0x4F), 0xF73C);
+	and_(imm(0xFC), 0xF73E);
+	eor(zp(0x4F), 0xF740);
+	jsr(0xF740, 0x44CD);
+	lda(zp(0x93), 0xF745);
+	jsr(0xF745, 0x44CD);
+	lda(ab(0x0D81), 0xF74B);
+	jsr(0xF74B, 0x44CD);
+	jmp(0x44BD);                                       // nmi_done
+}
+
+// F64E (command 6): a game starts (one byte: the players, bit 7 a continue) when the credits
+// 0x48 cover its price (0xF6F7 by the players and 0x93 bits 6-7; a continue 0xF6FF by 0x93
+// bits 6-7): the clocks cleared, 0x68 = 1, 0x66 = 0x80 (0xC0 for a continue, which counts the
+// continues (statistic 6) and the time histogram of the player's game); a game started after a
+// counted coin (0x86) takes one off statistic 8 and queues record 0; then F703
+void cmd_game_start()
+{
+	lda(imm(0x01), 0xF650);
+	jsr(0xF650, 0xFADE);                               // receive_data
+	lda(ab(0x0C00), 0xF656);
+	if (bmi(0xF656, 0xF6B4)) goto lF6B4;
+	sta(wzp(0x67), 0xF65A);
+	sta(wzp(0x5D), 0xF65C);
+	dec(mzp(0x5D), 0xF65E);
+	lda(zp(0x93), 0xF660);
+	and_(imm(0xC0), 0xF662);
+	asl_a(0xF663);
+	rol(mzp(0x5D), 0xF665);
+	asl_a(0xF666);
+	rol(mzp(0x5D), 0xF668);
+	ldy(zp(0x5D), 0xF66A);
+	lda(zp(0x48), 0xF66C);
+	sec(0xF66D);
+	sbc(aby(0xF6F7), 0xF670);
+	if (!bcs(0xF670, 0xF675))
+	{
+		jmp_to(0xF703);
+		cmd_status();
+		return;
+	}
+	sta(wzp(0x48), 0xF677);
+	lda(imm(0x00), 0xF679);
+	ldx(imm(0x10), 0xF67B);
+	do
+	{
+		sta(wzpx(0x6D), 0xF67D);
+		dex(0xF67E);
+	} while (bpl(0xF67E, 0xF67B));
+	sta(wzp(0x69), 0xF682);
+	sta(wzp(0x6A), 0xF684);
+	lda(imm(0x01), 0xF686);
+	sta(wzp(0x68), 0xF688);
+	lda(imm(0x80), 0xF68A);
+	sta(wzp(0x66), 0xF68C);
+lF68C:
+	lda(imm(0xFF), 0xF68E);
+	sta(wzp(0x85), 0xF690);
+	lda(zp(0x86), 0xF692);
+	if (!beq(0xF692, 0xF6B1))
+	{
+		ldy(imm(0x08), 0xF696);
+		lda(aby(0x0D6D), 0xF699);
+		sec(0xF69A);
+		sbc(imm(0x01), 0xF69C);
+		sta(waby(0x0D6D), 0xF69F);
+		if (!bcs(0xF69F, 0xF6AA))
+		{
+			iny(0xF6A2);
+			lda(aby(0x0D6D), 0xF6A5);
+			sbc(imm(0x00), 0xF6A7);
+			sta(waby(0x0D6D), 0xF6AA);
+		}
+		lda(imm(0x00), 0xF6AC);
+		sta(wzp(0x86), 0xF6AE);
+		jsr(0xF6AE, 0xF4E9);                           // eeprom_queue
+	}
+lF6B1:
+	jmp_to(0xF703);
+	cmd_status();
+	return;
+
+lF6B4:
+	// a continue
+	lda(zp(0x93), 0xF6B6);
+	for (uint16_t pc = 0xF6B7; pc <= 0xF6BC; pc++) lsr_a(pc);
+	tay(0xF6BD);
+	lda(zp(0x48), 0xF6BF);
+	sec(0xF6C0);
+	sbc(aby(0xF6FF), 0xF6C3);
+	if (bcc(0xF6C3, 0xF6B1)) goto lF6B1;
+	sta(wzp(0x48), 0xF6C7);
+	lda(imm(0xC0), 0xF6C9);
+	sta(wzp(0x66), 0xF6CB);
+	ldy(imm(0x06), 0xF6CD);
+	jsr(0xF6CD, 0xFB2A);                               // stat_inc
+	lda(imm(0xFF), 0xF6D2);
+	sta(wzp(0x86), 0xF6D4);
+	ldx(zp(0x68), 0xF6D6);
+	dex(0xF6D7);
+	lda(zpx(0x69), 0xF6D9);
+	if (beq(0xF6D9, 0xF6DF))
+		ldy(imm(0x1E), 0xF6E1);
+	else
+	{
+		ldy(imm(0x46), 0xF6DD);
+		bne(0xF6DD, 0xF6E1);                           // BNE (always)
+	}
+	txa(0xF6E2);
+	pha(0xF6E3);
+	ora(imm(0x04), 0xF6E5);
+	jsr(0xF6E5, 0xFC54);                               // time_histogram
+	lda(imm(0x00), 0xF6EA);
+	sta(wzpx(0x6D), 0xF6EC);
+	sta(wzpx(0x6F), 0xF6EE);
+	pla(0xF6EF);
+	tax(0xF6F0);
+	lda(imm(0xFF), 0xF6F2);
+	sta(wzpx(0x69), 0xF6F4);
+	jmp_to(0xF68C);
+	goto lF68C;
+}
+
+// F751 (command 0x17): one byte into 0x0D81 (record 2), queued for the EEPROM
+void cmd_set_option()
+{
+	lda(imm(0x01), 0xF753);
+	jsr(0xF753, 0xFADE);                               // receive_data
+	lda(ab(0x0C00), 0xF759);
+	sta(wab(0x0D81), 0xF75C);
+	lda(imm(0x02), 0xF75E);
+	jsr(0xF75E, 0xF4E9);                               // eeprom_queue
+	jmp(0x44BD);                                       // nmi_done
+}
+
+// F764 (command 0x13): the counters' moves since last time (0x94 / 0x98 less 0x9C / 0xA0, the
+// second then the first) to the main CPU
+void cmd_counter_moves()
+{
+	ldx(imm(0x01), 0xF766);
+	do
+	{
+		sec(0xF767);
+		lda(zpx(0x94), 0xF769);
+		sbc(zpx(0x9C), 0xF76B);
+		php(0xF76C);
+		jsr(0xF76C, 0x44CD);                           // send_main
+		plp(0xF770);
+		lda(zpx(0x98), 0xF772);
+		sbc(zpx(0xA0), 0xF774);
+		jsr(0xF774, 0x44CD);
+		lda(zpx(0x94), 0xF779);
+		sta(wzpx(0x9C), 0xF77B);
+		lda(zpx(0x98), 0xF77D);
+		sta(wzpx(0xA0), 0xF77F);
+		dex(0xF780);
+	} while (bpl(0xF780, 0xF766));
+	jmp(0x44BD);                                       // nmi_done
+}
+
+// F785 (command 0x15): the mixer 0x187C from one byte (bits 2-4, the rest from 0x33, bits 2-3
+// inverted)
+void cmd_mixer()
+{
+	lda(imm(0x01), 0xF787);
+	jsr(0xF787, 0xFADE);                               // receive_data
+	lda(ab(0x0C00), 0xF78D);
+	eor(zp(0x33), 0xF78F);
+	and_(imm(0x1C), 0xF791);
+	eor(zp(0x33), 0xF793);
+	eor(imm(0x0C), 0xF795);
+	sta(wab(0x187C), 0xF798);
+	jmp(0x44BD);                                       // nmi_done
+}
+
+// F79B (command 0x0A): a game over (two bytes): its statistics (FB01), 0x66-0x68 cleared
+void cmd_game_over()
+{
+	lda(imm(0x02), 0xF79D);
+	jsr(0xF79D, 0xFADE);                               // receive_data
+	jsr(0xF7A0, 0xFB01);                               // end_of_game
+	lda(imm(0x00), 0xF7A5);
+	sta(wzp(0x66), 0xF7A7);
+	sta(wzp(0x67), 0xF7A9);
+	sta(wzp(0x68), 0xF7AB);
+	jmp(0x44BD);                                       // nmi_done
+}
+
+// F7AE (command 9): 0x26 to the main CPU
+void cmd_send_26()
+{
+	lda(zp(0x26), 0xF7B0);
+	jsr(0xF7B0, 0x44CD);                               // send_main
+	jmp(0x44BD);                                       // nmi_done
+}
+
+// F7B6 (command 0x14): two of the POKEY's random numbers (0x180A) to the main CPU
+void cmd_random()
+{
+	ldx(imm(0x01), 0xF7B8);
+	do
+	{
+		lda(ab(0x180A), 0xF7BB);
+		jsr(0xF7BB, 0x44CD);                           // send_main
+		dex(0xF7BF);
+	} while (bpl(0xF7BF, 0xF7B8));
+	jmp(0x44BD);                                       // nmi_done
+}
+
+// F7C4 (command 0x16): statistic 0x42 (byte 0) or 0x44 (otherwise) one up and queued
+void cmd_count()
+{
+	lda(imm(0x01), 0xF7C6);
+	jsr(0xF7C6, 0xFADE);                               // receive_data
+	lda(ab(0x0C00), 0xF7CC);
+	if (!beq(0xF7CC, 0xF7D0)) lda(imm(0x02), 0xF7D0);
+	clc(0xF7D1);
+	adc(imm(0x42), 0xF7D3);
+	tay(0xF7D4);
+	jsr(0xF7D4, 0xFB2A);                               // stat_inc
+	jsr(0xF7D7, 0xFB3E);                               // stat_queue
+	jmp(0x44BD);                                       // nmi_done
+}
+
+// 0x68 (the players' clocks that run) from byte 0 (bits 0-1, at least 1) (LDA $0C00 at F816)
+void set_players()
+{
+	lda(ab(0x0C00), 0xF819);
+	and_(imm(0x03), 0xF81B);
+	if (!bne(0xF81B, 0xF81F)) lda(imm(0x01), 0xF81F);
+	sta(wzp(0x68), 0xF821);
+	jmp(0x44BD);                                       // nmi_done
+}
+
+// F811 (command 8): the players' clocks (one byte)
+void cmd_players()
+{
+	lda(imm(0x01), 0xF813);
+	jsr(0xF813, 0xFADE);                               // receive_data
+	set_players();
+}
+
+// F7DD (command 0x0F): three bytes: statistic 0x16 one up and record 2 queued; byte 1 adds
+// credits (bits 2-7) and coin units (bits 0-1), byte 2 sets 0x67 (bits 0-1) and 0x66 (bits
+// 6-7), byte 0 the players' clocks
+void cmd_resume()
+{
+	lda(imm(0x03), 0xF7DF);
+	jsr(0xF7DF, 0xFADE);                               // receive_data
+	ldy(imm(0x16), 0xF7E4);
+	jsr(0xF7E4, 0xFB2A);                               // stat_inc
+	lda(imm(0x02), 0xF7E9);
+	jsr(0xF7E9, 0xF4E9);                               // eeprom_queue
+	lda(ab(0x0C01), 0xF7EF);
+	lsr_a(0xF7F0);
+	lsr_a(0xF7F1);
+	clc(0xF7F2);
+	adc(zp(0x48), 0xF7F4);
+	sta(wzp(0x48), 0xF7F6);
+	lda(ab(0x0C01), 0xF7F9);
+	and_(imm(0x03), 0xF7FB);
+	clc(0xF7FC);
+	adc(zp(0x4F), 0xF7FE);
+	sta(wzp(0x4F), 0xF800);
+	lda(ab(0x0C02), 0xF803);
+	and_(imm(0x03), 0xF805);
+	sta(wzp(0x67), 0xF807);
+	lda(ab(0x0C02), 0xF80A);
+	and_(imm(0xC0), 0xF80C);
+	sta(wzp(0x66), 0xF80E);
+	jmp_to(0xF816);
+	set_players();
+}
+
+// F824 (command 0x0E): the byte at the address in two bytes to the main CPU
+void cmd_peek()
+{
+	lda(imm(0x02), 0xF826);
+	jsr(0xF826, 0xFADE);                               // receive_data
+	lda(ab(0x0C00), 0xF82C);
+	sta(wzp(0x5C), 0xF82E);
+	lda(ab(0x0C01), 0xF831);
+	sta(wzp(0x5D), 0xF833);
+	ldy(imm(0x00), 0xF835);
+	lda(iy(0x5C), 0xF837);
+	jsr(0xF837, 0x44CD);                               // send_main
+	jmp(0x44BD);                                       // nmi_done
+}
+
+// a pass over the score entries at base (size bytes apart, compared on their first n bytes)
+// from entry Y down to entry 0x5F: 0x5C = the offset of the highest (else the lowest) of them
+// and the one at 0x5C before (LDX $5C at pc; the end tested with CMP $5F or CMP #0)
+void best_entry(uint16_t pc, uint16_t base, int n, uint8_t size, bool highest, bool cmp_zp)
+{
+	const uint16_t c = (uint16_t)(pc + 4 + 0x0A * (n - 1) + 6);
+	do
+	{
+		ldx(zp(0x5C), (uint16_t)(pc + 2));
+		sty(wzp(0x5D), (uint16_t)(pc + 4));
+		uint16_t a = (uint16_t)(pc + 4);
+		for (int k = 0;; k++)
+		{
+			lda(highest ? abx(base) : aby(base), (uint16_t)(a + 3));
+			cmp(highest ? aby(base) : abx(base), (uint16_t)(a + 6));
+			if (k == n - 1 || bne((uint16_t)(a + 6), c)) break;
+			inx((uint16_t)(a + 9));
+			iny((uint16_t)(a + 0x0A));
+			a = (uint16_t)(a + 0x0A);
+		}
+		if (!bcs(c, (uint16_t)(c + 6)))
+		{
+			lda(zp(0x5D), (uint16_t)(c + 4));
+			sta(wzp(0x5C), (uint16_t)(c + 6));
+		}
+		lda(zp(0x5D), (uint16_t)(c + 8));
+		sec((uint16_t)(c + 9));
+		sbc(imm(size), (uint16_t)(c + 0x0B));
+		tay((uint16_t)(c + 0x0C));
+		if (cmp_zp)
+			cmp(zp(0x5F), (uint16_t)(c + 0x0E));
+		else
+			cmp(imm(0x00), (uint16_t)(c + 0x0E));
+	} while (bne((uint16_t)(c + 0x0E), pc));
+}
+
+// with 0x0D76 = 0 and 0x0D75 at most 0xC8: 0x0D75 = 0xC8 and record 1 queued (LDA $0D76 at pc)
+void high_score_seen(uint16_t pc, uint16_t skip)
+{
+	lda(ab(0x0D76), (uint16_t)(pc + 3));
+	if (bne((uint16_t)(pc + 3), skip)) return;
+	lda(imm(0xC8), (uint16_t)(pc + 7));
+	cmp(ab(0x0D75), (uint16_t)(pc + 0x0A));
+	if (bcc((uint16_t)(pc + 0x0A), skip)) return;
+	sta(wab(0x0D75), (uint16_t)(pc + 0x0F));
+	lda(imm(0x01), (uint16_t)(pc + 0x11));
+	jsr((uint16_t)(pc + 0x11), 0xF4E9);                // eeprom_queue
+}
+
+// F83D (command 0x0B): a score of the first table (six bytes: three of score, three letters)
+// takes the place of the table's lowest (20 entries of 5 bytes at 0x0C48) if not below it
+void cmd_high_score()
+{
+	lda(imm(0x06), 0xF83F);
+	jsr(0xF83F, 0xFADE);                               // receive_data
+	lda(imm(0x00), 0xF844);
+	sta(wzp(0x5C), 0xF846);
+	ldy(imm(0x5F), 0xF848);
+	best_entry(0xF848, 0x0C48, 3, 5, false, false);
+	ldx(zp(0x5C), 0xF878);
+	lda(ab(0x0C00), 0xF87B);
+	cmp(abx(0x0C48), 0xF87E);
+	if (!bne(0xF87E, 0xF890))
+	{
+		inx(0xF881);
+		lda(ab(0x0C01), 0xF884);
+		cmp(abx(0x0C48), 0xF887);
+		if (!bne(0xF887, 0xF890))
+		{
+			inx(0xF88A);
+			lda(ab(0x0C02), 0xF88D);
+			cmp(abx(0x0C48), 0xF890);
+		}
+	}
+	if (!bcc(0xF890, 0xF8DE))
+	{
+		high_score_seen(0xF892, 0xF8A6);
+		// the letters packed into two bytes
+		lda(ab(0x0C03), 0xF8A9);
+		jsr(0xF8A9, 0xFAC6);                           // letter_code
+		sta(wab(0x0C03), 0xF8AF);
+		lda(ab(0x0C04), 0xF8B2);
+		jsr(0xF8B2, 0xFAC6);
+		for (uint16_t pc = 0xF8B6; pc <= 0xF8B9; pc++) asl_a(pc);
+		rol(mab(0x0C03), 0xF8BC);
+		asl_a(0xF8BD);
+		rol(mab(0x0C03), 0xF8C0);
+		sta(wab(0x0C04), 0xF8C3);
+		lda(ab(0x0C05), 0xF8C6);
+		jsr(0xF8C6, 0xFAC6);
+		ora(ab(0x0C04), 0xF8CC);
+		sta(wab(0x0C04), 0xF8CF);
+		ldx(imm(0x00), 0xF8D1);
+		ldy(zp(0x5C), 0xF8D3);
+		do
+		{
+			lda(abx(0x0C00), 0xF8D6);
+			jsr(0xF8D6, 0xFC7E);                       // score_store
+			inx(0xF8DA);
+			cpx(imm(0x05), 0xF8DC);
+		} while (bne(0xF8DC, 0xF8D3));
+	}
+	jmp(0x44BD);                                       // nmi_done
+}
+
+// F8E1 (command 0x0C): an entry of the second table (five bytes: a 16-bit value, shifted down
+// one, and three letters) takes the place of the table's lowest (20 entries of 3 bytes at
+// 0x0CAC) if not below it
+void cmd_high_score2()
+{
+	lda(imm(0x05), 0xF8E3);
+	jsr(0xF8E3, 0xFADE);                               // receive_data
+	lsr(mab(0x0C01), 0xF8E9);
+	ror(mab(0x0C00), 0xF8EC);
+	ror(mab(0x0C01), 0xF8EF);
+	lda(imm(0x00), 0xF8F1);
+	sta(wzp(0x5C), 0xF8F3);
+	ldy(imm(0x39), 0xF8F5);
+	best_entry(0xF8F5, 0x0CAC, 2, 3, false, false);
+	ldx(zp(0x5C), 0xF91B);
+	lda(ab(0x0C00), 0xF91E);
+	cmp(abx(0x0CAC), 0xF921);
+	if (!bne(0xF921, 0xF92C))
+	{
+		inx(0xF924);
+		lda(ab(0x0C01), 0xF927);
+		ora(imm(0x7F), 0xF929);
+		cmp(abx(0x0CAC), 0xF92C);
+	}
+	if (!bcc(0xF92C, 0xF98B))
+	{
+		high_score_seen(0xF92E, 0xF942);
+		lda(ab(0x0C01), 0xF945);
+		and_(imm(0x80), 0xF947);
+		lsr_a(0xF948);
+		lsr_a(0xF949);
+		sta(wab(0x0C01), 0xF94C);
+		lda(ab(0x0C02), 0xF94F);
+		jsr(0xF94F, 0xFAC6);                           // letter_code
+		ora(ab(0x0C01), 0xF955);
+		sta(wab(0x0C01), 0xF958);
+		lda(ab(0x0C03), 0xF95B);
+		jsr(0xF95B, 0xFAC6);
+		for (uint16_t pc = 0xF95F; pc <= 0xF962; pc++) asl_a(pc);
+		rol(mab(0x0C01), 0xF965);
+		asl_a(0xF966);
+		rol(mab(0x0C01), 0xF969);
+		sta(wab(0x0C02), 0xF96C);
+		lda(ab(0x0C04), 0xF96F);
+		jsr(0xF96F, 0xFAC6);
+		ora(ab(0x0C02), 0xF975);
+		sta(wab(0x0C02), 0xF978);
+		ldx(imm(0x00), 0xF97A);
+		lda(zp(0x5C), 0xF97C);
+		clc(0xF97D);
+		adc(imm(0x64), 0xF97F);
+		tay(0xF980);
+		do
+		{
+			lda(abx(0x0C00), 0xF983);
+			jsr(0xF983, 0xFC7E);                       // score_store
+			inx(0xF987);
+			cpx(imm(0x03), 0xF989);
+		} while (bne(0xF989, 0xF980));
+	}
+	jmp(0x44BD);                                       // nmi_done
+}
+
+// the letters of an entry at 0x0C00 back from their codes (FAD2): the code bytes at high /
+// low (high bits 0-1 and low bits 5-7 the second) into the bytes at out + 2, out + 1 and out
+// (LDA low at pc)
+void unpack_letters(uint16_t pc, uint16_t low, uint16_t high, uint16_t out)
+{
+	lda(ab(low), (uint16_t)(pc + 3));
+	jsr((uint16_t)(pc + 3), 0xFAD2);                   // code_letter
+	sta(wab((uint16_t)(out + 2)), (uint16_t)(pc + 9));
+	lda(ab(low), (uint16_t)(pc + 0x0C));
+	lsr(mab(high), (uint16_t)(pc + 0x0F));
+	ror_a((uint16_t)(pc + 0x10));
+	lsr(mab(high), (uint16_t)(pc + 0x13));
+	ror_a((uint16_t)(pc + 0x14));
+	for (uint16_t a = (uint16_t)(pc + 0x15); a <= (uint16_t)(pc + 0x17); a++) lsr_a(a);
+	jsr((uint16_t)(pc + 0x17), 0xFAD2);
+	sta(wab((uint16_t)(out + 1)), (uint16_t)(pc + 0x1D));
+	lda(ab(high), (uint16_t)(pc + 0x20));
+	jsr((uint16_t)(pc + 0x20), 0xFAD2);
+	sta(wab(out), (uint16_t)(pc + 0x26));
+}
+
+// F98E (command 0x0D): both score tables to the main CPU, highest first, from a copy at 0x0CE8:
+// the first's 20 entries as three score bytes and three letters, the second's as two bytes and
+// three letters
+void cmd_send_scores()
+{
+	ldy(imm(0x64), 0xF990);
+	do
+	{
+		lda(aby(0x0C47), 0xF993);
+		sta(waby(0x0CE7), 0xF996);
+		dey(0xF997);
+	} while (bne(0xF997, 0xF990));
+	lda(imm(0x00), 0xF99B);
+	sta(wzp(0x5F), 0xF99D);
+	lda(imm(0x14), 0xF99F);
+	sta(wzp(0x5E), 0xF9A1);
+	for (;;)
+	{
+		lda(zp(0x5F), 0xF9A3);
+		sta(wzp(0x5C), 0xF9A5);
+		clc(0xF9A6);
+		adc(imm(0x5F), 0xF9A8);
+		tay(0xF9A9);
+		best_entry(0xF9A9, 0x0CE8, 3, 5, true, true);
+		ldy(zp(0x5C), 0xF9D9);
+		ldx(imm(0x00), 0xF9DB);
+		do
+		{
+			lda(aby(0x0CE8), 0xF9DE);
+			sta(wabx(0x0C00), 0xF9E1);
+			lda(imm(0x00), 0xF9E3);
+			sta(waby(0x0CE8), 0xF9E6);
+			iny(0xF9E7);
+			inx(0xF9E8);
+			cpx(imm(0x05), 0xF9EA);
+		} while (bne(0xF9EA, 0xF9DB));
+		unpack_letters(0xF9EC, 0x0C04, 0x0C03, 0x0C03);
+		ldx(imm(0x00), 0xFA14);
+		do
+		{
+			lda(abx(0x0C00), 0xFA17);
+			jsr(0xFA17, 0x44CD);                       // send_main
+			inx(0xFA1B);
+			cpx(imm(0x06), 0xFA1D);
+		} while (bne(0xFA1D, 0xFA14));
+		dec(mzp(0x5E), 0xFA21);
+		if (beq(0xFA21, 0xFA26)) break;
+		jmp_to(0xF9A1);
+	}
+	ldy(imm(0x3C), 0xFA28);
+	do
+	{
+		lda(aby(0x0CAB), 0xFA2B);
+		sta(waby(0x0CE7), 0xFA2E);
+		dey(0xFA2F);
+	} while (bne(0xFA2F, 0xFA28));
+	lda(imm(0x00), 0xFA33);
+	sta(wzp(0x5F), 0xFA35);
+	lda(imm(0x14), 0xFA37);
+	sta(wzp(0x5E), 0xFA39);
+	for (;;)
+	{
+		lda(zp(0x5F), 0xFA3B);
+		sta(wzp(0x5C), 0xFA3D);
+		clc(0xFA3E);
+		adc(imm(0x39), 0xFA40);
+		tay(0xFA41);
+		best_entry(0xFA41, 0x0CE8, 2, 3, true, true);
+		ldy(zp(0x5C), 0xFA67);
+		ldx(imm(0x00), 0xFA69);
+		do
+		{
+			lda(aby(0x0CE8), 0xFA6C);
+			sta(wabx(0x0C00), 0xFA6F);
+			lda(imm(0x00), 0xFA71);
+			sta(waby(0x0CE8), 0xFA74);
+			iny(0xFA75);
+			inx(0xFA76);
+			cpx(imm(0x03), 0xFA78);
+		} while (bne(0xFA78, 0xFA69));
+		unpack_letters(0xFA7A, 0x0C02, 0x0C01, 0x0C02);
+		lda(ab(0x0C01), 0xFAA3);
+		asl_a(0xFAA4);
+		asl_a(0xFAA5);
+		and_(imm(0x80), 0xFAA7);
+		asl_a(0xFAA8);
+		rol(mab(0x0C00), 0xFAAB);
+		rol_a(0xFAAC);
+		sta(wab(0x0C01), 0xFAAF);
+		ldx(imm(0x00), 0xFAB1);
+		do
+		{
+			lda(abx(0x0C00), 0xFAB4);
+			jsr(0xFAB4, 0x44CD);                       // send_main
+			inx(0xFAB8);
+			cpx(imm(0x05), 0xFABA);
+		} while (bne(0xFABA, 0xFAB1));
+		dec(mzp(0x5E), 0xFABE);
+		if (beq(0xFABE, 0xFAC3)) break;
+		jmp_to(0xFA39);
+	}
+	jmp(0x44BD);                                       // nmi_done
+}
+
+// FC9A (command 0x10): the play times to the main CPU: the statistics 2-7 and 0x0A-0x0D, the
+// times at 0x11 (then the power-on time), 0x18 and 0x1B
+void cmd_send_times()
+{
+	ldy(imm(0x00), 0xFC9C);
+	do
+	{
+		lda(aby(0x0D6F), 0xFC9F);
+		jsr(0xFC9F, 0x44CD);                           // send_main
+		iny(0xFCA3);
+		cpy(imm(0x06), 0xFCA5);
+	} while (bne(0xFCA5, 0xFC9C));
+	ldy(imm(0x00), 0xFCA9);
+	do
+	{
+		lda(aby(0x0D77), 0xFCAC);
+		jsr(0xFCAC, 0x44CD);
+		iny(0xFCB0);
+		cpy(imm(0x04), 0xFCB2);
+	} while (bne(0xFCB2, 0xFCA9));
+	ldy(imm(0x11), 0xFCB6);
+	ldx(imm(0x04), 0xFCB8);
+	jsr(0xFCB8, 0xFB5B);                               // time_unpack
+	jsr(0xFCBB, 0xFBBE);                               // send_time
+	ldx(imm(0x00), 0xFCC0);
+	jsr(0xFCC0, 0xFBBE);
+	ldy(imm(0x18), 0xFCC5);
+	ldx(imm(0x04), 0xFCC7);
+	jsr(0xFCC7, 0xFB5B);
+	jsr(0xFCCA, 0xFBBE);
+	ldy(imm(0x1B), 0xFCCF);
+	ldx(imm(0x04), 0xFCD1);
+	jsr(0xFCD1, 0xFB5B);
+	jsr(0xFCD4, 0xFBBE);
+	jmp(0x44BD);                                       // nmi_done
+}
+
+// FCDA (command 0x11): the statistics from 0x14 on (0x0D81-0x0DDA) to the main CPU
+void cmd_send_stats()
+{
+	ldy(imm(0x14), 0xFCDC);
+	do
+	{
+		lda(aby(0x0D6D), 0xFCDF);
+		jsr(0xFCDF, 0x44CD);                           // send_main
+		iny(0xFCE3);
+		cpy(imm(0x6E), 0xFCE5);
+	} while (bne(0xFCE5, 0xFCDC));
+	jmp(0x44BD);                                       // nmi_done
+}
+
+// FCEA (command 0x12): one byte: bit 0 the default scores (FD7F); bits 1-2 the statistics
+// cleared (all but 8-9 and 0x14) and written to the EEPROM with every slot's sequence started
+// again, the slots past the records erased
+void cmd_clear()
+{
+	lda(imm(0x01), 0xFCEC);
+	jsr(0xFCEC, 0xFADE);                               // receive_data
+	lsr(mab(0x0C00), 0xFCF2);
+	if (!bcc(0xFCF2, 0xFCF7)) jsr(0xFCF4, 0xFD7F);    // default_scores
+	lda(ab(0x0C00), 0xFCFA);
+	and_(imm(0x03), 0xFCFC);
+	if (!beq(0xFCFC, 0xFD7C))
+	{
+		ldx(imm(0x00), 0xFD00);
+		txa(0xFD01);
+		do
+		{
+			sta(wabx(0x0D6D), 0xFD04);
+			sta(wabx(0x0DF7), 0xFD07);
+			inx(0xFD08);
+			cpx(imm(0x08), 0xFD0A);
+		} while (bne(0xFD0A, 0xFD01));
+		lda(abx(0x0D6D), 0xFD0F);
+		sta(wabx(0x0DF7), 0xFD12);
+		inx(0xFD13);
+		lda(abx(0x0D6D), 0xFD16);
+		sta(wabx(0x0DF7), 0xFD19);
+		inx(0xFD1A);
+		lda(imm(0x00), 0xFD1C);
+		do
+		{
+			sta(wabx(0x0D6D), 0xFD1F);
+			sta(wabx(0x0DF7), 0xFD22);
+			inx(0xFD23);
+			cpx(imm(0x14), 0xFD25);
+		} while (bne(0xFD25, 0xFD1C));
+		lda(abx(0x0D6D), 0xFD2A);
+		sta(wabx(0x0DF7), 0xFD2D);
+		inx(0xFD2E);
+		lda(imm(0x00), 0xFD30);
+		do
+		{
+			sta(wabx(0x0D6D), 0xFD33);
+			sta(wabx(0x0DF7), 0xFD36);
+			inx(0xFD37);
+			cpx(imm(0x6E), 0xFD39);
+		} while (bne(0xFD39, 0xFD30));
+		ldx(imm(0x00), 0xFD3D);
+		do
+		{
+			lda(imm(0xFF), 0xFD3F);
+			sta(wabx(0x0D62), 0xFD42);
+			stx(wzp(0x8F), 0xFD44);
+			jsr(0xFD44, 0xF303);                       // eeprom_encode
+			lda(zp(0x8F), 0xFD49);
+			jsr(0xFD49, 0xF490);                       // ptr_1000
+			ldx(zp(0x8F), 0xFD4E);
+			ldy(imm(0x00), 0xFD50);
+			do
+			{
+				lda(aby(0x0DDB), 0xFD53);
+				sta(wiy(0x8D), 0xFD55);
+				jsr(0xFD55, 0xFE28);                   // delay
+				iny(0xFD59);
+				cpy(imm(0x10), 0xFD5B);
+			} while (bne(0xFD5B, 0xFD50));
+			inx(0xFD5E);
+			cpx(imm(0x0B), 0xFD60);
+		} while (bne(0xFD60, 0xFD3D));
+		do
+		{
+			txa(0xFD63);
+			pha(0xFD64);
+			jsr(0xFD64, 0xF490);                       // ptr_1000
+			pla(0xFD68);
+			tax(0xFD69);
+			ldy(imm(0x00), 0xFD6B);
+			do
+			{
+				lda(imm(0xFF), 0xFD6D);
+				sta(wiy(0x8D), 0xFD6F);
+				jsr(0xFD6F, 0xFE28);                   // delay
+				iny(0xFD73);
+				cpy(imm(0x10), 0xFD75);
+			} while (bne(0xFD75, 0xFD6B));
+			inx(0xFD78);
+			cpx(imm(0x16), 0xFD7A);
+		} while (bne(0xFD7A, 0xFD62));
+	}
+	jmp(0x44BD);                                       // nmi_done
+}
+
 // F14D (from the IRQ): the clocks, the coins, the EEPROM and the counter inputs; carry clear
 void irq_system()
 {
@@ -1469,6 +2229,21 @@ SOUND_TABLE(system,
 	routine(0xF4E9, "eeprom_queue", eeprom_queue),
 	routine(0xF53B, "counter_inputs", counter_inputs),
 	routine(0xF568, "system_init", system_init),
+	routine(0xF64E, "cmd_game_start", cmd_game_start, NMI_END),
+	routine(0xF703, "cmd_status", cmd_status, NMI_END),
+	routine(0xF751, "cmd_set_option", cmd_set_option, NMI_END),
+	routine(0xF764, "cmd_counter_moves", cmd_counter_moves, NMI_END),
+	routine(0xF785, "cmd_mixer", cmd_mixer, NMI_END),
+	routine(0xF79B, "cmd_game_over", cmd_game_over, NMI_END),
+	routine(0xF7AE, "cmd_send_26", cmd_send_26, NMI_END),
+	routine(0xF7B6, "cmd_random", cmd_random, NMI_END),
+	routine(0xF7C4, "cmd_count", cmd_count, NMI_END),
+	routine(0xF7DD, "cmd_resume", cmd_resume, NMI_END),
+	routine(0xF811, "cmd_players", cmd_players, NMI_END),
+	routine(0xF824, "cmd_peek", cmd_peek, NMI_END),
+	routine(0xF83D, "cmd_high_score", cmd_high_score, NMI_END),
+	routine(0xF8E1, "cmd_high_score2", cmd_high_score2, NMI_END),
+	routine(0xF98E, "cmd_send_scores", cmd_send_scores, NMI_END),
 	routine(0xFAC6, "letter_code", letter_code),
 	routine(0xFAD2, "code_letter", code_letter),
 	routine(0xFADE, "receive_data", receive_data),
@@ -1482,6 +2257,9 @@ SOUND_TABLE(system,
 	routine(0xFBFF, "player_times", player_times),
 	routine(0xFC54, "time_histogram", time_histogram),
 	routine(0xFC7E, "score_store", score_store),
+	routine(0xFC9A, "cmd_send_times", cmd_send_times, NMI_END),
+	routine(0xFCDA, "cmd_send_stats", cmd_send_stats, NMI_END),
+	routine(0xFCEA, "cmd_clear", cmd_clear, NMI_END),
 	routine(0xFD7F, "default_scores", default_scores),
 )
 
