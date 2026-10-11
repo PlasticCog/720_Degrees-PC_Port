@@ -49,7 +49,11 @@ void restore_banks(uint16_t a, uint16_t b)
 void hw_banks(uint16_t a, uint16_t b) { poke(0x1400, a); poke(0x1402, b); }
 
 // JSR PC,@#addr from the original's call site (ret = the address after it): like logic::call,
-// but the return address on the stack is the original's (the translated JSR does the same)
+// but the return address on the stack is the original's (the translated JSR does the same).
+//
+// Long loops let interrupts in once per pass (tick, with the cycles the original's pass
+// costs, at the original's loop address); the stack pointer and registers are the original's
+// there, as an interrupt saves its frame below the stack pointer.
 uint16_t jsr(uint16_t addr, uint16_t ret)
 {
 	push(ret);
@@ -62,6 +66,8 @@ uint16_t jsr(uint16_t addr, uint16_t ret)
 		fprintf(stderr, "logic: call of %04X from %04X did not return (PC=%04X)\n", addr, (uint16_t)(ret - 4), T.r[7]);
 		fatal_unknown_pc(T.r[7]);
 	}
+	// the instruction after the JSR: interrupts may come in here
+	if (!sync(ret)) throw Unwound{};
 	return T.r[0];
 }
 
@@ -283,19 +289,24 @@ void update_chains_b()
 void build_sprite_pieces()
 {
 	const uint16_t list = sext8(peekb(0x0993));
-	const uint16_t sp = (uint16_t)(T.r[6] - 2);         // the list is kept on the stack
-	ww(sp, list);
+	push(list);                                         // the list is kept on the stack
+	const uint16_t sp = T.r[6];
 	T.r[1] = list;
 	T.r[0] = sext8(peekb((uint16_t)(0x0988 + list)));
 	poke(0x0FEE, T.r[0]);
 	uint16_t link = T.r[0];
 	while ((int16_t)link >= 0)
 	{
+		// cycles of this object's pass at B1FA, except the piece loops (they tick themselves)
+		int cycles = 12 + 138;                          // BGE, B200-B214
 		T.r[3] = peek(0x0FEE) & 0x001F;
 		T.r[2] = peekb((uint16_t)(0x0490 + T.r[3]));
 		T.r[5] = list;
-		if (!(peekb((uint16_t)(0xFD80 + list)) & T.r[2]))
+		if (peekb((uint16_t)(0xFD80 + list)) & T.r[2])
+			cycles += 18;                               // JMP B362
+		else
 		{
+			cycles += 267;                              // B21A-B23E
 			ww((uint16_t)(sp - 2), (uint16_t)(list + 0xFD7E));
 			T.r[5] = (uint16_t)~peekb((uint16_t)(0xFD7E + list));
 			T.r[2] &= (uint16_t)~T.r[5];
@@ -305,6 +316,7 @@ void build_sprite_pieces()
 			T.r[5] = (uint16_t)(T.r[3] << 1);
 			if (T.r[2])
 			{
+				cycles += 660;                          // B244-B2A8
 				const uint16_t w = T.r[5];
 				pokeb((uint16_t)(0x0490 + T.r[3]), (uint8_t)(peekb((uint16_t)(0x0490 + T.r[3])) & ~T.r[2]));
 				hw_banks(0, 0x0400);
@@ -331,32 +343,44 @@ void build_sprite_pieces()
 				poke(0x0FF8, peek(0x0FF4));
 				if ((int16_t)peek(0x0FF6) < 0)
 				{
+					cycles += 153;                      // B2AA-B2BA
 					next_row();
 					poke(0x0FF8, (uint16_t)(peek(0x0FF8) + peek(0x0FF4)));
 				}
+				cycles += 99;                           // B2C0-B2CE
 				pokeb(0x0FFB, peekb((uint16_t)(0x0470 + T.r[3])));
 				T.r[4] = (uint16_t)(T.r[4] + 0x3800);
 				poke(0x0FF0, 0);
 				T.r[2] = 0;
 				for (;;)
 				{
+					int pass = 36;                      // B2D0-B2D4
 					if ((int16_t)peek(0x0FF0) < 0)
 					{
+						pass += 57;                     // B32A-B32E
 						poke((uint16_t)(T.r[4] + 2), 0);
 						T.r[2] = peek((uint16_t)(T.r[4] + 6));
 					}
 					else
 					{
+						pass += 36;                     // B2D6-B2DA
 						if ((int16_t)peek(0x0FF6) >= 0)
 						{
+							pass += 153;                // B2DC-B2EC
 							next_row();
 							poke(0x0FF8, (uint16_t)(peek(0x0FF8) + peek(0x0FF4)));
 						}
+						pass += 162;                    // B2F2-B308
 						pokeb(0x0FF2, peekb(T.r[1]++));
 						pokeb(0x0FF3, peekb(T.r[1]++));
 						poke(0x0FF0, peek(0x0FF2));
 						poke(0x0FF2, peek(0x0FF2) & 0x7FFF);
-						if (T.r[2]) poke(0x0FF2, peek(0x0FF2) | 0x8000);
+						if (T.r[2])
+						{
+							pass += 33;                 // B30A
+							poke(0x0FF2, peek(0x0FF2) | 0x8000);
+						}
+						pass += 177;                    // B310-B328
 						poke(T.r[4], peek(0x0FF8));
 						T.r[4] = (uint16_t)(T.r[4] + 2);
 						poke(T.r[4], peek(0x0FF2));
@@ -364,29 +388,42 @@ void build_sprite_pieces()
 						T.r[2] = (uint16_t)((peek(T.r[4]) & 0x0FFF) | peek(0x0FFA));
 						poke(T.r[4], T.r[2]);
 					}
+					pass += 84;                         // B332-B340
 					T.r[5] = T.r[2] & 0x07F8;
 					T.r[4] = (uint16_t)(T.r[5] + 0x3800);
-					if (--T.r[0] == 0) break;
+					if (--T.r[0] == 0)
+					{
+						tick(0xB362, pass);
+						break;
+					}
+					tick(0xB2D0, pass + 12);            // BR B2D0
 				}
 			}
 			else
 			{
+				cycles += 18 + 111;                     // JMP B344, B344-B350
 				T.r[2] = (uint16_t)(peek((uint16_t)(0x0630 + T.r[5])) + peek((uint16_t)(0x0530 + T.r[5])));
 				poke((uint16_t)(0x3804 + T.r[4]), T.r[2]);
 				T.r[2] = peek((uint16_t)(0x05F0 + T.r[5]));
-				do
+				for (;;)
 				{
 					poke((uint16_t)(0x3800 + T.r[4]), (uint16_t)(peek((uint16_t)(0x3800 + T.r[4])) + T.r[2]));
 					T.r[4] = peek((uint16_t)(0x3806 + T.r[4])) & 0x07F8;
-				} while (--T.r[0]);
+					--T.r[0];
+					tick(T.r[0] ? 0xB354 : 0xB362, 30 + 27 + 18 + 18);   // ADD, MOV, BIC, SOB
+					if (!T.r[0]) break;
+				}
 			}
 		}
+		cycles += 132;                                  // B362-B370
 		ww((uint16_t)(sp - 2), (uint16_t)(peek(0x0FEE) + 0x0808));
 		T.r[5] = sext8(peekb((uint16_t)(peek(0x0FEE) + 0x0808)));
 		poke(0x0FEE, T.r[5]);
+		fl::mov(T.r[5]);
 		link = T.r[5];
+		tick(0xB1FA, cycles);
 	}
-	fl::tst(list);
+	fl::tst(pop());
 }
 
 // F:B378 (assembly): move the objects 0x0994 down to 0: animation (rate 0x0770 frames per step,
@@ -396,15 +433,20 @@ void build_sprite_pieces()
 // reserves end compared, as the original does.
 void move_objects()
 {
-	const uint16_t at_rate = (uint16_t)(T.r[6] - 4), at_scratch = (uint16_t)(T.r[6] - 2), at_byte = (uint16_t)(T.r[6] - 6);
+	T.r[6] = (uint16_t)(T.r[6] - 4);                    // CMP -(SP),-(SP)
+	const uint16_t at_rate = T.r[6], at_scratch = (uint16_t)(T.r[6] + 2), at_byte = (uint16_t)(T.r[6] - 2);
 	const uint8_t top = peekb(0x0994);
 	T.r[5] = sext8(top);
 	if (!(top & 0x80))
 		for (;;)
 		{
+			int cycles = 27 + 12;                       // B384 TSTB, BNE
 			const uint16_t i = T.r[5];
-			if (peekb((uint16_t)(0x0370 + i)))
+			if (!peekb((uint16_t)(0x0370 + i)))
+				cycles += 18;                           // JMP B4AA
+			else
 			{
+				cycles += 171;                          // B38E-B3A4
 				T.r[4] = (uint16_t)(i << 1);
 				const uint16_t w = T.r[4];
 				T.r[3] = peek((uint16_t)(0x04F0 + w));
@@ -412,24 +454,37 @@ void move_objects()
 				const uint16_t rate_ptr = (uint16_t)(0x0770 + i);
 				ww(at_rate, rate_ptr);
 				const uint8_t rate = peekb(rate_ptr);
+				if (rate) cycles += 12;                 // BMI
 				if (rate && !(rate & 0x80))
 				{
+					cycles += 60;                       // B3A8-B3B0
 					T.r[0] = (uint16_t)(0x0790 + i);
 					if (peekb(T.r[0]))
+					{
+						cycles += 21;                   // B45C DECB
 						pokeb(T.r[0], (uint8_t)(peekb(T.r[0]) - 1));
+					}
 					else
 					{
+						cycles += 147;                  // B3B2-B3C4
 						pokeb(T.r[0], peekb(rate_ptr));
 						T.r[1] = (uint16_t)(peek((uint16_t)(0x03B0 + w)) + 2);
 						pokeb((uint16_t)(0x07B0 + i), (uint8_t)(peekb((uint16_t)(0x07B0 + i)) + 1));
 						if ((int16_t)peek(T.r[1]) < 0)
 						{
+							cycles += 111;              // B3C6-B3D6
 							T.r[1] = peek(T.r[1]) & 0x7FFF;
 							pokeb((uint16_t)(0x07B0 + i), 0);
-							if (peekb((uint16_t)(0x04B0 + i)) & 0x20) pokeb(rate_ptr, 0);
+							if (peekb((uint16_t)(0x04B0 + i)) & 0x20)
+							{
+								cycles += 36;           // B3D8
+								pokeb(rate_ptr, 0);
+							}
 						}
+						cycles += 45;                   // B3DC-B3E2
 						if (peekb((uint16_t)(0x0490 + i)) & 0x01)
 						{
+							cycles += 102 + 225 + 225 + 30;   // B3E4-B430
 							T.r[0] = (uint16_t)(peek(T.r[1]) + 0x3FFD);
 							hw_banks(0x3000, 0x3400);
 							// velocity bytes * 16 (the original goes through a stack word)
@@ -444,25 +499,34 @@ void move_objects()
 							const uint8_t step = peekb(T.r[0]);
 							if (step)
 							{
+								cycles += 171;          // B432-B442
 								ww(at_byte, step);
 								poke((uint16_t)(0x0430 + w), (uint16_t)(peek((uint16_t)(0x0430 + w)) - step));
 								T.r[0] = peekb(rate_ptr);
 								poke((uint16_t)(0x0430 + w), (uint16_t)(peek((uint16_t)(0x0430 + w)) + T.r[0]));
 							}
+							cycles += 60;               // B446-B44A
 							hw_banks(0, 0x0400);
 						}
+						cycles += 78;                   // B450-B45A
 						poke((uint16_t)(0x03B0 + w), T.r[1]);
 						pokeb((uint16_t)(0x0490 + i), peekb((uint16_t)(0x0490 + i)) | 0x18);
 					}
 				}
+				cycles += 30;                           // B45E-B462
 				if ((int16_t)i < 4)
+				{
+					cycles += 48;                       // B464-B46A
 					pokeb((uint16_t)(0x0490 + i), peekb((uint16_t)(0x0490 + i)) | 0x18);
+				}
 				else
 				{
+					cycles += 105;                      // B46C-B474
 					poke((uint16_t)(0x06F0 + w), (uint16_t)(peek((uint16_t)(0x06F0 + w)) + T.r[3]));
 					poke((uint16_t)(0x0730 + w), (uint16_t)(peek((uint16_t)(0x0730 + w)) + T.r[2]));
 					poke((uint16_t)(0x06B0 + w), (uint16_t)(peek((uint16_t)(0x06B0 + w)) + peek((uint16_t)(0x05B0 + w))));
 				}
+				cycles += 306;                          // B47A-B4A6
 				T.r[3] = (uint16_t)(peek((uint16_t)(0x06F0 + w)) - peek(0x01A8));
 				poke((uint16_t)(0x0630 + w), T.r[3]);
 				T.r[2] = (uint16_t)(peek((uint16_t)(0x0730 + w)) + peek(0x01AA) + peek((uint16_t)(0x06B0 + w)));
@@ -472,10 +536,17 @@ void move_objects()
 				poke((uint16_t)(0x05F0 + w), T.r[0]);
 				poke((uint16_t)(0x0670 + w), T.r[2]);
 			}
+			cycles += 24;                               // B4AA DEC, BLT
 			T.r[5]--;
-			if ((int16_t)T.r[5] < 0) break;
+			if ((int16_t)T.r[5] < 0)
+			{
+				tick(0xB4B2, cycles);
+				break;
+			}
+			tick(0xB384, cycles + 18);                  // JMP B384
 		}
 	fl::cmp(rw(at_rate), rw(at_scratch));                // CMP (SP)+,(SP)+
+	T.r[6] = (uint16_t)(T.r[6] + 4);
 }
 
 // ---------------------------------------------------------------- objects
@@ -552,7 +623,11 @@ uint16_t clear_objects_and_text(const Args &)
 	mtps(0xE0);
 	jsr(0x8068, 0xBA3A);
 	jsr(0x8D3E, 0xBA3E);
-	for (uint16_t p = 0x0370; p != 0x0995; p++) pokeb(p, 0);
+	for (T.r[0] = 0x0370; T.r[0] != 0x0995;)
+	{
+		pokeb(T.r[0]++, 0);
+		tick(T.r[0] != 0x0995 ? 0xBA42 : 0xBA4A, 21 + 18 + 12);     // CLRB (R0)+, CMP, BNE
+	}
 	poke(0x3BFE, 0x03F8);
 	poke(0x0988, 0xFFFF);
 	mtps(0);
@@ -1140,7 +1215,11 @@ uint16_t init_map_objects(const Args &)
 	uint16_t *R = T.r;
 	R[2] = peek(0x01D2);
 	R[3] = peek(0x01D4);
-	for (R[0] = 0x09AA; R[0] <= 0x0E9A; R[0]++) pokeb(R[0], 0);
+	for (R[0] = 0x09AA; R[0] <= 0x0E9A;)
+	{
+		pokeb(R[0]++, 0);
+		tick(R[0] <= 0x0E9A ? 0xCFE8 : 0xCFF0, 21 + 18 + 12);       // CLRB (R0)+, CMP, BLOS
+	}
 	pokeb(0x0E93, 0);
 	poke(0x09AE, 0xFFFF);
 	poke(0x09B0, 0x003F);
@@ -1149,13 +1228,15 @@ uint16_t init_map_objects(const Args &)
 	poke(0x1400, 0);
 	R[0] = 0x0400;
 	set_bank_b(0x0400);
-	for (R[1] = 0x6696; peek(R[1]) != 0xFFFF; R[1] = (uint16_t)(R[1] + 4))
+	for (R[1] = 0x6696; peek(R[1]) != 0xFFFF;)
 	{
 		push(peek(R[1]));
 		push(peek((uint16_t)(R[1] + 2)));
 		push(1);
 		jsr(0xCE24, 0xD032);
+		R[1] = (uint16_t)(R[1] + 4);
 		R[6] = (uint16_t)(R[6] + 6);
+		tick(0xD01E, 24 + 12 + 30 + 39 + 30 + 30 + 18 + 18 + 12);   // D01E-D03A without F:CE24
 	}
 	restore_banks(R[2], R[3]);
 	set_c(false);
@@ -1705,9 +1786,12 @@ void tick_map_object_timers()
 		{
 			T.r[0] = peek(0x09AA);
 			if ((int16_t)T.r[0] < 0) break;
+			// cycles of this pass at C8C2, without the routines it calls
+			int cycles = 99;                            // C8C2-C8D0
 			T.r[4] = peekb((uint16_t)(0x0AB8 + T.r[0]));
 			if (T.r[4] == T.r[1])
 			{
+				cycles += 144 + 30 + 204;               // C8D2-C8E6, JSR, C8EE-C90E
 				T.r[0] = 0x1000;
 				set_bank_a(0x1000);
 				T.r[0] = 0x1400;
@@ -1722,15 +1806,18 @@ void tick_map_object_timers()
 				bool check = true;
 				if (!(peekb(T.r[5]) & peekb(bit)))
 				{
+					cycles += 96;                       // C910-C91C
 					jsr(0xC850, 0xC914);
 					ww(result, T.r[0]);
 					if (peekb((uint16_t)(0x4560 + T.r[3])) & 0x40)
 					{
+						cycles += 60;                   // C91E-C924
 						pokeb(T.r[5], peekb(T.r[5]) | peekb(bit));
 						if ((int16_t)T.r[0] >= 0)
 							check = false;
 						else
 						{
+							cycles += 117 + 78;         // C926-C934, C958-C960
 							T.r[0] = peek(0x09AA);
 							T.r[4] = sext8(peekb((uint16_t)(0x09B8 + T.r[0])));
 							push(T.r[4]);
@@ -1739,9 +1826,12 @@ void tick_map_object_timers()
 							T.r[6] = (uint16_t)(T.r[6] + 2);
 						}
 					}
+					else
+						cycles += 30;                   // C95E-C960
 				}
 				else
 				{
+					cycles += 183;                      // C936-C94C
 					pokeb(T.r[5], (uint8_t)(peekb(T.r[5]) & ~peekb(bit)));
 					T.r[0] = peek(0x09AA);
 					T.r[4] = sext8(peekb((uint16_t)(0x09B8 + T.r[0])));
@@ -1750,22 +1840,31 @@ void tick_map_object_timers()
 					ww(result, T.r[0]);
 					if ((int16_t)T.r[0] < 0)
 					{
+						cycles += 63 + 30;              // C94E-C954, C958
 						poke(0x09B2, (uint16_t)(peek(0x09B2) - 4));
 						jsr(0xC850, 0xC958);
 						ww(result, T.r[0]);
 					}
+					cycles += 48;                       // C95C-C960
 					T.r[6] = (uint16_t)(T.r[6] + 2);
 				}
 				if (check && (int16_t)rw(result) < 0)
 				{
+					cycles += 108;                      // C962-C970
 					T.r[0] = peek(0x09AA);
 					T.r[4] = (uint16_t)(peekb(0x0E9A) + 8);
 					pokeb((uint16_t)(0x0AB8 + T.r[0]), (uint8_t)T.r[4]);
 				}
+				cycles += 63;                           // C974-C97C
 				T.r[0] = peek(0x09AA);
-				if (!peekb((uint16_t)(0x0AB8 + T.r[0]))) pokeb((uint16_t)(0x0AB8 + T.r[0]), 1);
+				if (!peekb((uint16_t)(0x0AB8 + T.r[0])))
+				{
+					cycles += 36;                       // C97E
+					pokeb((uint16_t)(0x0AB8 + T.r[0]), 1);
+				}
 			}
 			poke(0x09AA, (uint16_t)(peek(0x09AA) - 1));
+			tick(0xC8C2, cycles + 39);                  // C984 DEC, BR C8C2
 		}
 	}
 	fl::tst(rw(result));
@@ -2374,11 +2473,11 @@ LOGIC_TABLE(fmid,
 	asm_routine("F", 0xB03C, "apply_queued_piece_counts", apply_queued_piece_counts, 58),
 	asm_routine("F", 0xB092, "update_chains_a", update_chains_a, 3372),
 	asm_routine("F", 0xB120, "update_chains_b", update_chains_b, 3278),
-	asm_routine("F", 0xB1EA, "build_sprite_pieces", build_sprite_pieces, 10481),
-	asm_routine("F", 0xB378, "move_objects", move_objects, 6590),
+	asm_routine("F", 0xB1EA, "build_sprite_pieces", build_sprite_pieces, 183),
+	asm_routine("F", 0xB378, "move_objects", move_objects, 111),
 	c_routine("F", 0xB4B6, "show_object", show_object, 0, 1240),
 	c_routine("F", 0xB602, "queue_piece_count", queue_piece_count, 0, 990),
-	c_routine("F", 0xBA2E, "clear_objects_and_text", clear_objects_and_text, 0, 80502),
+	c_routine("F", 0xBA2E, "clear_objects_and_text", clear_objects_and_text, 0, 279),
 	c_routine("F", 0xC98E, "restart_object_animation", restart_object_animation, 0, 1047),
 	c_routine("F", 0xBE10, "locate_map_object", locate_map_object, 0, 686),
 	c_routine("F", 0xBE7C, "map_object_state", map_object_state, 0, 729),
@@ -2390,7 +2489,7 @@ LOGIC_TABLE(fmid,
 	c_routine("F", 0xC114, "turn_map_object", turn_map_object, 0, 2946),
 	c_routine("F", 0xCF5E, "remove_map_object", remove_map_object, 0, 611),
 	c_routine("F", 0xCE24, "add_map_object", add_map_object, 0, 3777),
-	c_routine("F", 0xCFD6, "init_map_objects", init_map_objects, 0, 73209),
+	c_routine("F", 0xCFD6, "init_map_objects", init_map_objects, 0, 813),
 	c_routine("F", 0xC3E6, "map_object_leaves", map_object_leaves, 0, 1405),
 	asm_routine("F", 0xBCB8, "check_map_object_view", check_map_object_view, 232),
 	c_routine("F", 0xBFBC, "move_map_object", move_map_object, 0, 1298),
@@ -2401,7 +2500,7 @@ LOGIC_TABLE(fmid,
 	c_routine("F", 0xC868, "try_next_map_definition", try_next_map_definition, 0, 289),
 	asm_routine("F", 0xCA4C, "update_map_object_slot", update_map_object_slot, 390),
 	asm_routine("F", 0xBC52, "check_map_objects_in_view", check_map_objects_in_view, 1295),
-	asm_routine("F", 0xC8AA, "tick_map_object_timers", tick_map_object_timers, 4451),
+	asm_routine("F", 0xC8AA, "tick_map_object_timers", tick_map_object_timers, 234),
 	asm_routine("F", 0xCB24, "update_objects", update_objects, 2617),
 )
 
