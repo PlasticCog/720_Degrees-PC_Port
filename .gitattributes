@@ -1,0 +1,3 @@
+# the Gradle wrapper scripts must keep their line endings to run
+port/android/gradlew text eol=lf
+port/android/gradlew.bat text eol=crlf

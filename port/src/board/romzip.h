@@ -14,5 +14,8 @@ int extract_rom_zips(const std::string &dir, std::string &log);
 // true if 'dir' holds the ROM files or a zip that contains them
 bool rom_folder_usable(const std::string &dir);
 
+// CRC-32 as used by zip files
+uint32_t rom_crc32(const uint8_t *p, size_t n);
+
 // decompress a raw deflate stream; false on corrupt input
 bool inflate_raw(const uint8_t *in, size_t n, std::vector<uint8_t> &out, size_t expected_size);

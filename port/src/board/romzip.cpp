@@ -281,6 +281,11 @@ std::vector<fs::path> zips_in(const std::string &dir)
 
 }
 
+uint32_t rom_crc32(const uint8_t *p, size_t n)
+{
+	return crc32(p, n);
+}
+
 bool inflate_raw(const uint8_t *in, size_t n, std::vector<uint8_t> &out, size_t expected_size)
 {
 	out.clear();

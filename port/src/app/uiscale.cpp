@@ -4,8 +4,13 @@
 #include "imgui_impl_sdlrenderer3.h"
 #include <cmath>
 
+namespace { float g_base = 1.0f; }
+
+void set_ui_base_scale(float base) { g_base = base; }
+
 void apply_ui_scale(float s, float ratio)
 {
+	s *= g_base;
 	ImGuiIO &io = ImGui::GetIO();
 	io.Fonts->Clear();
 	ImFontConfig cfg;

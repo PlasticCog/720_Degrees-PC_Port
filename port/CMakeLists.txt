@@ -21,12 +21,17 @@ option(D720_ROM_FREE "Leave out data generated from the ROMs (level_palettes.inc
 # tools that compare the rewrite with the original (render720, verify720) need the program
 # ROMs translated to C++ at configure time; OFF (or no ROMs found) leaves them out.
 option(D720_TRANSLATION "Translate the program ROMs for the tools that compare with the original" ON)
+# Android (port/android, built by Gradle): only the game, as libmain.so for SDL's Java
+# activity, without the comparison tools
+if(ANDROID)
+  set(D720_TRANSLATION OFF)
+endif()
 
 # ---------------------------------------------------------------------------
 # Static translation of the arcade program ROMs into C++ (src/game).
 # The generated code is derived from the user's ROMs and is not part of the repository.
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
 if(D720_GAME AND D720_TRANSLATION)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 # re-translate whenever the translators or their inputs change (hash stamp in src/game)
 set(D720_TRANSLATOR_INPUTS
   ${REPO_ROOT}/tools/t11_to_cpp.py ${REPO_ROOT}/tools/m6502_to_cpp.py ${REPO_ROOT}/tools/codedb.py
@@ -91,7 +96,8 @@ endif()
 # SDL3.  Windows: an installed package, otherwise the official development package for
 # this toolchain is downloaded into third_party/ (SDL3.dll ships next to the programs).
 # Linux / macOS: SDL3 is built from source as a static library, so the programs need no
-# extra shared library (-DD720_SYSTEM_SDL=ON uses an installed SDL3 instead).
+# extra shared library (-DD720_SYSTEM_SDL=ON uses an installed SDL3 instead).  Android: built
+# from source as libSDL3.so, which SDL's Java activity loads before the game.
 set(SDL3_VERSION 3.2.28)
 if(NOT WIN32)
   option(D720_SYSTEM_SDL "Use an installed SDL3 instead of building it from source" OFF)
@@ -99,8 +105,13 @@ if(NOT WIN32)
     find_package(SDL3 REQUIRED CONFIG)
   else()
     include(FetchContent)
-    set(SDL_SHARED OFF CACHE BOOL "" FORCE)
-    set(SDL_STATIC ON CACHE BOOL "" FORCE)
+    if(ANDROID)
+      set(SDL_SHARED ON CACHE BOOL "" FORCE)
+      set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+    else()
+      set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+      set(SDL_STATIC ON CACHE BOOL "" FORCE)
+    endif()
     set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
     set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
@@ -145,8 +156,10 @@ if(WIN32)
 else()
   set(CORO_SRC src/native/coro_posix.cpp)
 endif()
+if(NOT ANDROID)
 add_executable(coro_test src/native/coro_test.cpp ${CORO_SRC})
 target_include_directories(coro_test PRIVATE src/native)
+endif()
 
 # ---------------------------------------------------------------------------
 # Shared board support (memory map, video, sound chips)
@@ -160,12 +173,14 @@ target_include_directories(board PUBLIC src/board third_party/ymfm)
 
 # ---------------------------------------------------------------------------
 # Reference interpreters (development oracle only: verification and RE tools)
+if(NOT ANDROID)
 add_library(refcpu STATIC
   src/ref/t11.cpp
   src/ref/m6502.cpp
   src/ref/refmachine.cpp)
 target_include_directories(refcpu PUBLIC src/ref)
 target_link_libraries(refcpu PUBLIC board)
+endif()
 
 # ---------------------------------------------------------------------------
 # Native game core: the rewritten programs + runtime (gamecore_native); gamecore adds the
@@ -269,12 +284,21 @@ endif()
 file(WRITE ${D720_GEN_DIR}/tricks_doc.inc.tmp "${D720_TRICKS_BYTES}\n")
 configure_file(${D720_GEN_DIR}/tricks_doc.inc.tmp ${D720_GEN_DIR}/tricks_doc.inc COPYONLY)
 
-add_executable(720degrees WIN32 src/app/main.cpp src/app/input_config.cpp src/app/debugui.cpp src/app/docview.cpp src/app/uiscale.cpp
-  src/app/extras.cpp ${D720_ICON_RC})
+set(D720_APP_SOURCES src/app/main.cpp src/app/input_config.cpp src/app/debugui.cpp src/app/docview.cpp src/app/uiscale.cpp
+  src/app/extras.cpp src/app/touch.cpp src/app/romsetup.cpp)
+if(ANDROID)
+# SDL's Java activity loads libSDL3.so and then libmain.so and calls its SDL_main
+add_library(main SHARED ${D720_APP_SOURCES})
+target_include_directories(main PRIVATE ${D720_GEN_DIR})
+target_link_libraries(main PRIVATE gamecore_native leveldata imgui SDL3::SDL3)
+else()
+add_executable(720degrees WIN32 ${D720_APP_SOURCES} ${D720_ICON_RC})
 target_include_directories(720degrees PRIVATE ${D720_GEN_DIR})
 target_link_libraries(720degrees PRIVATE gamecore_native leveldata imgui SDL3::SDL3)
 d720_copy_to_output(720degrees)
+endif()
 
+if(NOT ANDROID)
 # ---------------------------------------------------------------------------
 # Level editor
 
@@ -293,14 +317,17 @@ endif()
 add_executable(render720native src/tools/render720.cpp src/app/extras.cpp)
 target_include_directories(render720native PRIVATE src/app)
 target_link_libraries(render720native PRIVATE gamecore_native leveldata)
-endif()
+endif()   # NOT ANDROID
+endif()   # D720_GAME
 
 # ---------------------------------------------------------------------------
 # Tools that do not need the translated code
+if(NOT ANDROID)
 add_executable(ref720 src/ref/refmain.cpp)
 target_link_libraries(ref720 PRIVATE refcpu)
 add_executable(leveltool src/tools/leveltool.cpp src/tools/leveltool_sprites.cpp)
 target_link_libraries(leveltool PRIVATE leveldata board)
+endif()
 
 if(MINGW)
   # Link the MinGW runtime (libgcc, libstdc++, winpthread) statically so the programs run

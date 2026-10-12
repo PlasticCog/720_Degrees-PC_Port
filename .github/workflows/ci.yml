@@ -1,7 +1,7 @@
 # Builds the game, the level editor and the tools on Windows, Linux and macOS without the
 # arcade ROMs (the game runs only the rewritten programs; D720_TRANSLATION=OFF leaves out the
 # tools that compare with the translated original), and runs the coroutine self-test the game
-# relies on.
+# relies on.  The Android job builds the APK (port/android).
 name: ci
 
 on:
@@ -62,3 +62,25 @@ jobs:
           $T/leveltool --roms nonexistent stats; code=$?
           set -e
           test $code -eq 1
+
+  # The Android app (port/android): the game as libmain.so for arm64 and x86-64 in an APK
+  android:
+    name: Android
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Build the APK
+        working-directory: port/android
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Check the APK
+        run: |
+          apk=port/android/app/build/outputs/apk/debug/app-debug.apk
+          unzip -l "$apk" | grep -E 'lib/(arm64-v8a|x86_64)/lib(main|SDL3)\.so'
+          test $(unzip -l "$apk" | grep -cE 'lib/(arm64-v8a|x86_64)/lib(main|SDL3)\.so') -eq 4

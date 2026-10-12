@@ -14,6 +14,8 @@
 // Xbox controller: left stick or d-pad points, right stick or LB/RB rotate, A or RT jump,
 //   X or B kick, View = coin, Menu = pause.
 // Mouse (click the game to capture): moving rotates, left button jumps, right button kicks.
+// Touch screens (Android, or --touch): see touch.h.  Android's back button closes a window,
+// then pauses, then quits.
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include "nativemachine.h"
@@ -25,6 +27,8 @@
 #include "debugui.h"
 #include "uiscale.h"
 #include "romzip.h"
+#include "romsetup.h"
+#include "touch.h"
 #include "window_icon.h"
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
@@ -55,23 +59,12 @@ struct Options {
 	std::string screenshot;              // testing: save the window to this PNG when quitting
 	bool debug_open = false, overlays = false;
 	int debug_tab = -1;
+#ifdef SDL_PLATFORM_ANDROID
+	bool touch = true;
+#else
+	bool touch = false;                  // on-screen touch controls (the mouse stands in for a finger)
+#endif
 };
-
-std::string find_roms(const std::string &requested)
-{
-	if (!requested.empty()) return requested;
-	const char *base = SDL_GetBasePath();
-	std::vector<std::string> candidates;
-	// the Game folder next to the program, the program's own folder, then Game folders above
-	// it (for running from the build directory)
-	if (base)
-		for (const char *rel : { "Game", "", "../Game", "../../Game", "../../../Game" })
-			candidates.push_back(std::string(base) + rel);
-	for (const char *rel : { "Game", "." }) candidates.push_back(rel);
-	for (auto &c : candidates)
-		if (rom_folder_usable(c)) return c;         // the ROM files, or a zip holding them
-	return std::string(base ? base : "") + "Game";
-}
 
 std::string pref_file(const char *name)
 {
@@ -91,6 +84,27 @@ void save_eeprom(Board &b)
 {
 	std::ofstream f(pref_file("720.eeprom"), std::ios::binary);
 	if (f) f.write((const char *)b.eeprom(), 0x200);
+}
+
+// Phones and tablets: SDL reports going to the background only to event watchers, called while
+// the event happens (the app may be stopped any time after it), so the EEPROM is saved there; the
+// main loop pauses the game and restarts the audio when it comes back.
+struct Lifecycle {
+	NativeMachine *machine = nullptr;
+	bool background = false, foreground = false;
+};
+
+bool SDLCALL on_app_event(void *userdata, SDL_Event *e)
+{
+	Lifecycle &life = *(Lifecycle *)userdata;
+	if (e->type == SDL_EVENT_DID_ENTER_BACKGROUND || e->type == SDL_EVENT_TERMINATING)
+	{
+		save_eeprom(life.machine->board);
+		life.background = true;
+	}
+	else if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND)
+		life.foreground = true;
+	return true;
 }
 
 // letterboxed 4:3 rectangle for the game image inside the window
@@ -150,22 +164,19 @@ int main(int argc, char **argv)
 		else if (a == "--debug") opt.debug_open = true;
 		else if (a == "--debug-tab") { opt.debug_open = true; opt.debug_tab = atoi(next().c_str()); }
 		else if (a == "--overlays") opt.overlays = true;
+		else if (a == "--touch") opt.touch = true;
 	}
 
+#ifdef SDL_PLATFORM_ANDROID
+	SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+	SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");     // back: close a window, pause, quit
+	opt.fullscreen = true;
+#else
+	if (opt.touch) SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "1");   // the mouse stands in for a finger
+#endif
 	if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD))
 	{
 		SDL_Log("SDL_Init failed: %s", SDL_GetError());
-		return 1;
-	}
-
-	RomSet roms;
-	std::string err;
-	const std::string romdir = find_roms(opt.roms);
-	if (!roms.load(romdir, err))
-	{
-		const std::string msg = "Could not load the 720 Degrees ROM set from '" + romdir + "':\n" + err +
-			"\n\nPut the ROM files in the 'Game' folder next to the game, or pass --roms <folder>.";
-		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "720 Degrees", msg.c_str(), nullptr);
 		return 1;
 	}
 
@@ -189,6 +200,42 @@ int main(int argc, char **argv)
 	ImGui::StyleColorsDark();
 	ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
 	ImGui_ImplSDLRenderer3_Init(renderer);
+	float dp = SDL_GetWindowDisplayScale(window);          // window units per density-independent pixel
+	if (!(dp > 0)) dp = 1;
+#ifdef SDL_PLATFORM_ANDROID
+	set_ui_base_scale(std::max(1.0f, dp * 1.35f));         // menus big enough to touch
+#endif
+	apply_ui_scale(1.0f);
+
+	auto shutdown_ui = [&]() {
+		ImGui_ImplSDLRenderer3_Shutdown();
+		ImGui_ImplSDL3_Shutdown();
+		ImGui::DestroyContext();
+		SDL_DestroyTexture(tex);
+		SDL_DestroyRenderer(renderer);
+		SDL_DestroyWindow(window);
+		SDL_Quit();
+	};
+
+	// the ROMs: found in one of the usual folders, or installed with the setup screen
+	RomSet roms;
+	std::string err, romdir = find_roms(opt.roms);
+	if (!roms.load(romdir, err))
+	{
+		if (!opt.roms.empty())
+		{
+			const std::string msg = "Could not load the 720 Degrees ROM set from '" + romdir + "':\n" + err;
+			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "720 Degrees", msg.c_str(), window);
+			shutdown_ui();
+			return 1;
+		}
+		// a folder with part of the set says what is missing; no ROMs at all needs no error
+		if (!rom_setup_screen(window, renderer, roms, romdir, rom_folder_usable(romdir) ? err : std::string()))
+		{
+			shutdown_ui();
+			return 0;
+		}
+	}
 
 	AudioOut audio;
 	if (!audio.open((int)std::lround(SoundChips::output_rate())))
@@ -210,8 +257,13 @@ int main(int argc, char **argv)
 		std::vector<std::string> applied;
 		if (!opt.no_mods)
 		{
+#ifdef SDL_PLATFORM_ANDROID
+			const char *base = SDL_GetAndroidExternalStoragePath();     // Android/data/<app>/files
+			applied = apply_mod_folder(roms, std::string(base ? base : "") + "/mods", errors);
+#else
 			const char *base = SDL_GetBasePath();
 			applied = apply_mod_folder(roms, std::string(base ? base : "") + "mods", errors);
+#endif
 		}
 		for (const auto &m : opt.mods)
 		{
@@ -241,6 +293,14 @@ int main(int argc, char **argv)
 	dbg.select_tab = opt.debug_tab;
 	if (opt.overlays) dbg.set_overlays(true, true);
 
+	Lifecycle life;
+	life.machine = machine.get();
+	SDL_AddEventWatch(on_app_event, &life);
+
+	TouchControls touch;
+	touch.enabled = opt.touch;
+	if (touch.enabled) SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");   // the controls pass touches to the menus themselves
+
 	RotaryController rotary;
 	RunControl run;
 	bool running = true, help = false, mouse_captured = false, test_switch = false;
@@ -268,6 +328,7 @@ int main(int argc, char **argv)
 			ImGui_ImplSDL3_ProcessEvent(&e);
 			// closing the window quits, whatever else is going on (rebinding, other windows)
 			if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) { running = false; continue; }
+			if (touch.handle_event(e)) continue;
 			if (input.handle_event(e)) continue;          // gamepad hotplug or rebinding
 			const bool ui_keys = io.WantTextInput;
 			if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat && !ui_keys)
@@ -291,22 +352,34 @@ int main(int argc, char **argv)
 					if (!(e.key.mod & (SDL_KMOD_ALT | SDL_KMOD_GUI)) && !input.key_bound(e.key.scancode)) toggle_fullscreen();
 					break;
 				case SDLK_RETURN: if (e.key.mod & SDL_KMOD_ALT) toggle_fullscreen(); break;
+				case SDLK_AC_BACK:                            // Android's back button
+					if (run.show_controls) run.show_controls = false;
+					else if (dbg.visible) dbg.visible = false;
+					else if (help) help = false;
+					else if (!run.paused) run.paused = true;
+					else running = false;
+					break;
 				default: break;
 				}
 			}
 			if (!ui_keys && input.is_action(e, Action::Pause)) run.paused = !run.paused;
 			if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && !mouse_captured && !io.WantCaptureMouse && input.cfg.mouse_enabled &&
-			    !dbg.visible && !run.show_controls)
+			    !dbg.visible && !run.show_controls && !touch.enabled)
 			{
 				mouse_captured = true;
 				SDL_SetWindowRelativeMouseMode(window, true);
 			}
 			if (e.type == SDL_EVENT_MOUSE_MOTION && mouse_captured) mouse_accum += e.motion.xrel;
 		}
+		if (life.background) { life.background = false; run.paused = true; }
+		if (life.foreground) { life.foreground = false; audio.restart(); }
+		if (touch.take_tap(TouchControls::Pause)) run.paused = !run.paused;
+		if (touch.take_tap(TouchControls::Menu)) dbg.visible = !dbg.visible;
 		if (run.reset) { run.reset = false; save_eeprom(machine->board); start_machine(); }
 
 		// ---- controls
-		const InputFrame in_frame = input.poll(!io.WantTextInput && !input.capturing(), mouse_captured, mouse_accum);
+		InputFrame in_frame = input.poll(!io.WantTextInput && !input.capturing(), mouse_captured, mouse_accum);
+		touch.apply(in_frame, input.cfg.invert_rotation);
 		mouse_accum = 0;
 		if (in_frame.aim) rotary.set_target_angle(in_frame.angle_deg);
 		else rotary.clear_target();
@@ -390,8 +463,25 @@ int main(int argc, char **argv)
 		dbg.draw(*machine, gr, run, audio, fps);
 		if (run.show_controls) input.draw_window(&run.show_controls);
 		if (help) draw_help(input);
+		if (touch.enabled)
+		{
+			// the game picture and the safe area (no notch, no system bars) in ImGui's units
+			int ww = 0, wh = 0, ow = 1, oh = 1;
+			SDL_GetWindowSize(window, &ww, &wh);
+			SDL_GetCurrentRenderOutputSize(renderer, &ow, &oh);
+			const float k = ow > 0 ? ww / (float)ow : 1.0f;
+			SDL_Rect safe = {0, 0, ww, wh};
+			if (!SDL_GetWindowSafeArea(window, &safe) || safe.w <= 0 || safe.h <= 0) safe = {0, 0, ww, wh};
+			touch.layout(io.DisplaySize, {(float)safe.x, (float)safe.y, (float)safe.w, (float)safe.h},
+				{gr.x * k, gr.y * k, gr.w * k, gr.h * k}, dp);
+			touch.draw(ImGui::GetBackgroundDrawList());
+		}
 		if (run.paused)
-			ImGui::GetForegroundDrawList()->AddText({gr.x + gr.w / 2 - 24, gr.y + 8}, IM_COL32(255, 255, 255, 255), "PAUSED");
+		{
+			const char *text = touch.enabled ? "PAUSED - back button again to quit" : "PAUSED";
+			const float tw = ImGui::CalcTextSize(text).x;
+			ImGui::GetForegroundDrawList()->AddText({gr.x + gr.w / 2 - tw / 2, gr.y + 8}, IM_COL32(255, 255, 255, 255), text);
+		}
 		ImGui::Render();
 		ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
 		const bool quitting = opt.quit_after > 0 && (SDL_GetTicksNS() - t_start) / 1e9 >= opt.quit_after;
@@ -424,9 +514,12 @@ int main(int argc, char **argv)
 	// (the machine, the gamepads, SDL) hang, the process ends anyway a few seconds later
 	audio.close();
 	SDL_HideWindow(window);
+	SDL_RemoveEventWatch(on_app_event, &life);
 	save_eeprom(machine->board);
 	fflush(stdout);
+#ifndef SDL_PLATFORM_ANDROID          // (Android ends the process itself when the activity closes)
 	std::thread([] { std::this_thread::sleep_for(std::chrono::seconds(3)); std::_Exit(0); }).detach();
+#endif
 	machine.reset();
 	input.close_gamepads();
 	ImGui_ImplSDLRenderer3_Shutdown();

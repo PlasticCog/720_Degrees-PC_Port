@@ -1,6 +1,6 @@
 # 720 Degrees - native PC port
 
-A native port of Atari Games' **720 Degrees** (1986 arcade, rev 4) for Windows, Linux and macOS, written in C++ with SDL3,
+A native port of Atari Games' **720 Degrees** (1986 arcade, rev 4) for Windows, Linux, macOS and Android, written in C++ with SDL3,
 plus a level editor. Both of the arcade board's programs, the main program (`port/src/logic`) and
 the sound program (`port/src/sound`), are newly written C++, checked instruction by instruction
 against the original programs; the game and the editor contain no translated program code.
@@ -18,7 +18,16 @@ on the [Releases](https://github.com/PlasticCog/720_Degrees-PC_Port/releases) pa
 zip, put your ROM files (or `720.zip`) into its `Game` folder and run `720degrees`
 (`720degrees.exe` on Windows). The programs are not signed: on macOS, clear the download
 quarantine first (`xattr -dr com.apple.quarantine <unpacked folder>`) or open them once with
-right-click > Open. To build it yourself:
+right-click > Open. If the game finds no ROMs it shows a screen where you can pick `720.zip` or
+the loose files; it copies them into its `Game` folder.
+
+For Android phones and tablets (Android 7.0 or newer, 64-bit), install
+`720degrees-<version>-android.apk` from the same page (allow installing apps from your browser or
+file manager when Android asks). On the first start, tap **Choose ROM files...** and pick your
+`720.zip`. It has on-screen touch controls and also works with gamepads; see
+[port/android/README.md](port/android/README.md).
+
+To build it yourself:
 
 1. Put the 37 ROM files of the MAME set `720` (rev 4) into the [`Game`](Game/README.txt) folder, or just
    drop the MAME `720.zip` there; it is unpacked automatically.
@@ -66,6 +75,11 @@ sudo apt install build-essential cmake ninja-build python3 libx11-dev libxext-de
 Install the Xcode command line tools (`xcode-select --install`) and `brew install cmake ninja python`.
 Apple Silicon and Intel Macs are both supported.
 
+### Android
+
+The Gradle project in `port/android` builds the game into an APK (`./gradlew assembleDebug`, with
+the Android SDK, NDK 27 and Java 17); see [port/android/README.md](port/android/README.md).
+
 ### Packaging
 
 `python tools/package.py` puts the built programs, an empty `Game` folder, this README and the
@@ -100,6 +114,12 @@ saved in `controls.cfg` in the game's settings folder (`%APPDATA%\Atari\720Degre
 
 Any controller SDL recognises works; the button names follow the Xbox layout. Controllers can be
 connected and removed while the game runs.
+
+Touch screens (Android; on a computer `--touch` shows them, with the mouse as the finger): a
+stick appears where the left thumb touches the left half of the screen and points the skater;
+JUMP and KICK are at the bottom right; COIN, 1P and 2P at the top right; MENU (the debug menu)
+and PAUSE at the top left. Android's back button closes a window, then pauses, and quits when
+pressed again while paused.
 
 On the title screens the arcade game starts two players when Jump is pressed with two credits in.
 Here only the 2 key starts a two-player game; Jump, Kick, the mouse, the gamepad and the 1 key

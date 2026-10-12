@@ -1,0 +1,93 @@
+plugins {
+    id 'com.android.application'
+}
+
+// The version shown to players; versionCode is derived from it (0.3.0 -> 300).
+def gameVersion = project.hasProperty('D720_VERSION') ? D720_VERSION : '0.3.0'
+def versionParts = gameVersion.tokenize('.').collect { it as int }
+
+android {
+    namespace = 'com.plasticcog.degrees720'
+    compileSdk 35
+    ndkVersion '27.2.12479018'
+
+    defaultConfig {
+        applicationId 'com.plasticcog.degrees720'
+        minSdk 24
+        targetSdk 35
+        versionCode versionParts[0] * 10000 + versionParts[1] * 100 + versionParts[2]
+        versionName gameVersion
+        externalNativeBuild {
+            cmake {
+                // the game only, without data generated from the ROMs (they are read at run time)
+                arguments '-DANDROID_STL=c++_static', '-DD720_ROM_FREE=ON', '-DD720_TRANSLATION=OFF'
+                abiFilters 'arm64-v8a', 'x86_64'
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path file('../../CMakeLists.txt')
+            version '3.22.1'
+        }
+    }
+
+    // Release signing: put the keystore's details in ~/.gradle/gradle.properties (never in the
+    // repository): D720_KEYSTORE, D720_KEYSTORE_PASSWORD, D720_KEY_ALIAS, D720_KEY_PASSWORD.
+    // Without them assembleRelease makes an unsigned APK; assembleDebug always works.
+    signingConfigs {
+        release {
+            if (project.hasProperty('D720_KEYSTORE')) {
+                storeFile file(D720_KEYSTORE)
+                storePassword D720_KEYSTORE_PASSWORD
+                keyAlias D720_KEY_ALIAS
+                keyPassword D720_KEY_PASSWORD
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (project.hasProperty('D720_KEYSTORE')) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    lint {
+        abortOnError = false
+    }
+
+    sourceSets {
+        main {
+            assets.srcDir(layout.buildDirectory.dir('generated/notices'))
+        }
+    }
+}
+
+// The licences of the libraries in the app, readable inside the APK as
+// assets/THIRD_PARTY_NOTICES.txt (the desktop zips carry the same file, see tools/package.py)
+def makeNotices = tasks.register('makeNotices') {
+    def licences = [
+        ['Dear ImGui (MIT)', file('../../third_party/imgui/LICENSE.txt')],
+        ['ymfm (BSD-3-Clause)', file('../../third_party/ymfm/LICENSE')],
+        ['SDL3 (zlib)', file('src/main/java/org/libsdl/app/LICENSE.txt')],
+    ]
+    def out = layout.buildDirectory.file('generated/notices/THIRD_PARTY_NOTICES.txt')
+    inputs.files(licences.collect { it[1] })
+    outputs.file(out)
+    doLast {
+        def text = new StringBuilder()
+        text << 'Third-party software in this app\n'
+        text << 'SDL3 (zlib licence), Dear ImGui (MIT), ymfm (BSD-3-Clause).\n'
+        text << 'Sound and video behaviour follows MAME\'s atarisy2 driver and device cores\n'
+        text << '(BSD-3-Clause, Aaron Giles and contributors).\n'
+        licences.each { title, f -> text << "\n==== ${title} ====\n\n" << f.getText('UTF-8') }
+        def o = out.get().asFile
+        o.parentFile.mkdirs()
+        o.setText(text.toString(), 'UTF-8')
+    }
+}
+preBuild.dependsOn(makeNotices)

@@ -33,3 +33,12 @@ __pycache__/
 /re/ghidra/PDP11/data/languages/sleigh_*.txt
 /re/ghidra/PDP11/data/languages/empty_in.txt
 *.720mod
+
+# Android build (port/android)
+/port/android/.gradle/
+/port/android/build/
+/port/android/app/build/
+/port/android/app/.cxx/
+/port/android/local.properties
+*.jks
+*.keystore

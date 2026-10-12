@@ -1,7 +1,7 @@
 # Builds the game and the level editor for Linux and macOS and attaches the zips to the GitHub
 # release of the tag.  No ROMs are needed: the game runs only the rewritten programs, and
-# D720_ROM_FREE leaves out anything generated from ROMs.  The Windows zip is built with MSYS2
-# (tools/package.py) and attached by hand.
+# D720_ROM_FREE leaves out anything generated from ROMs.  The Windows zip (MSYS2, tools/package.py)
+# and the signed Android APK (port/android, assembleRelease) are built locally and attached by hand.
 name: release
 
 on:

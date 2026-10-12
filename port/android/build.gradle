@@ -1,0 +1,19 @@
+// 720 Degrees for Android: the game (port/CMakeLists.txt, built as libmain.so) in SDL's Java
+// activity.  See port/android/README.md.
+
+buildscript {
+    repositories {
+        mavenCentral()
+        google()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.7.3'
+    }
+}
+
+allprojects {
+    repositories {
+        mavenCentral()
+        google()
+    }
+}
